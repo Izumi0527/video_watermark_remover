@@ -9,9 +9,10 @@
 版本: v1.0
 """
 
-import os
 import logging
-from typing import Optional, List, Any
+import os
+from typing import Any, List, Optional
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # 导入视频处理线程
@@ -105,7 +106,7 @@ class SignalHandler(QObject):
                 self.log_panel.add_status_message(f"文件已加载: {os.path.basename(file_path)}")
 
                 # 如果当前是手动模式，自动切换到手动选择标签页
-                if hasattr(self.file_panel, 'is_manual_mode') and self.file_panel.is_manual_mode():
+                if hasattr(self.file_panel, "is_manual_mode") and self.file_panel.is_manual_mode():
                     self.preview_panel.switch_to_manual_tab()
 
                 self.logger.info(f"File imported: {file_path}")
@@ -128,9 +129,7 @@ class SignalHandler(QObject):
 
         try:
             file_path, _ = self._show_save_dialog(
-                parent_widget,
-                "保存处理后的文件",
-                "PNG文件 (*.png);;JPEG文件 (*.jpg);;所有文件 (*)"
+                parent_widget, "保存处理后的文件", "PNG文件 (*.png);;JPEG文件 (*.jpg);;所有文件 (*)"
             )
 
             if file_path:
@@ -238,6 +237,7 @@ class SignalHandler(QObject):
 
             # 准备输出路径
             import os
+
             input_dir = os.path.dirname(self.input_file_path)
             input_filename = os.path.basename(self.input_file_path)
             input_name, input_ext = os.path.splitext(input_filename)
@@ -246,13 +246,15 @@ class SignalHandler(QObject):
             # 创建VideoProcessorThread实例
             ai_params = {
                 "auto_detect": self.preferences.get_preference("processing", "auto_mode"),
-                "detection_sensitivity": self.preferences.get_preference("advanced", "detection_sensitivity"),
+                "detection_sensitivity": self.preferences.get_preference(
+                    "advanced", "detection_sensitivity"
+                ),
                 "user_mask": None,  # TODO: 从手动选择获取
             }
 
             # 使用预加载的AI模型 (如果可用)
             preloaded_ai_handler = None
-            if self.main_window and hasattr(self.main_window, 'ai_handler'):
+            if self.main_window and hasattr(self.main_window, "ai_handler"):
                 preloaded_ai_handler = self.main_window.ai_handler
 
             self.video_processor = VideoProcessorThread(
@@ -268,10 +270,13 @@ class SignalHandler(QObject):
             self.video_processor.status.connect(self.log_panel.add_status_message)
             self.video_processor.finished.connect(self._on_processing_finished)
             self.video_processor.error.connect(self._on_processing_error)
-            self.video_processor.preview_update.connect(self.preview_panel.update_preview)
+            # TODO: Implement preview_update method in PreviewPanel
+            # self.video_processor.preview_update.connect(self.preview_panel.update_preview)
 
             # 连接详细进度信号 (Phase 4 Stage 1.4)
-            self.video_processor.detailed_progress.connect(self.control_panel.update_detailed_progress)
+            self.video_processor.detailed_progress.connect(
+                self.control_panel.update_detailed_progress
+            )
 
             # 启动处理线程
             self.video_processor.start()
@@ -303,7 +308,7 @@ class SignalHandler(QObject):
 
     def handle_stop_processing(self) -> None:
         """处理停止处理请求 (Phase 4 Stage 1.4)"""
-        if hasattr(self, 'video_processor') and self.video_processor:
+        if hasattr(self, "video_processor") and self.video_processor:
             self.video_processor.stop()
             self.video_processor.wait(5000)  # 等待最多5秒
 
@@ -399,7 +404,7 @@ class SignalHandler(QObject):
     def cleanup(self) -> None:
         """清理资源"""
         # 停止处理线程
-        if self.video_processor_thread and hasattr(self.video_processor_thread, 'isRunning'):
+        if self.video_processor_thread and hasattr(self.video_processor_thread, "isRunning"):
             if self.video_processor_thread.isRunning():
                 self.video_processor_thread.quit()
                 self.video_processor_thread.wait()

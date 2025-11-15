@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from configparser import ConfigParser
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -58,7 +58,7 @@ class VideoProcessorThread(QThread):
         # 进度跟踪 (Phase 4 Stage 1.4)
         self._start_time = 0.0  # 处理开始时间
         self._last_frame_time = 0.0  # 上一帧处理时间
-        self._processing_speeds = []  # 处理速度历史记录 (用于平滑计算)
+        self._processing_speeds: List[float] = []  # 处理速度历史记录 (用于平滑计算)
         self._current_phase = "idle"  # 当前处理阶段
 
         # Setup logging
