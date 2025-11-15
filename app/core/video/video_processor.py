@@ -1,11 +1,15 @@
 import logging
+import multiprocessing
 import os
+import subprocess
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from configparser import ConfigParser
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
 from ..ai.ai_handler import AIHandler
 from ..audio.ffmpeg_audio_processor import FFmpegAudioProcessor
@@ -18,6 +22,126 @@ from ..exceptions import (
     VideoReadError,
     VideoWriteError,
 )
+
+
+# ============================================================================
+# Module-level function for multiprocessing (Phase 4 Stage 2.1)
+# Must be at module level for pickle compatibility with multiprocessing
+# ============================================================================
+
+
+def process_video_chunk(
+    video_path: str,
+    start_frame: int,
+    end_frame: int,
+    output_path: str,
+    ai_params: dict,
+    config_dict: Optional[dict],
+    progress_queue: multiprocessing.Queue,
+    stop_event: multiprocessing.Event,
+    chunk_id: int,
+) -> Tuple[Optional[str], bool, Optional[str]]:
+    """
+    处理视频块（在子进程中运行）
+
+    Args:
+        video_path: 输入视频路径
+        start_frame: 起始帧索引
+        end_frame: 结束帧索引
+        output_path: 输出临时文件路径
+        ai_params: AI 参数字典
+        config_dict: 配置字典（ConfigParser无法pickle，传递字典）
+        progress_queue: 进度队列（发送进度信息到主线程）
+        stop_event: 停止事件（主线程通知停止）
+        chunk_id: 块ID（用于进度标识）
+
+    Returns:
+        (输出路径, 成功标志, 错误信息)
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        # 1. 在子进程中加载 AI 模型
+        ai_handler = AIHandler(None, ai_params)
+        if not ai_handler.load_models():
+            return (None, False, "AI 模型加载失败")
+
+        # 2. 打开视频文件
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return (None, False, "无法打开视频文件")
+
+        # 3. 获取视频参数
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+
+        # 4. 创建视频写入器
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        if not out.isOpened():
+            cap.release()
+            return (None, False, f"无法创建输出文件: {output_path}")
+
+        # 5. 定位到起始帧
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        # 6. 逐帧处理
+        total_frames_in_chunk = end_frame - start_frame
+        processed_count = 0
+
+        for i in range(total_frames_in_chunk):
+            # 检查停止事件
+            if stop_event.is_set():
+                logger.info(f"Chunk {chunk_id} stopped by user request")
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # AI 处理
+            try:
+                # 准备处理参数 (Phase 4 Stage 2.1修复)
+                processing_params = {
+                    "auto_detect": ai_params.get("auto_detect", True),
+                    "detection_sensitivity": ai_params.get("detection_sensitivity", 0.5),
+                    "user_mask": ai_params.get("user_mask", None),
+                }
+                processed_frame, _ = ai_handler.process_frame(frame, processing_params)
+                out.write(processed_frame)
+                processed_count += 1
+            except Exception as e:
+                logger.warning(f"Frame processing error in chunk {chunk_id}: {e}")
+                # 写入原始帧
+                out.write(frame)
+
+            # 发送进度（每10帧）
+            if i % 10 == 0:
+                try:
+                    progress_queue.put(
+                        {
+                            "chunk_id": chunk_id,
+                            "current": i,
+                            "total": total_frames_in_chunk,
+                            "processed": processed_count,
+                        },
+                        block=False,
+                    )
+                except Exception:
+                    pass  # 队列满时忽略
+
+        # 7. 释放资源
+        cap.release()
+        out.release()
+
+        logger.info(f"Chunk {chunk_id} completed: {processed_count}/{total_frames_in_chunk} frames")
+        return (output_path, True, None)
+
+    except Exception as e:
+        error_msg = f"Chunk {chunk_id} error: {str(e)}"
+        logger.error(error_msg)
+        return (None, False, error_msg)
 
 
 class VideoProcessorThread(QThread):
@@ -44,6 +168,8 @@ class VideoProcessorThread(QThread):
         ai_params: Optional[Dict[str, Any]],
         config: Optional[ConfigParser] = None,
         preloaded_ai_handler: Optional[AIHandler] = None,
+        enable_multiprocess: bool = True,  # 新增: 是否启用多进程 (Phase 4 Stage 2.1)
+        num_processes: Optional[int] = None,  # 新增: 进程数(None=自动检测)
         parent: Optional[QThread] = None,
     ) -> None:
         super().__init__(parent)
@@ -54,6 +180,12 @@ class VideoProcessorThread(QThread):
         self.ai_handler: Optional[AIHandler] = preloaded_ai_handler  # 使用预加载的AI处理器
         self.ffmpeg_processor: Optional[FFmpegAudioProcessor] = None
         self._is_running = True
+
+        # 多进程配置 (Phase 4 Stage 2.1)
+        self.enable_multiprocess = enable_multiprocess
+        self.num_processes = num_processes or min(multiprocessing.cpu_count(), 4)
+        self._progress_timer: Optional[QTimer] = None
+        self._stop_event: Optional[multiprocessing.Event] = None
 
         # 进度跟踪 (Phase 4 Stage 1.4)
         self._start_time = 0.0  # 处理开始时间
@@ -165,7 +297,13 @@ class VideoProcessorThread(QThread):
             if file_ext in [".jpg", ".jpeg", ".png", ".bmp"]:
                 self._process_image()
             elif file_ext in [".mp4", ".avi", ".mkv", ".mov"]:
-                self._process_video()
+                # 视频处理: 根据配置选择单/多进程模式 (Phase 4 Stage 2.1)
+                if self.enable_multiprocess:
+                    self.logger.info(f"Using multiprocess mode with {self.num_processes} processes")
+                    self._process_video_multiprocess()
+                else:
+                    self.logger.info("Using single-process mode")
+                    self._process_video_singleprocess()
             else:
                 raise UnsupportedFormatError("不支持的文件格式", details=f"文件扩展名 '{file_ext}' 不在支持列表中")
 
@@ -241,7 +379,284 @@ class VideoProcessorThread(QThread):
             self.logger.error(f"Image processing error: {e}")
             self.error.emit(f"图片处理失败: {str(e)}")
 
-    def _process_video(self) -> None:
+    # ============================================================================
+    # 多进程处理辅助方法 (Phase 4 Stage 2.1)
+    # ============================================================================
+
+    def _calculate_chunks(
+        self, total_frames: int, num_processes: int
+    ) -> List[Tuple[int, int, str]]:
+        """
+        计算分块策略
+
+        Args:
+            total_frames: 总帧数
+            num_processes: 进程数
+
+        Returns:
+            [(start_frame, end_frame, temp_output_path), ...]
+        """
+        chunk_size = total_frames // num_processes
+        chunks = []
+
+        for i in range(num_processes):
+            start = i * chunk_size
+            # 最后一个块包含剩余所有帧
+            end = total_frames if i == num_processes - 1 else (i + 1) * chunk_size
+
+            # 使用 tempfile 创建临时文件路径
+            temp_path = os.path.join(
+                tempfile.gettempdir(), f"video_chunk_{i}_{os.getpid()}.mp4"
+            )
+            chunks.append((start, end, temp_path))
+
+        self.logger.info(f"Calculated {num_processes} chunks for {total_frames} frames")
+        return chunks
+
+    def _check_progress_queue(
+        self, progress_queue: multiprocessing.Queue, total_frames: int
+    ) -> None:
+        """
+        检查进度队列并发送信号
+
+        Args:
+            progress_queue: 进度队列
+            total_frames: 总帧数
+        """
+        try:
+            while not progress_queue.empty():
+                progress_data = progress_queue.get_nowait()
+
+                chunk_id = progress_data["chunk_id"]
+                current = progress_data["current"]
+                total = progress_data["total"]
+
+                # 计算总体进度 (假设所有块平均分配)
+                chunk_progress = (current / total) if total > 0 else 0
+                overall_progress = int(
+                    (chunk_id / self.num_processes + chunk_progress / self.num_processes)
+                    * 90
+                ) + 10  # 10-100%
+
+                # 发送 PyQt 信号
+                self.progress.emit(overall_progress)
+                self.status.emit(f"🎨 处理块 {chunk_id + 1}/{self.num_processes}: {current}/{total} 帧")
+
+        except Exception as e:
+            self.logger.warning(f"Progress polling error: {e}")
+
+    def _merge_video_chunks(self, chunk_paths: List[str], output_path: str) -> None:
+        """
+        使用 FFmpeg 合并视频块
+
+        Args:
+            chunk_paths: 视频块路径列表
+            output_path: 输出路径
+        """
+        concat_list_path = None
+
+        try:
+            # 1. 创建 concat 列表文件
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                concat_list_path = f.name
+                for chunk_path in chunk_paths:
+                    # FFmpeg concat demuxer 要求绝对路径
+                    abs_path = os.path.abspath(chunk_path).replace("\\", "/")
+                    f.write(f"file '{abs_path}'\n")
+
+            self.logger.info(f"Created concat list: {concat_list_path}")
+
+            # 2. 使用 FFmpeg concat demuxer 合并(无损、快速)
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_list_path,
+                "-c",
+                "copy",  # 复制编码,不重新编码
+                output_path,
+                "-y",  # 覆盖已存在文件
+            ]
+
+            self.logger.info(f"Running FFmpeg merge: {' '.join(ffmpeg_cmd)}")
+
+            # 3. 执行 FFmpeg
+            result = subprocess.run(
+                ffmpeg_cmd, capture_output=True, text=True, timeout=300
+            )
+
+            # 4. 检查结果
+            if result.returncode != 0:
+                raise Exception(f"FFmpeg merge failed: {result.stderr}")
+
+            self.logger.info(f"Video chunks merged successfully: {output_path}")
+
+        finally:
+            # 5. 删除 concat 列表文件
+            if concat_list_path and os.path.exists(concat_list_path):
+                try:
+                    os.remove(concat_list_path)
+                except Exception as e:
+                    self.logger.warning(f"Failed to remove concat list: {e}")
+
+    def _process_video_multiprocess(self) -> None:
+        """
+        多进程视频处理 (Phase 4 Stage 2.1)
+        使用分块批处理策略,将视频分割成多个块并行处理
+        """
+        temp_files: List[str] = []
+
+        try:
+            # 1. 获取视频信息
+            self.status.emit("📊 分析视频信息...")
+            cap = cv2.VideoCapture(self.input_path)
+            if not cap.isOpened():
+                raise VideoReadError("无法打开视频文件", details=f"文件路径: {self.input_path}")
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+
+            self.logger.info(
+                f"Video info: {width}x{height}, {fps} fps, {total_frames} frames"
+            )
+            self.status.emit(
+                f"🚀 使用 {self.num_processes} 个进程并行处理 {total_frames} 帧"
+            )
+
+            # 2. 计算分块
+            chunks = self._calculate_chunks(total_frames, self.num_processes)
+            temp_files = [chunk[2] for chunk in chunks]
+
+            # 3. 创建进度队列和停止事件 (Windows兼容)
+            manager = multiprocessing.Manager()
+            progress_queue: multiprocessing.Queue = manager.Queue()
+            self._stop_event = manager.Event()
+
+            # 4. 启动进度轮询
+            self._progress_timer = QTimer()
+            self._progress_timer.timeout.connect(
+                lambda: self._check_progress_queue(progress_queue, total_frames)
+            )
+            self._progress_timer.start(100)  # 每100ms检查一次
+
+            # 5. 将 ConfigParser 转换为字典 (ConfigParser 无法 pickle)
+            config_dict = None
+            if self.config:
+                config_dict = {section: dict(self.config[section]) for section in self.config.sections()}
+
+            # 6. 并行处理
+            self.status.emit("🎨 开始并行处理视频块...")
+            results: List[Tuple[Optional[str], bool, Optional[str]]] = []
+
+            with ProcessPoolExecutor(max_workers=self.num_processes) as executor:
+                futures = []
+                for i, (start, end, temp_path) in enumerate(chunks):
+                    future = executor.submit(
+                        process_video_chunk,
+                        self.input_path,
+                        start,
+                        end,
+                        temp_path,
+                        self.ai_params,
+                        config_dict,
+                        progress_queue,
+                        self._stop_event,
+                        i,  # chunk_id
+                    )
+                    futures.append(future)
+
+                # 收集结果
+                for future in as_completed(futures):
+                    result = future.result()
+                    results.append(result)
+                    self.logger.info(f"Chunk completed: {result[0]}, success={result[1]}")
+
+            # 7. 检查结果
+            failed_chunks = [r for r in results if not r[1]]
+            if failed_chunks:
+                error_messages = [r[2] for r in failed_chunks if r[2]]
+                raise Exception(f"{len(failed_chunks)} 个块处理失败: {'; '.join(error_messages)}")
+
+            # 8. 合并视频块
+            chunk_paths = [r[0] for r in results if r[0] is not None]
+            chunk_paths.sort()  # 确保顺序正确
+
+            self.status.emit("🔗 正在合并视频块...")
+            self.progress.emit(95)
+
+            # 创建临时合并文件
+            temp_merged_path = self.output_path.replace(".", "_temp_merged.")
+            self._merge_video_chunks(chunk_paths, temp_merged_path)
+
+            # 9. 处理音频
+            if self.ffmpeg_processor and self.ffmpeg_processor.is_available():
+                self.status.emit("🎵 正在合并原始音频...")
+                self.progress.emit(97)
+
+                audio_success = self.ffmpeg_processor.process_video_with_audio_preservation(
+                    original_video_path=self.input_path,
+                    processed_video_path=temp_merged_path,
+                    final_output_path=self.output_path,
+                )
+
+                if audio_success:
+                    self.logger.info("Audio merged successfully")
+                    # 删除临时合并文件
+                    if os.path.exists(temp_merged_path):
+                        os.remove(temp_merged_path)
+                else:
+                    self.logger.warning("Audio merge failed, using video-only output")
+                    # 将临时文件重命名为最终输出
+                    if os.path.exists(temp_merged_path):
+                        if os.path.exists(self.output_path):
+                            os.remove(self.output_path)
+                        os.rename(temp_merged_path, self.output_path)
+            else:
+                # 没有音频处理,直接使用合并后的文件
+                if os.path.exists(self.output_path):
+                    os.remove(self.output_path)
+                os.rename(temp_merged_path, self.output_path)
+
+            # 10. 完成
+            self.progress.emit(100)
+            self.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")
+            self.logger.info(f"Multiprocess video processing completed: {self.output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Multiprocess processing failed, falling back to single-process: {e}")
+            self.status.emit("⚠️ 多进程失败，切换到单进程模式")
+
+            # 降级到单进程处理
+            self._process_video_singleprocess()
+
+        finally:
+            # 11. 清理
+            if self._progress_timer:
+                self._progress_timer.stop()
+                self._progress_timer = None
+
+            if self._stop_event:
+                self._stop_event.set()
+                self._stop_event = None
+
+            # 删除临时文件
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                        self.logger.debug(f"Removed temp file: {temp_file}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to remove temp file {temp_file}: {e}")
+
+    def _process_video_singleprocess(self) -> None:
         """
         Process a video file frame by frame.
         """
