@@ -114,7 +114,9 @@ class VideoProcessorThread(QThread):
             self.status.emit("🔍 检测水印区域...")
             self.progress.emit(40)
 
-            assert self.ai_handler is not None, "AI handler not initialized"
+            if self.ai_handler is None:
+                raise ModelLoadError("AI handler not initialized")
+
             processed_image, processing_info = self.ai_handler.process_frame(
                 image, processing_params
             )
@@ -180,7 +182,7 @@ class VideoProcessorThread(QThread):
             )
 
             # Setup output video writer
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(self.output_path, fourcc, fps, (frame_width, frame_height))
 
             if not out.isOpened():
@@ -208,7 +210,9 @@ class VideoProcessorThread(QThread):
                 current_frame += 1
 
                 # Process frame with AI
-                assert self.ai_handler is not None, "AI handler not initialized"
+                if self.ai_handler is None:
+                    raise ModelLoadError("AI handler not initialized")
+
                 processed_frame, processing_info = self.ai_handler.process_frame(
                     frame, processing_params
                 )

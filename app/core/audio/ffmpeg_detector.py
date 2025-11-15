@@ -16,6 +16,7 @@ FFmpeg检测和管理模块
 
 import logging
 import os
+import shutil
 import subprocess
 from typing import List, Optional
 
@@ -80,16 +81,21 @@ class FFmpegDetector:
             config_path = self.config.get("Paths", "ffmpeg_path", fallback=None)
             if config_path and isinstance(config_path, str):
                 return str(config_path)
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug(f"Failed to read ffmpeg_path from config: {e}")
 
         return None
 
     def _check_system_path(self) -> Optional[str]:
         """检查系统PATH中的FFmpeg"""
         try:
+            # Use shutil.which to find the full path (safer than partial path)
+            ffmpeg_cmd = shutil.which("ffmpeg")
+            if not ffmpeg_cmd:
+                return None
+
             result = subprocess.run(
-                ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5
+                [ffmpeg_cmd, "-version"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 return "ffmpeg"  # 系统PATH中可用
@@ -181,13 +187,18 @@ class FFmpegDetector:
 
         # 如果推导失败，尝试系统PATH
         try:
+            # Use shutil.which to find the full path (safer than partial path)
+            ffprobe_cmd = shutil.which("ffprobe")
+            if not ffprobe_cmd:
+                return None
+
             result = subprocess.run(
-                ["ffprobe", "-version"], capture_output=True, text=True, timeout=5
+                [ffprobe_cmd, "-version"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 return "ffprobe"
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug(f"ffprobe not found in system PATH: {e}")
 
         return None
 
@@ -220,7 +231,7 @@ class FFmpegDetector:
                 if lines:
                     return lines[0].strip()
 
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug(f"Failed to get version info for {path}: {e}")
 
         return None

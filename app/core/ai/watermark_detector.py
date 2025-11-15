@@ -144,7 +144,7 @@ class WatermarkDetector:
                 f"Watermark detection completed. Found {len(contours)} potential watermark regions"
             )
             result_mask = final_mask.astype(np.uint8)
-            return result_mask  # type: ignore[no-any-return]
+            return result_mask
 
         except Exception as e:
             self.logger.error(f"Error in watermark detection: {e}")
