@@ -121,7 +121,7 @@ if command -v ffmpeg &> /dev/null; then
 else
     echo "⚠️ 未检测到FFmpeg"
     echo "📖 FFmpeg安装指南:"
-    
+
     if [[ "$OS" == "linux" ]]; then
         echo "  Ubuntu/Debian: sudo apt install ffmpeg"
         echo "  CentOS/RHEL: sudo yum install ffmpeg"
@@ -134,10 +134,10 @@ else
         echo "  2. 解压到任意目录"
         echo "  3. 将bin文件夹添加到系统PATH"
     fi
-    
+
     echo ""
     read -p "是否现在安装FFmpeg? (仅Linux/macOS) [y/N]: " INSTALL_FFMPEG
-    
+
     if [[ $INSTALL_FFMPEG == "y" || $INSTALL_FFMPEG == "Y" ]]; then
         if [[ "$OS" == "linux" ]]; then
             if command -v apt &> /dev/null; then

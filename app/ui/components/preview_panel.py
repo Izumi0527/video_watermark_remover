@@ -1,15 +1,8 @@
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QGroupBox,
-    QTabWidget,
-    QFrame,
-    QSplitter,
-)
+import logging
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
-import logging
+from PyQt6.QtWidgets import QFrame, QGroupBox, QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 # 导入图像选择器组件
 from ..widgets.image_selector_widget import ImageSelectorWidget
@@ -97,7 +90,8 @@ class PreviewPanel(QWidget):
         # 添加对比信息显示区域
         self.comparison_info_label = QLabel("📊 对比信息：请先处理图像")
         self.comparison_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.comparison_info_label.setStyleSheet("""
+        self.comparison_info_label.setStyleSheet(
+            """
             QLabel {
                 background-color: #f0f8ff;
                 border: 1px solid #007acc;
@@ -106,7 +100,8 @@ class PreviewPanel(QWidget):
                 color: #007acc;
                 font-weight: bold;
             }
-        """)
+        """
+        )
         comparison_layout.addWidget(self.comparison_info_label)
 
         # 创建分割器用于左右对比
@@ -122,7 +117,7 @@ class PreviewPanel(QWidget):
 
         self.comparison_splitter.addWidget(original_frame)
         self.comparison_splitter.addWidget(processed_frame)
-        
+
         # 设置分割器比例
         self.comparison_splitter.setStretchFactor(0, 1)
         self.comparison_splitter.setStretchFactor(1, 1)
@@ -205,7 +200,7 @@ class PreviewPanel(QWidget):
             self.processed_image_label.setPixmap(scaled_pixmap)
             self.processed_image_label.setText("")
             self._processed_image = processed_pixmap
-            
+
             # 更新对比信息显示
             self._update_comparison_info(processing_info)
 
@@ -294,25 +289,28 @@ class PreviewPanel(QWidget):
         """切换到手动选择标签页"""
         self.preview_tabs.setCurrentWidget(self.manual_select_tab)
         self.logger.debug("Switched to manual selection tab")
-    
+
     # 预览对比功能增强方法
     def _update_comparison_info(self, processing_info=None):
         """更新对比信息显示"""
         if processing_info:
             # 从处理信息中提取统计数据
             method = processing_info.get("detection_method", "未知")
-            regions_count = processing_info.get("manual_regions_count", 0) or processing_info.get("auto_regions_count", 0)
+            regions_count = processing_info.get("manual_regions_count", 0) or processing_info.get(
+                "auto_regions_count", 0
+            )
             process_time = processing_info.get("processing_time", 0)
-            
+
             # 格式化显示信息
             info_text = f"📊 处理完成 | 方法: {method}"
             if regions_count > 0:
                 info_text += f" | 处理区域: {regions_count}个"
             if process_time > 0:
                 info_text += f" | 耗时: {process_time:.2f}秒"
-                
+
             self.comparison_info_label.setText(info_text)
-            self.comparison_info_label.setStyleSheet("""
+            self.comparison_info_label.setStyleSheet(
+                """
                 QLabel {
                     background-color: #e8f5e8;
                     border: 1px solid #4CAF50;
@@ -321,11 +319,13 @@ class PreviewPanel(QWidget):
                     color: #4CAF50;
                     font-weight: bold;
                 }
-            """)
+            """
+            )
         else:
             # 基本的完成信息
             self.comparison_info_label.setText("✅ 图像处理完成 - 对比效果如下")
-            self.comparison_info_label.setStyleSheet("""
+            self.comparison_info_label.setStyleSheet(
+                """
                 QLabel {
                     background-color: #e8f5e8;
                     border: 1px solid #4CAF50;
@@ -334,12 +334,14 @@ class PreviewPanel(QWidget):
                     color: #4CAF50;
                     font-weight: bold;
                 }
-            """)
+            """
+            )
 
     def show_processing_progress(self):
         """显示处理中的进度状态"""
         self.comparison_info_label.setText("⏳ 正在处理图像，请稍候...")
-        self.comparison_info_label.setStyleSheet("""
+        self.comparison_info_label.setStyleSheet(
+            """
             QLabel {
                 background-color: #fff3cd;
                 border: 1px solid #ffc107;
@@ -348,12 +350,14 @@ class PreviewPanel(QWidget):
                 color: #856404;
                 font-weight: bold;
             }
-        """)
+        """
+        )
 
     def reset_comparison_display(self):
         """重置对比显示状态"""
         self.comparison_info_label.setText("📊 对比信息：请先处理图像")
-        self.comparison_info_label.setStyleSheet("""
+        self.comparison_info_label.setStyleSheet(
+            """
             QLabel {
                 background-color: #f0f8ff;
                 border: 1px solid #007acc;
@@ -362,13 +366,14 @@ class PreviewPanel(QWidget):
                 color: #007acc;
                 font-weight: bold;
             }
-        """)
-        
+        """
+        )
+
         # 清空处理后图像
         self.processed_image_label.clear()
         self.processed_image_label.setText("暂无图片")
         self._processed_image = None
-        
+
     def switch_to_comparison_tab(self):
         """切换到对比标签页"""
         self.preview_tabs.setCurrentWidget(self.comparison_tab)

@@ -13,28 +13,28 @@ FFmpeg音频处理器 - 重构版
 版本: v1.0 (重构版)
 """
 
+import logging
 import os
 import shutil
-import logging
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from .ffmpeg_detector import FFmpegDetector
-from .video_info_extractor import VideoInfoExtractor  
 from .audio_extractor import AudioExtractor
 from .audio_merger import AudioMerger
+from .ffmpeg_detector import FFmpegDetector
+from .video_info_extractor import VideoInfoExtractor
 
 
 class FFmpegAudioProcessor:
     """
     FFmpeg音频处理器 - 重构版
-    
+
     负责视频音频轨道的提取、合并和处理，使用模块化架构
     """
 
     def __init__(self, config=None):
         """
         初始化音频处理器
-        
+
         Args:
             config: 配置对象
         """
@@ -46,16 +46,18 @@ class FFmpegAudioProcessor:
         self.info_extractor = VideoInfoExtractor(self.detector)
         self.audio_extractor = AudioExtractor(self.detector)
         self.audio_merger = AudioMerger(self.detector)
-        
+
         # 临时文件管理（来自各个模块）
         self.temp_files: List[str] = []
 
-        self.logger.info(f"FFmpegAudioProcessor initialized (refactored) - FFmpeg: {self.detector.is_available()}")
+        self.logger.info(
+            f"FFmpegAudioProcessor initialized (refactored) - FFmpeg: {self.detector.is_available()}"
+        )
 
     def is_available(self) -> bool:
         """
         检查FFmpeg是否可用
-        
+
         Returns:
             FFmpeg是否可用
         """
@@ -64,105 +66,114 @@ class FFmpegAudioProcessor:
     def get_video_info(self, video_path: str) -> Dict[str, Any]:
         """
         获取视频文件信息
-        
+
         Args:
             video_path: 视频文件路径
-            
+
         Returns:
             视频信息字典
         """
         return self.info_extractor.get_video_info(video_path)
 
-    def extract_audio(self, video_path: str, 
-                     output_path: Optional[str] = None,
-                     **params) -> Optional[str]:
+    def extract_audio(
+        self, video_path: str, output_path: Optional[str] = None, **params
+    ) -> Optional[str]:
         """
         从视频文件提取音频
-        
+
         Args:
             video_path: 输入视频文件路径
             output_path: 输出音频文件路径（可选）
             **params: 音频提取参数
-            
+
         Returns:
             音频文件路径，失败时返回None
         """
         result = self.audio_extractor.extract_audio(video_path, output_path, **params)
-        
+
         # 如果是临时文件，加入清理列表
         if result and output_path is None:
             self.temp_files.append(result)
-            
+
         return result
 
-    def merge_audio_video(self, video_path: str, 
-                         audio_path: str,
-                         output_path: str,
-                         **params) -> bool:
+    def merge_audio_video(
+        self, video_path: str, audio_path: str, output_path: str, **params
+    ) -> bool:
         """
         将音频合并到视频文件
-        
+
         Args:
             video_path: 输入视频文件路径
             audio_path: 音频文件路径
             output_path: 输出视频文件路径
             **params: 合并参数
-            
+
         Returns:
             是否成功
         """
         return self.audio_merger.merge_audio_video(video_path, audio_path, output_path, **params)
 
-    def process_video_with_audio_preservation(self, 
-                                            original_video_path: str,
-                                            processed_video_path: str,
-                                            final_output_path: str) -> bool:
+    def process_video_with_audio_preservation(
+        self, original_video_path: str, processed_video_path: str, final_output_path: str
+    ) -> bool:
         """
         处理视频并保持原始音频 - 主要工作流程
-        
+
         这是主要的工作流程：
         1. 检查原视频是否有音频
         2. 从原视频提取音频
         3. 将音频合并到处理后的视频
-        
+
         Args:
             original_video_path: 原始视频文件路径
             processed_video_path: 处理后的视频文件路径（无音频）
             final_output_path: 最终输出文件路径
-            
+
         Returns:
             是否成功
         """
         if not self.is_available():
-            return self._fallback_copy(processed_video_path, final_output_path,
-                                     "FFmpeg not available, skipping audio preservation")
+            return self._fallback_copy(
+                processed_video_path,
+                final_output_path,
+                "FFmpeg not available, skipping audio preservation",
+            )
 
         try:
             # 检查原视频是否有音频
             if not self._check_original_audio(original_video_path):
-                return self._fallback_copy(processed_video_path, final_output_path,
-                                         "Original video has no audio, copying processed video directly")
+                return self._fallback_copy(
+                    processed_video_path,
+                    final_output_path,
+                    "Original video has no audio, copying processed video directly",
+                )
 
             # 步骤1：提取音频
             audio_path = self._extract_original_audio(original_video_path)
             if not audio_path:
-                return self._fallback_copy(processed_video_path, final_output_path,
-                                         "Failed to extract audio")
+                return self._fallback_copy(
+                    processed_video_path, final_output_path, "Failed to extract audio"
+                )
 
             # 步骤2：合并音频和处理后的视频
-            success = self._merge_audio_to_processed_video(processed_video_path, audio_path, final_output_path)
-            
+            success = self._merge_audio_to_processed_video(
+                processed_video_path, audio_path, final_output_path
+            )
+
             if not success:
-                return self._fallback_copy(processed_video_path, final_output_path,
-                                         "Failed to merge audio and video")
+                return self._fallback_copy(
+                    processed_video_path, final_output_path, "Failed to merge audio and video"
+                )
 
             self.logger.info("Audio preservation completed successfully")
             return True
 
         except Exception as e:
             self.logger.error(f"Error in audio preservation workflow: {e}")
-            return self._fallback_copy(processed_video_path, final_output_path,
-                                     f"Error in workflow: {e}")
+            return self._fallback_copy(
+                processed_video_path, final_output_path, f"Error in workflow: {e}"
+            )
 
     def _check_original_audio(self, original_video_path: str) -> bool:
         """检查原视频是否有音频"""
@@ -174,12 +185,14 @@ class FFmpegAudioProcessor:
         self.logger.info("Step 1: Extracting audio from original video")
         return self.audio_extractor.extract_audio(original_video_path)
 
-    def _merge_audio_to_processed_video(self, processed_video_path: str, 
-                                      audio_path: str,
-                                      final_output_path: str) -> bool:
+    def _merge_audio_to_processed_video(
+        self, processed_video_path: str, audio_path: str, final_output_path: str
+    ) -> bool:
         """将音频合并到处理后的视频"""
         self.logger.info("Step 2: Merging audio with processed video")
-        return self.audio_merger.merge_audio_video(processed_video_path, audio_path, final_output_path)
+        return self.audio_merger.merge_audio_video(
+            processed_video_path, audio_path, final_output_path
+        )
 
     def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:
         """回退方案：复制处理后的视频"""
@@ -203,7 +216,7 @@ class FFmpegAudioProcessor:
                 self.logger.warning(f"Failed to clean up {temp_file}: {e}")
 
         self.temp_files.clear()
-        
+
         # 清理模块的临时文件
         self.audio_extractor.cleanup_temp_files()
 
@@ -231,14 +244,14 @@ if __name__ == "__main__":
 
     print("=== FFmpeg音频处理器重构版测试 ===")
     print(f"FFmpeg available: {processor.is_available()}")
-    
+
     if processor.is_available():
         version = processor.get_version_info()
         print(f"FFmpeg version: {version}")
-        
+
         formats = processor.get_supported_formats()
         print(f"Supported audio codecs: {formats['audio_codecs']}")
-        
+
         # 测试获取视频信息（如果有测试视频的话）
         test_video = "test_video.mp4"  # 替换为实际测试视频路径
         if os.path.exists(test_video):

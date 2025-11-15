@@ -1,16 +1,16 @@
 # 高级参数组件模块
-from .advanced_parameters_widget import AdvancedParametersWidget
 from .advanced_parameters_tabs import (
     DetectionParametersTab,
-    InpaintingParametersTab, 
+    InpaintingParametersTab,
+    OutputParametersTab,
     PerformanceParametersTab,
-    OutputParametersTab
 )
+from .advanced_parameters_widget import AdvancedParametersWidget
 
 __all__ = [
-    'AdvancedParametersWidget',
-    'DetectionParametersTab',
-    'InpaintingParametersTab',
-    'PerformanceParametersTab', 
-    'OutputParametersTab'
+    "AdvancedParametersWidget",
+    "DetectionParametersTab",
+    "InpaintingParametersTab",
+    "PerformanceParametersTab",
+    "OutputParametersTab",
 ]

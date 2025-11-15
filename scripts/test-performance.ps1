@@ -5,22 +5,22 @@
 param(
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [string]$TestDataPath = "tests/test_data",
-    
+
     [Parameter()]
     [switch]$MemoryProfile,
-    
+
     [Parameter()]
     [switch]$GPUProfile,
-    
+
     [Parameter()]
     [int]$Iterations = 5,
-    
+
     [Parameter()]
     [string]$ReportPath = "logs/performance_report.json"
 )
@@ -32,7 +32,7 @@ $ErrorActionPreference = "Stop"
 $Colors = @{
     Header = "Green"
     Success = "Green"
-    Warning = "Yellow" 
+    Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
     Detail = "White"
@@ -101,16 +101,16 @@ system_info = {
 
 print(json.dumps(system_info, indent=2))
 "@
-    
+
     $PerformanceResults.SystemInfo = $systemInfo | ConvertFrom-Json
     Write-Host "✅ 系统信息收集完成" -ForegroundColor $Colors.Success
-    
+
     if ($Verbose) {
         Write-Host "  CPU核心数: $($PerformanceResults.SystemInfo.cpu_count) (逻辑: $($PerformanceResults.SystemInfo.cpu_count_logical))" -ForegroundColor $Colors.Detail
         Write-Host "  总内存: $([math]::Round($PerformanceResults.SystemInfo.memory_total / 1GB, 2)) GB" -ForegroundColor $Colors.Detail
         Write-Host "  可用内存: $([math]::Round($PerformanceResults.SystemInfo.memory_available / 1GB, 2)) GB" -ForegroundColor $Colors.Detail
     }
-    
+
 } catch {
     Write-Host "❌ 系统信息收集失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
 }
@@ -120,7 +120,7 @@ print(json.dumps(system_info, indent=2))
 if ($GPUProfile) {
     Write-Host ""
     Write-Host "🎮 检查GPU信息..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $gpuInfo = python -c @"
 import json
@@ -133,7 +133,7 @@ try:
         gpu_info['available'] = True
         gpu_info['cuda_version'] = torch.version.cuda
         gpu_info['device_count'] = torch.cuda.device_count()
-        
+
         for i in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(i)
             gpu_info['devices'].append({
@@ -141,16 +141,16 @@ try:
                 'memory': props.total_memory,
                 'capability': f'{props.major}.{props.minor}'
             })
-    
+
     print(json.dumps(gpu_info, indent=2))
-    
+
 except ImportError:
     print(json.dumps(gpu_info, indent=2))
 "@
-        
+
         $gpuData = $gpuInfo | ConvertFrom-Json
         $PerformanceResults.SystemInfo.GPU = $gpuData
-        
+
         if ($gpuData.available) {
             Write-Host "✅ GPU可用 - $($gpuData.device_count) 个设备" -ForegroundColor $Colors.Success
             if ($Verbose) {
@@ -161,7 +161,7 @@ except ImportError:
         } else {
             Write-Host "⚠️ GPU不可用或CUDA未安装" -ForegroundColor $Colors.Warning
         }
-        
+
     } catch {
         Write-Host "❌ GPU信息检查失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     }
@@ -192,17 +192,17 @@ for i, size in enumerate(image_sizes):
     # 生成随机图像数据
     width, height = size
     image_data = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
-    
+
     # 添加一些结构化内容模拟真实图像
     # 添加一些矩形"水印"区域
     watermark_x = width // 4
-    watermark_y = height // 4  
+    watermark_y = height // 4
     watermark_w = width // 3
     watermark_h = height // 6
-    
-    image_data[watermark_y:watermark_y+watermark_h, 
+
+    image_data[watermark_y:watermark_y+watermark_h,
                watermark_x:watermark_x+watermark_w] = [255, 255, 255]
-    
+
     # 保存测试图像
     img = Image.fromarray(image_data)
     img_path = os.path.join(test_data_path, f'perf_test_image_{width}x{height}.png')
@@ -211,9 +211,9 @@ for i, size in enumerate(image_sizes):
 
 print(f'性能测试数据创建完成，共 {len(image_sizes)} 个文件')
 "@
-    
+
     Write-Host $testImageCreation -ForegroundColor $Colors.Detail
-    
+
 } catch {
     Write-Host "❌ 性能测试数据创建失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
 }
@@ -243,14 +243,14 @@ try:
     # 测试视频处理器初始化时间
     process = psutil.Process()
     start_memory = process.memory_info().rss / 1024 / 1024  # MB
-    
+
     start_time = time.time()
     from app.core.video.video_processor import VideoProcessor
     processor = VideoProcessor()
     end_time = time.time()
-    
+
     results['initialization_time'] = end_time - start_time
-    
+
     # 内存使用测试
     end_memory = process.memory_info().rss / 1024 / 1024  # MB
     results['memory_usage'] = {
@@ -258,38 +258,38 @@ try:
         'after_init': end_memory,
         'delta': end_memory - start_memory
     }
-    
+
     # 多次初始化测试 (模拟负载)
     iterations = $Iterations if not $Quick else 2
     init_times = []
-    
+
     for i in range(iterations):
         gc.collect()  # 强制垃圾回收
-        
+
         start_iter = time.time()
         temp_processor = VideoProcessor()
         end_iter = time.time()
-        
+
         init_times.append(end_iter - start_iter)
         del temp_processor
-    
+
     results['performance_stats'] = {
         'min_init_time': min(init_times),
         'max_init_time': max(init_times),
         'avg_init_time': sum(init_times) / len(init_times),
         'iterations': len(init_times)
     }
-    
+
     print(json.dumps(results, indent=2))
-    
+
 except Exception as e:
     results['error'] = str(e)
     print(json.dumps(results, indent=2))
 "@
-    
+
     $videoResults = $videoProcessingTest | ConvertFrom-Json
     $PerformanceResults.VideoProcessing = $videoResults
-    
+
     if ($videoResults.error) {
         Write-Host "❌ 视频处理器性能测试失败: $($videoResults.error)" -ForegroundColor $Colors.Error
     } else {
@@ -297,7 +297,7 @@ except Exception as e:
         Write-Host "✅ 内存使用增加: $([math]::Round($videoResults.memory_usage.delta, 2)) MB" -ForegroundColor $Colors.Success
         Write-Host "✅ 平均初始化时间: $([math]::Round($videoResults.performance_stats.avg_init_time * 1000, 2)) ms" -ForegroundColor $Colors.Success
     }
-    
+
 } catch {
     Write-Host "❌ 视频处理器性能测试执行失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
 }
@@ -329,14 +329,14 @@ try:
     # AI处理器初始化性能测试
     process = psutil.Process()
     start_memory = process.memory_info().rss / 1024 / 1024  # MB
-    
+
     start_time = time.time()
     from app.core.ai.ai_handler import AIHandler
     ai_handler = AIHandler()
     end_time = time.time()
-    
+
     results['initialization_time'] = end_time - start_time
-    
+
     # 内存使用测试
     end_memory = process.memory_info().rss / 1024 / 1024  # MB
     results['memory_usage'] = {
@@ -344,14 +344,14 @@ try:
         'after_init': end_memory,
         'delta': end_memory - start_memory
     }
-    
+
     # 模拟AI推理性能测试 (如果有测试图像)
     test_images = glob('$TestDataPath/perf_test_image_*.png')
     if test_images and hasattr(ai_handler, 'process_image'):
         for img_path in test_images:
             inference_times = []
             iterations = min($Iterations, 3)  # AI推理较慢，限制迭代次数
-            
+
             for i in range(iterations):
                 start_inference = time.time()
                 try:
@@ -362,39 +362,39 @@ try:
                 except:
                     pass  # 忽略处理错误，重点测试性能
                 end_inference = time.time()
-                
+
                 inference_times.append(end_inference - start_inference)
-            
+
             if inference_times:
                 results['inference_times'].append({
                     'image': os.path.basename(img_path),
                     'times': inference_times,
                     'avg_time': sum(inference_times) / len(inference_times)
                 })
-    
+
     print(json.dumps(results, indent=2))
-    
+
 except Exception as e:
     results['error'] = str(e)
     print(json.dumps(results, indent=2))
 "@
-    
+
     $aiResults = $aiProcessingTest | ConvertFrom-Json
     $PerformanceResults.AIInference = $aiResults
-    
+
     if ($aiResults.error) {
         Write-Host "❌ AI处理器性能测试失败: $($aiResults.error)" -ForegroundColor $Colors.Error
     } else {
         Write-Host "✅ AI处理器初始化: $([math]::Round($aiResults.initialization_time * 1000, 2)) ms" -ForegroundColor $Colors.Success
         Write-Host "✅ 内存使用增加: $([math]::Round($aiResults.memory_usage.delta, 2)) MB" -ForegroundColor $Colors.Success
-        
+
         if ($aiResults.inference_times -and $aiResults.inference_times.Count -gt 0) {
             foreach ($inference in $aiResults.inference_times) {
                 Write-Host "✅ $($inference.image) 推理时间: $([math]::Round($inference.avg_time * 1000, 2)) ms" -ForegroundColor $Colors.Success
             }
         }
     }
-    
+
 } catch {
     Write-Host "❌ AI处理器性能测试执行失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
 }
@@ -404,7 +404,7 @@ except Exception as e:
 if ($MemoryProfile) {
     Write-Host ""
     Write-Host "💾 内存使用监控测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $memoryProfileTest = python -c @"
 import sys
@@ -425,85 +425,85 @@ results = {
 
 try:
     process = psutil.Process()
-    
+
     # 基线内存使用
     gc.collect()
     baseline = process.memory_info().rss / 1024 / 1024  # MB
     results['baseline_memory'] = baseline
     results['memory_timeline'].append({'time': 0, 'memory': baseline, 'action': 'baseline'})
-    
+
     # 加载主要组件并监控内存
     components = [
         ('VideoProcessor', 'app.core.video.video_processor', 'VideoProcessor'),
         ('AIHandler', 'app.core.ai.ai_handler', 'AIHandler'),
         ('ConfigManager', 'app.config.config_manager', 'ConfigManager'),
     ]
-    
+
     current_memory = baseline
     peak_memory = baseline
-    
+
     for name, module_path, class_name in components:
         try:
             # 导入并实例化组件
             module = __import__(module_path, fromlist=[class_name])
             component_class = getattr(module, class_name)
-            
+
             start_time = time.time()
             instance = component_class()
             end_time = time.time()
-            
+
             # 测量内存变化
             new_memory = process.memory_info().rss / 1024 / 1024  # MB
             delta = new_memory - current_memory
-            
+
             results['memory_timeline'].append({
                 'time': end_time - start_time,
                 'memory': new_memory,
                 'delta': delta,
                 'action': f'load_{name}'
             })
-            
+
             current_memory = new_memory
             peak_memory = max(peak_memory, new_memory)
-            
+
             del instance  # 清理实例
-            
+
         except Exception as e:
             results['memory_timeline'].append({
                 'action': f'error_{name}',
                 'error': str(e)
             })
-    
+
     # 测试垃圾回收影响
     pre_gc_memory = process.memory_info().rss / 1024 / 1024  # MB
     gc.collect()
     post_gc_memory = process.memory_info().rss / 1024 / 1024  # MB
-    
+
     results['gc_impact'] = {
         'before': pre_gc_memory,
         'after': post_gc_memory,
         'freed': pre_gc_memory - post_gc_memory
     }
-    
+
     results['peak_memory'] = peak_memory
-    
+
     print(json.dumps(results, indent=2))
-    
+
 except Exception as e:
     results['error'] = str(e)
     print(json.dumps(results, indent=2))
 "@
-        
+
         $memoryResults = $memoryProfileTest | ConvertFrom-Json
         $PerformanceResults.MemoryUsage = $memoryResults
-        
+
         if ($memoryResults.error) {
             Write-Host "❌ 内存监控测试失败: $($memoryResults.error)" -ForegroundColor $Colors.Error
         } else {
             Write-Host "✅ 基线内存: $([math]::Round($memoryResults.baseline_memory, 2)) MB" -ForegroundColor $Colors.Success
             Write-Host "✅ 峰值内存: $([math]::Round($memoryResults.peak_memory, 2)) MB" -ForegroundColor $Colors.Success
             Write-Host "✅ GC回收: $([math]::Round($memoryResults.gc_impact.freed, 2)) MB" -ForegroundColor $Colors.Success
-            
+
             if ($Verbose -and $memoryResults.memory_timeline) {
                 foreach ($entry in $memoryResults.memory_timeline) {
                     if ($entry.delta) {
@@ -512,7 +512,7 @@ except Exception as e:
                 }
             }
         }
-        
+
     } catch {
         Write-Host "❌ 内存监控测试执行失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     }
@@ -523,7 +523,7 @@ except Exception as e:
 if (-not $Quick) {
     Write-Host ""
     Write-Host "⚡ CPU性能基准测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $cpuBenchmark = python -c @"
 import time
@@ -548,52 +548,52 @@ try:
         for _ in range(2, n + 1):
             a, b = b, a + b
         return b
-    
+
     # 单线程基准测试
     n = 30000 if '$Quick' != 'True' else 10000
-    
+
     start_time = time.time()
     result = cpu_intensive_task(n)
     end_time = time.time()
-    
+
     results['single_thread'] = {
         'duration': end_time - start_time,
         'operations_per_second': n / (end_time - start_time)
     }
-    
+
     # 多线程基准测试 (使用CPU核心数的线程)
     cpu_count = psutil.cpu_count(logical=False)
     pool_size = min(cpu_count, 4)  # 限制最大线程数
-    
+
     start_time = time.time()
     with mp.Pool(pool_size) as pool:
         tasks = [n // pool_size] * pool_size
         pool.map(cpu_intensive_task, tasks)
     end_time = time.time()
-    
+
     results['multi_thread'] = {
         'duration': end_time - start_time,
         'thread_count': pool_size,
         'speedup': (results['single_thread']['duration'] / (end_time - start_time))
     }
-    
+
     # CPU使用率监控
     cpu_percent = psutil.cpu_percent(interval=1)
     results['cpu_usage'] = {
         'current_usage': cpu_percent,
         'cpu_count': cpu_count
     }
-    
+
     print(json.dumps(results, indent=2))
-    
+
 except Exception as e:
     results['error'] = str(e)
     print(json.dumps(results, indent=2))
 "@
-        
+
         $cpuResults = $cpuBenchmark | ConvertFrom-Json
         $PerformanceResults.Benchmarks = $cpuResults
-        
+
         if ($cpuResults.error) {
             Write-Host "❌ CPU基准测试失败: $($cpuResults.error)" -ForegroundColor $Colors.Error
         } else {
@@ -601,7 +601,7 @@ except Exception as e:
             Write-Host "✅ 多线程加速比: $([math]::Round($cpuResults.multi_thread.speedup, 2))x ($($cpuResults.multi_thread.thread_count) 线程)" -ForegroundColor $Colors.Success
             Write-Host "✅ 当前CPU使用率: $([math]::Round($cpuResults.cpu_usage.current_usage, 1))%" -ForegroundColor $Colors.Success
         }
-        
+
     } catch {
         Write-Host "❌ CPU基准测试执行失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     }

@@ -1,9 +1,22 @@
-import cv2
-import os
 import logging
+import os
+from configparser import ConfigParser
+from typing import Any, Dict, Optional, Tuple
+
+import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
+
 from ..ai.ai_handler import AIHandler
 from ..audio.ffmpeg_audio_processor import FFmpegAudioProcessor
+from ..exceptions import (
+    FileReadError,
+    FileSaveError,
+    FrameProcessingError,
+    ModelLoadError,
+    UnsupportedFormatError,
+    VideoReadError,
+    VideoWriteError,
+)
 
 
 class VideoProcessorThread(QThread):
@@ -18,14 +31,21 @@ class VideoProcessorThread(QThread):
     error = pyqtSignal(str)  # Error messages
     preview_update = pyqtSignal(object)  # Processed frame for preview
 
-    def __init__(self, input_path, output_path, ai_params, config=None, parent=None):
+    def __init__(
+        self,
+        input_path: str,
+        output_path: str,
+        ai_params: Optional[Dict[str, Any]],
+        config: Optional[ConfigParser] = None,
+        parent: Optional[QThread] = None,
+    ) -> None:
         super().__init__(parent)
         self.input_path = input_path
         self.output_path = output_path
         self.ai_params = ai_params or {}
         self.config = config
-        self.ai_handler = None
-        self.ffmpeg_processor = None
+        self.ai_handler: Optional[AIHandler] = None
+        self.ffmpeg_processor: Optional[FFmpegAudioProcessor] = None
         self._is_running = True
 
         # Setup logging
@@ -39,7 +59,7 @@ class VideoProcessorThread(QThread):
         else:
             self.logger.warning("FFmpeg not available, audio will not be preserved")
 
-    def run(self):
+    def run(self) -> None:
         """
         Main processing loop for images and videos.
         Reads input file, applies AI processing, and writes output.
@@ -50,7 +70,7 @@ class VideoProcessorThread(QThread):
             # Initialize AI handler
             self.ai_handler = AIHandler(self.config, self.ai_params)
             if not self.ai_handler.load_models():
-                raise Exception("无法加载 AI 模型")
+                raise ModelLoadError("无法加载 AI 模型")
 
             self.status.emit("🤖 AI 模型加载完成")
 
@@ -62,13 +82,13 @@ class VideoProcessorThread(QThread):
             elif file_ext in [".mp4", ".avi", ".mkv", ".mov"]:
                 self._process_video()
             else:
-                raise Exception(f"不支持的文件格式: {file_ext}")
+                raise UnsupportedFormatError("不支持的文件格式", details=f"文件扩展名 '{file_ext}' 不在支持列表中")
 
         except Exception as e:
             self.logger.error(f"Processing error: {e}")
             self.error.emit(str(e))
 
-    def _process_image(self):
+    def _process_image(self) -> None:
         """
         Process a single image file.
         """
@@ -78,7 +98,7 @@ class VideoProcessorThread(QThread):
             image = cv2.imread(self.input_path)
 
             if image is None:
-                raise Exception("无法读取图片文件")
+                raise FileReadError("无法读取图片文件", details=f"文件路径: {self.input_path}")
 
             self.logger.info(f"Image loaded: {image.shape}")
             self.progress.emit(20)
@@ -100,7 +120,7 @@ class VideoProcessorThread(QThread):
             )
 
             if "error" in processing_info:
-                raise Exception(processing_info["error"])
+                raise FrameProcessingError("帧处理失败", details=processing_info["error"])
 
             self.progress.emit(80)
             self.status.emit("🎨 修复水印区域...")
@@ -119,7 +139,7 @@ class VideoProcessorThread(QThread):
             self.status.emit("💾 保存处理后的图片...")
 
             if not cv2.imwrite(self.output_path, processed_image):
-                raise Exception("保存图片失败")
+                raise FileSaveError("保存图片失败", details=f"输出路径: {self.output_path}")
 
             self.progress.emit(100)
 
@@ -134,7 +154,7 @@ class VideoProcessorThread(QThread):
             self.logger.error(f"Image processing error: {e}")
             self.error.emit(f"图片处理失败: {str(e)}")
 
-    def _process_video(self):
+    def _process_video(self) -> None:
         """
         Process a video file frame by frame.
         """
@@ -147,7 +167,7 @@ class VideoProcessorThread(QThread):
             cap = cv2.VideoCapture(self.input_path)
 
             if not cap.isOpened():
-                raise Exception(f"无法打开视频文件: {self.input_path}")
+                raise VideoReadError("无法打开视频文件", details=f"文件路径: {self.input_path}")
 
             # Get video properties
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -164,7 +184,7 @@ class VideoProcessorThread(QThread):
             out = cv2.VideoWriter(self.output_path, fourcc, fps, (frame_width, frame_height))
 
             if not out.isOpened():
-                raise Exception(f"无法创建输出视频文件: {self.output_path}")
+                raise VideoWriteError("无法创建输出视频文件", details=f"输出路径: {self.output_path}")
 
             self.progress.emit(10)
 
@@ -276,9 +296,7 @@ class VideoProcessorThread(QThread):
             )
 
             audio_status = (
-                "含音频"
-                if (self.ffmpeg_processor and self.ffmpeg_processor.is_available())
-                else "无音频"
+                "含音频" if (self.ffmpeg_processor and self.ffmpeg_processor.is_available()) else "无音频"
             )
             self.status.emit(f"✅ 视频处理完成! 处理了 {processed_frames} 帧 ({audio_status})")
             self.finished.emit(final_output_path)
@@ -293,7 +311,7 @@ class VideoProcessorThread(QThread):
             if out:
                 out.release()
 
-    def merge_audio_if_needed(self, original_video_path, video_no_audio_path):
+    def merge_audio_if_needed(self, original_video_path: str, video_no_audio_path: str) -> bool:
         """
         Uses FFmpeg to copy audio from the original video to the processed video.
         现在通过FFmpegAudioProcessor实现。
@@ -308,7 +326,7 @@ class VideoProcessorThread(QThread):
             self.logger.warning("FFmpeg not available, cannot merge audio")
             return False
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Signal the processing loop to stop gracefully.
         """
@@ -332,4 +350,5 @@ if __name__ == "__main__":
     # # processor.finished.connect(lambda f: print(f"Finished: {f}"))
     # # processor.error.connect(lambda e: print(f"Error: {e}"))
     # processor.run() # Run directly for non-threaded test
-    print("video_processor.py executed directly (for testing purposes).")
+    logger = logging.getLogger(__name__)
+    logger.info("video_processor.py executed directly (for testing purposes).")

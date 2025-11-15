@@ -31,7 +31,7 @@ echo "🔍 运行代码质量检查..."
 echo "📝 检查代码格式 (black)..."
 black --check app/ main.py --diff
 
-# 代码风格检查  
+# 代码风格检查
 echo "📋 检查代码风格 (flake8)..."
 flake8 app/ main.py --max-line-length=100 --exclude=.venv
 

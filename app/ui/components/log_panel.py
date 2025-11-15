@@ -1,18 +1,19 @@
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTextEdit,
-    QGroupBox,
-    QPushButton,
-    QCheckBox,
-    QComboBox,
-    QLabel,
-)
-from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtGui import QFont, QTextCursor
 import logging
 from datetime import datetime
+
+from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class LogPanel(QWidget):

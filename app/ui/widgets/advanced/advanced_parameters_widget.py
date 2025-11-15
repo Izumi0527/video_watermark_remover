@@ -15,21 +15,17 @@
 版本: v1.0 (重构版)
 """
 
-from typing import Dict, Any
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QTabWidget,
-    QScrollArea,
-)
+from typing import Any, Dict
+
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QScrollArea, QTabWidget, QVBoxLayout, QWidget
 
 # 导入Tab页面实现
 from .advanced_parameters_tabs import (
     DetectionParametersTab,
     InpaintingParametersTab,
-    PerformanceParametersTab,
     OutputParametersTab,
+    PerformanceParametersTab,
 )
 
 
@@ -64,7 +60,7 @@ class AdvancedParametersWidget(QWidget):
 
         # 创建标签页控件
         self.tab_widget = QTabWidget()
-        
+
         # 创建各个参数页面
         detection_tab = DetectionParametersTab.create_tab(self)
         inpainting_tab = InpaintingParametersTab.create_tab(self)
@@ -150,7 +146,6 @@ class AdvancedParametersWidget(QWidget):
             "enable_blur_preprocess": self.enable_blur_check.isChecked(),
             "enable_sharp_preprocess": self.enable_sharp_check.isChecked(),
             "enable_denoise_preprocess": self.enable_denoise_check.isChecked(),
-            
             # 修复参数
             "inpainting_method": self.inpainting_method_combo.currentText(),
             "inpainting_radius": self.inpaint_radius_spin.value(),
@@ -158,14 +153,12 @@ class AdvancedParametersWidget(QWidget):
             "enable_smooth_postprocess": self.enable_smooth_check.isChecked(),
             "enable_blend_postprocess": self.enable_blend_check.isChecked(),
             "enable_enhance_postprocess": self.enable_enhance_check.isChecked(),
-            
             # 性能参数
             "thread_count": self.thread_count_spin.value(),
             "enable_gpu": self.enable_gpu_check.isChecked(),
             "gpu_memory_limit": self.gpu_memory_spin.value(),
             "cache_size": self.cache_size_spin.value(),
             "enable_cache": self.enable_cache_check.isChecked(),
-            
             # 输出参数
             "output_format": self.output_format_combo.currentText(),
             "compression_quality": self.compression_slider.value(),
@@ -244,20 +237,17 @@ class AdvancedParametersWidget(QWidget):
             "enable_blur_preprocess": True,
             "enable_sharp_preprocess": False,
             "enable_denoise_preprocess": True,
-            
-            "inpainting_method": "自动选择", 
+            "inpainting_method": "自动选择",
             "inpainting_radius": 3,
             "inpainting_quality": 3,
             "enable_smooth_postprocess": True,
             "enable_blend_postprocess": True,
             "enable_enhance_postprocess": False,
-            
             "thread_count": 4,
             "enable_gpu": False,
             "gpu_memory_limit": 2048,
             "cache_size": 512,
             "enable_cache": True,
-            
             "output_format": "保持原格式",
             "compression_quality": 85,
             "add_suffix": True,
@@ -279,7 +269,7 @@ class AdvancedParametersWidget(QWidget):
         current_params = self.get_parameters()
         self.parameters = current_params
         self.parameters_changed.emit(current_params)
-        
+
         if self.preferences:
             try:
                 # 保存参数到偏好设置
@@ -293,7 +283,7 @@ class AdvancedParametersWidget(QWidget):
     def set_preferences_manager(self, preferences):
         """设置偏好设置管理器"""
         self.preferences = preferences
-        
+
         # 从偏好设置中加载参数
         if preferences:
             try:
@@ -302,11 +292,11 @@ class AdvancedParametersWidget(QWidget):
                     value = preferences.get_preference("advanced_params", key)
                     if value is not None:
                         saved_params[key] = value
-                
+
                 if saved_params:
                     self.set_parameters(saved_params)
                     print("[OK] 已从偏好设置加载高级参数")
-                    
+
             except Exception as e:
                 print(f"[WARNING] 加载高级参数失败: {e}")
 
@@ -314,16 +304,17 @@ class AdvancedParametersWidget(QWidget):
 # 示例用法
 if __name__ == "__main__":
     import sys
+
     from PyQt6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    
+
     widget = AdvancedParametersWidget()
     widget.show()
-    
+
     def on_params_changed(params):
         print(f"[INFO] 参数已更新: {len(params)} 个参数")
-    
+
     widget.parameters_changed.connect(on_params_changed)
-    
+
     sys.exit(app.exec())

@@ -8,7 +8,7 @@
     "updated_date": "2024-06-20",
     "license": "MIT"
   },
-  
+
   "model_specs": {
     "framework": "PyTorch",
     "framework_version": "2.1.0",
@@ -18,7 +18,7 @@
     "output_shape": [3, 512, 512],
     "supported_formats": ["pth", "onnx", "tensorrt"]
   },
-  
+
   "performance": {
     "inference_time_ms": {
       "cpu_intel_i7": 850,
@@ -35,7 +35,7 @@
       "processing_accuracy": 0.92
     }
   },
-  
+
   "training_info": {
     "dataset_size": 50000,
     "training_epochs": 150,
@@ -47,7 +47,7 @@
     ],
     "training_duration_hours": 48
   },
-  
+
   "compatibility": {
     "minimum_python": "3.8",
     "required_packages": [
@@ -64,7 +64,7 @@
       "compute_capability": "6.0+"
     }
   },
-  
+
   "usage_examples": [
     {
       "scenario": "单张图像处理",
@@ -82,7 +82,7 @@
       "description": "处理视频文件中的水印"
     }
   ],
-  
+
   "changelog": [
     {
       "version": "2.1.0",
@@ -94,7 +94,7 @@
       ]
     },
     {
-      "version": "2.0.0", 
+      "version": "2.0.0",
       "date": "2024-03-15",
       "changes": [
         "全新的UNet v2架构",

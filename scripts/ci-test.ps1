@@ -5,22 +5,22 @@
 param(
     [Parameter()]
     [switch]$SkipPerformance,
-    
+
     [Parameter()]
     [switch]$SkipCoverage,
-    
+
     [Parameter()]
     [double]$MinCoverage = 80.0,
-    
+
     [Parameter()]
     [string]$OutputFile = "",
-    
+
     [Parameter()]
     [string]$ArtifactsDir = "ci-artifacts",
-    
+
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [int]$TimeoutMinutes = 30
 )
@@ -57,7 +57,7 @@ function Record-CIResult {
         [double]$Duration = 0,
         [hashtable]$Metadata = @{}
     )
-    
+
     $CIResults.TestResults[$TestName] = @{
         Passed = $Passed
         Skipped = $Skipped
@@ -66,7 +66,7 @@ function Record-CIResult {
         Timestamp = Get-Date
         Metadata = $Metadata
     }
-    
+
     if ($Skipped) {
         $CIResults.SkippedTests++
         Write-Output "SKIP: $TestName"
@@ -80,7 +80,7 @@ function Record-CIResult {
             Write-Output "DETAILS: $Details"
         }
     }
-    
+
     $CIResults.TotalTests++
 }
 
@@ -114,15 +114,15 @@ function Collect-EnvironmentInfo {
             WorkingDirectory = (Get-Location).Path
             Timestamp = Get-Date
         }
-        
+
         # CI环境特定变量
         if ($env:CI) { $CIResults.Environment.CI = $env:CI }
         if ($env:GITHUB_ACTIONS) { $CIResults.Environment.GitHubActions = $env:GITHUB_ACTIONS }
         if ($env:BUILD_NUMBER) { $CIResults.Environment.BuildNumber = $env:BUILD_NUMBER }
         if ($env:GIT_COMMIT) { $CIResults.Environment.GitCommit = $env:GIT_COMMIT }
-        
+
         Write-Output "INFO: Environment information collected"
-        
+
     } catch {
         Add-CIWarning "Failed to collect environment info: $($_.Exception.Message)"
     }
@@ -134,7 +134,7 @@ function Initialize-ArtifactsDirectory {
         if (-not (Test-Path $ArtifactsDir)) {
             New-Item -ItemType Directory -Path $ArtifactsDir -Force | Out-Null
         }
-        
+
         # 创建子目录
         @("logs", "reports", "coverage", "performance") | ForEach-Object {
             $subDir = Join-Path $ArtifactsDir $_
@@ -142,9 +142,9 @@ function Initialize-ArtifactsDirectory {
                 New-Item -ItemType Directory -Path $subDir -Force | Out-Null
             }
         }
-        
+
         Write-Output "INFO: Artifacts directory initialized: $ArtifactsDir"
-        
+
     } catch {
         Add-CIError "Failed to initialize artifacts directory: $($_.Exception.Message)"
     }
@@ -153,27 +153,27 @@ function Initialize-ArtifactsDirectory {
 # 检查Python环境
 function Test-PythonEnvironment {
     $startTime = Get-Date
-    
+
     try {
         # 检查虚拟环境
         if (-not (Test-Path ".venv")) {
             throw "Virtual environment not found"
         }
-        
+
         # 激活虚拟环境（CI模式）
         & ".\.venv\Scripts\Activate.ps1"
-        
+
         # 设置环境变量
         $env:PYTHONIOENCODING = "utf-8"
-        $env:PYTHONUTF8 = "1" 
+        $env:PYTHONUTF8 = "1"
         $env:PYTHONPATH = (Get-Location).Path
-        
+
         # 检查Python版本
         $pythonVersion = python --version 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Python not available: $pythonVersion"
         }
-        
+
         # 检查关键依赖包
         $requiredPackages = @("pytest", "PyQt6", "opencv-python", "numpy")
         foreach ($package in $requiredPackages) {
@@ -182,13 +182,13 @@ function Test-PythonEnvironment {
                 throw "Package $package not available: $checkResult"
             }
         }
-        
+
         $CIResults.Environment.PythonVersion = $pythonVersion.Trim()
         $CIResults.Environment.VirtualEnv = $true
-        
+
         $endTime = Get-Date
         Record-CIResult "PythonEnvironment" $true "Python environment ready" $false ($endTime - $startTime).TotalSeconds
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "PythonEnvironment" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -198,26 +198,26 @@ function Test-PythonEnvironment {
 # 运行代码质量检查
 function Test-CodeQuality {
     $startTime = Get-Date
-    
+
     try {
         Write-Output "INFO: Starting code quality checks"
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test.ps1", "quality", "-Quick"
         ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/quality.log" -RedirectStandardError "$ArtifactsDir/logs/quality.err"
-        
+
         $endTime = Get-Date
-        
+
         if ($process.ExitCode -eq 0) {
             Record-CIResult "CodeQuality" $true "Code quality checks passed" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Artifacts.QualityLog = "$ArtifactsDir/logs/quality.log"
         } else {
-            $errorContent = if (Test-Path "$ArtifactsDir/logs/quality.err") { 
+            $errorContent = if (Test-Path "$ArtifactsDir/logs/quality.err") {
                 (Get-Content "$ArtifactsDir/logs/quality.err" -Raw).Trim()
             } else { "Unknown error" }
             Record-CIResult "CodeQuality" $false "Exit code: $($process.ExitCode), $errorContent" $false ($endTime - $startTime).TotalSeconds
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "CodeQuality" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -227,26 +227,26 @@ function Test-CodeQuality {
 # 运行单元测试
 function Test-UnitTests {
     $startTime = Get-Date
-    
+
     try {
         Write-Output "INFO: Starting unit tests"
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test.ps1", "unit", "-Quick"
         ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/unit.log" -RedirectStandardError "$ArtifactsDir/logs/unit.err"
-        
+
         $endTime = Get-Date
-        
+
         if ($process.ExitCode -eq 0) {
             Record-CIResult "UnitTests" $true "Unit tests passed" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Artifacts.UnitTestLog = "$ArtifactsDir/logs/unit.log"
         } else {
-            $errorContent = if (Test-Path "$ArtifactsDir/logs/unit.err") { 
+            $errorContent = if (Test-Path "$ArtifactsDir/logs/unit.err") {
                 (Get-Content "$ArtifactsDir/logs/unit.err" -Raw).Trim()
             } else { "Unknown error" }
             Record-CIResult "UnitTests" $false "Exit code: $($process.ExitCode), $errorContent" $false ($endTime - $startTime).TotalSeconds
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "UnitTests" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -256,36 +256,36 @@ function Test-UnitTests {
 # 运行集成测试
 function Test-Integration {
     $startTime = Get-Date
-    
+
     try {
         Write-Output "INFO: Starting integration tests"
-        
+
         # 端到端测试
         if (Test-Path "tests/test_end_to_end.ps1") {
             $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
                 "-File", "tests/test_end_to_end.ps1", "-Quick"
             ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/e2e.log" -RedirectStandardError "$ArtifactsDir/logs/e2e.err"
-            
+
             if ($process.ExitCode -ne 0) {
                 throw "End-to-end tests failed with exit code: $($process.ExitCode)"
             }
         }
-        
+
         # 用户偏好测试
         if (Test-Path "tests/test_user_preferences.ps1") {
             $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
                 "-File", "tests/test_user_preferences.ps1", "-Quick"
             ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/prefs.log" -RedirectStandardError "$ArtifactsDir/logs/prefs.err"
-            
+
             if ($process.ExitCode -ne 0) {
                 Add-CIWarning "User preferences tests failed with exit code: $($process.ExitCode)"
             }
         }
-        
+
         $endTime = Get-Date
         Record-CIResult "Integration" $true "Integration tests completed" $false ($endTime - $startTime).TotalSeconds
         $CIResults.Artifacts.IntegrationLogs = @("$ArtifactsDir/logs/e2e.log", "$ArtifactsDir/logs/prefs.log")
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "Integration" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -298,22 +298,22 @@ function Test-Coverage {
         Record-CIResult "Coverage" $true "Skipped by user request" $true 0
         return
     }
-    
+
     $startTime = Get-Date
-    
+
     try {
         Write-Output "INFO: Starting coverage analysis"
-        
+
         if (-not (Test-Path "scripts/test-coverage.ps1")) {
             throw "Coverage script not found"
         }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test-coverage.ps1", "-Quick", "-MinCoverage", $MinCoverage, "-FailOnLow"
         ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/coverage.log" -RedirectStandardError "$ArtifactsDir/logs/coverage.err"
-        
+
         $endTime = Get-Date
-        
+
         # 复制覆盖率报告到制品目录
         if (Test-Path "logs/htmlcov") {
             Copy-Item "logs/htmlcov" "$ArtifactsDir/coverage" -Recurse -Force
@@ -321,19 +321,19 @@ function Test-Coverage {
         if (Test-Path "logs/coverage.xml") {
             Copy-Item "logs/coverage.xml" "$ArtifactsDir/reports/" -Force
         }
-        
+
         if ($process.ExitCode -eq 0) {
             Record-CIResult "Coverage" $true "Coverage analysis passed" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Coverage.Status = "Passed"
             $CIResults.Artifacts.CoverageReport = "$ArtifactsDir/coverage/index.html"
         } else {
-            $errorContent = if (Test-Path "$ArtifactsDir/logs/coverage.err") { 
+            $errorContent = if (Test-Path "$ArtifactsDir/logs/coverage.err") {
                 (Get-Content "$ArtifactsDir/logs/coverage.err" -Raw).Trim()
             } else { "Coverage below minimum threshold" }
             Record-CIResult "Coverage" $false "Exit code: $($process.ExitCode), $errorContent" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Coverage.Status = "Failed"
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "Coverage" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -347,22 +347,22 @@ function Test-Performance {
         Record-CIResult "Performance" $true "Skipped by user request" $true 0
         return
     }
-    
+
     $startTime = Get-Date
-    
+
     try {
         Write-Output "INFO: Starting performance tests"
-        
+
         if (-not (Test-Path "scripts/test-performance.ps1")) {
             throw "Performance script not found"
         }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test-performance.ps1", "-Quick"
         ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$ArtifactsDir/logs/performance.log" -RedirectStandardError "$ArtifactsDir/logs/performance.err"
-        
+
         $endTime = Get-Date
-        
+
         # 复制性能报告到制品目录
         if (Test-Path "logs/performance_report_*.json") {
             Get-ChildItem "logs/performance_report_*.json" | Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object {
@@ -370,18 +370,18 @@ function Test-Performance {
                 $CIResults.Artifacts.PerformanceReport = "$ArtifactsDir/reports/performance.json"
             }
         }
-        
+
         if ($process.ExitCode -eq 0) {
             Record-CIResult "Performance" $true "Performance tests passed" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Performance.Status = "Passed"
         } else {
-            $errorContent = if (Test-Path "$ArtifactsDir/logs/performance.err") { 
+            $errorContent = if (Test-Path "$ArtifactsDir/logs/performance.err") {
                 (Get-Content "$ArtifactsDir/logs/performance.err" -Raw).Trim()
             } else { "Performance tests failed" }
             Record-CIResult "Performance" $false "Exit code: $($process.ExitCode), $errorContent" $false ($endTime - $startTime).TotalSeconds
             $CIResults.Performance.Status = "Failed"
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-CIResult "Performance" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -394,14 +394,14 @@ function Generate-CIReport {
     try {
         $CIResults.EndTime = Get-Date
         $CIResults.Success = ($CIResults.FailedTests -eq 0)
-        
+
         # 计算成功率
-        $successRate = if ($CIResults.TotalTests -gt 0) { 
-            [math]::Round($CIResults.PassedTests / $CIResults.TotalTests * 100, 2) 
-        } else { 
-            0 
+        $successRate = if ($CIResults.TotalTests -gt 0) {
+            [math]::Round($CIResults.PassedTests / $CIResults.TotalTests * 100, 2)
+        } else {
+            0
         }
-        
+
         # 准备最终报告
         $finalReport = @{
             Success = $CIResults.Success
@@ -422,10 +422,10 @@ function Generate-CIReport {
             Warnings = $CIResults.Warnings
             Timestamp = Get-Date
         }
-        
+
         # 输出到指定文件或标准输出
         $jsonOutput = $finalReport | ConvertTo-Json -Depth 4 -Compress
-        
+
         if ($OutputFile) {
             $jsonOutput | Out-File -FilePath $OutputFile -Encoding UTF8
             Write-Output "INFO: CI report saved to: $OutputFile"
@@ -433,25 +433,25 @@ function Generate-CIReport {
             # 输出JSON到标准输出（CI系统可以解析）
             Write-Output "CI_RESULTS_JSON:$jsonOutput"
         }
-        
+
         # 保存到制品目录
         $jsonOutput | ConvertFrom-Json | ConvertTo-Json -Depth 4 | Out-File -FilePath "$ArtifactsDir/reports/ci-results.json" -Encoding UTF8
-        
+
         # 输出摘要信息
         Write-Output ""
         Write-Output "CI_SUMMARY: Tests: $($CIResults.TotalTests), Passed: $($CIResults.PassedTests), Failed: $($CIResults.FailedTests), Skipped: $($CIResults.SkippedTests)"
         Write-Output "CI_SUCCESS_RATE: $successRate%"
         Write-Output "CI_DURATION: $([math]::Round(($CIResults.EndTime - $CIResults.StartTime).TotalSeconds, 2))s"
         Write-Output "CI_STATUS: $(if($CIResults.Success){'PASSED'}else{'FAILED'})"
-        
+
         if ($CIResults.Errors.Count -gt 0) {
             Write-Output "CI_ERRORS: $($CIResults.Errors.Count)"
         }
-        
+
         if ($CIResults.Warnings.Count -gt 0) {
             Write-Output "CI_WARNINGS: $($CIResults.Warnings.Count)"
         }
-        
+
     } catch {
         Add-CIError "Failed to generate CI report: $($_.Exception.Message)"
     }
@@ -471,42 +471,42 @@ try {
     # 初始化
     Collect-EnvironmentInfo
     Initialize-ArtifactsDirectory
-    
+
     # 检查超时
     if ((Get-Date) -gt $timeout) {
         throw "CI pipeline timeout exceeded"
     }
-    
+
     # 核心测试流程
     Test-PythonEnvironment
-    
+
     if ((Get-Date) -gt $timeout) {
         throw "CI pipeline timeout exceeded"
     }
-    
+
     Test-CodeQuality
     Test-UnitTests
     Test-Integration
-    
+
     # 可选测试（如果时间允许）
     if ((Get-Date) -lt $timeout) {
         Test-Coverage
     }
-    
+
     if ((Get-Date) -lt $timeout) {
         Test-Performance
     }
-    
+
 } catch {
     Add-CIError "CI pipeline error: $($_.Exception.Message)"
 } finally {
     # 生成最终报告
     Generate-CIReport
-    
+
     Write-Output ""
     Write-Output "INFO: CI test pipeline completed"
     Write-Output "INFO: Artifacts directory: $ArtifactsDir"
-    
+
     # 返回适当的退出码
     if ($CIResults.Success) {
         Write-Output "INFO: All CI tests passed"

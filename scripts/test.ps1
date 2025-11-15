@@ -6,26 +6,26 @@ param(
     [Parameter(Position=0)]
     [ValidateSet("unit", "integration", "quality", "audio", "e2e", "preferences", "all", "help")]
     [string]$Type = "all",
-    
+
     [Parameter(Position=1)]
     [ValidateSet("mvp", "ai", "ui", "batch", "video", "audio", "preferences", "all")]
     [string]$Module = "all",
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [switch]$Parallel,
-    
+
     [Parameter()]
     [switch]$Report,
-    
+
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Coverage,
-    
+
     [Parameter()]
     [switch]$Performance
 
@@ -35,7 +35,7 @@ $ErrorActionPreference = "Stop"
 # 颜色常量
 $Colors = @{
     Header = "Green"
-    Success = "Green"  
+    Success = "Green"
     Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
@@ -121,17 +121,17 @@ function Record-TestResult {
         [bool]$Passed,
         [string]$Details = ""
     )
-    
+
     if (-not $TestResults[$Category]) {
         $TestResults[$Category] = @{}
     }
-    
+
     $TestResults[$Category][$TestName] = @{
         Passed = $Passed
         Details = $Details
         Timestamp = Get-Date
     }
-    
+
     if ($Passed) {
         $TestResults.TotalPassed++
     } else {
@@ -143,7 +143,7 @@ function Record-TestResult {
 function Show-TestSummary {
     $endTime = Get-Date
     $duration = $endTime - $TestResults.StartTime
-    
+
     Write-Host ""
     Write-Host "📊 测试执行摘要" -ForegroundColor $Colors.Summary
     Write-Host "=" * 50 -ForegroundColor $Colors.Info
@@ -151,7 +151,7 @@ function Show-TestSummary {
     Write-Host "✅ 通过: $($TestResults.TotalPassed)" -ForegroundColor $Colors.Success
     Write-Host "❌ 失败: $($TestResults.TotalFailed)" -ForegroundColor $Colors.Error
     Write-Host "📋 总计: $($TestResults.TotalPassed + $TestResults.TotalFailed)" -ForegroundColor $Colors.Info
-    
+
     if ($TestResults.TotalFailed -eq 0) {
         Write-Host ""
         Write-Host "🎉 所有测试通过！" -ForegroundColor $Colors.Success
@@ -199,27 +199,27 @@ if (-not (Test-Path "logs")) {
 #region 代码质量检查函数
 function Run-QualityChecks {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "quality" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "🔍 代码质量检查..." -ForegroundColor $Colors.Progress
-    
+
     $targetPaths = @()
     if (Test-Path "app") { $targetPaths += "app" }
     if (Test-Path "main.py") { $targetPaths += "main.py" }
-    
+
     if ($targetPaths.Count -eq 0) {
         Write-Host "⚠️ 未找到代码文件，跳过质量检查" -ForegroundColor $Colors.Warning
         return
     }
-    
+
     # 代码格式检查
     Write-Host "📝 检查代码格式 (black)..." -ForegroundColor $Colors.Info
     try {
         $blackArgs = @("--check") + $targetPaths + @("--diff")
         if ($Quick) { $blackArgs += "--fast" }
-        
+
         black @blackArgs
         Write-Host "✅ 代码格式检查通过" -ForegroundColor $Colors.Success
         Record-TestResult "QualityChecks" "CodeFormat" $true "Black formatting check passed"
@@ -228,13 +228,13 @@ function Run-QualityChecks {
         Write-Host "建议运行: black $($targetPaths -join ' ')" -ForegroundColor $Colors.Warning
         Record-TestResult "QualityChecks" "CodeFormat" $false "Black formatting issues found"
     }
-    
-    # 代码风格检查  
+
+    # 代码风格检查
     Write-Host "📋 检查代码风格 (flake8)..." -ForegroundColor $Colors.Info
     try {
         $flakeArgs = $targetPaths + @("--max-line-length=100", "--exclude=.venv")
         if ($Quick) { $flakeArgs += "--select=E9,F63,F7,F82" }
-        
+
         flake8 @flakeArgs
         Write-Host "✅ 代码风格检查通过" -ForegroundColor $Colors.Success
         Record-TestResult "QualityChecks" "CodeStyle" $true "Flake8 style check passed"
@@ -243,7 +243,7 @@ function Run-QualityChecks {
         Write-Host "请修复 flake8 报告的问题" -ForegroundColor $Colors.Warning
         Record-TestResult "QualityChecks" "CodeStyle" $false "Flake8 style issues found"
     }
-    
+
     # 类型检查
     if (-not $Quick) {
         Write-Host "🔍 检查类型注解 (mypy)..." -ForegroundColor $Colors.Info
@@ -264,20 +264,20 @@ function Run-QualityChecks {
 #region 单元测试函数
 function Run-UnitTests {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "unit" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "🧪 单元测试..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "tests")) {
         Write-Host "⚠️ tests 目录不存在，跳过单元测试" -ForegroundColor $Colors.Warning
         return
     }
-    
+
     try {
         $pytestArgs = @("tests", "-v", "--tb=short")
-        
+
         # 根据模块过滤测试
         if ($SelectedModule -ne "all") {
             $testPattern = switch ($SelectedModule) {
@@ -290,10 +290,10 @@ function Run-UnitTests {
             }
             $pytestArgs += "-k", $testPattern
         }
-        
+
         if ($Quick) { $pytestArgs += "-x" } # Stop on first failure
         if ($Verbose) { $pytestArgs += "-s" } # Don't capture output
-        
+
         pytest @pytestArgs
         Write-Host "✅ 单元测试通过" -ForegroundColor $Colors.Success
         Record-TestResult "UnitTests" "Pytest" $true "Pytest unit tests passed"
@@ -307,50 +307,50 @@ function Run-UnitTests {
 #region 集成测试函数
 function Run-IntegrationTests {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "integration" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "🎯 集成测试..." -ForegroundColor $Colors.Progress
-    
+
     $integrationTests = @()
-    
+
     # 根据选择的模块确定要运行的测试
     if ($SelectedModule -eq "all" -or $SelectedModule -eq "mvp") {
         if (Test-Path "tests/test_mvp.py") {
             $integrationTests += @{Name="MVP功能测试"; Path="tests/test_mvp.py"; Category="MVP"}
         }
     }
-    
+
     if ($SelectedModule -eq "all" -or $SelectedModule -eq "ai") {
         if (Test-Path "tests/test_phase2.py") {
             $integrationTests += @{Name="AI功能测试"; Path="tests/test_phase2.py"; Category="AI"}
         }
     }
-    
+
     if ($SelectedModule -eq "all" -or $SelectedModule -eq "ui") {
         if (Test-Path "tests/test_phase3.py") {
             $integrationTests += @{Name="UI功能测试"; Path="tests/test_phase3.py"; Category="UI"}
         }
     }
-    
+
     if ($SelectedModule -eq "all" -or $SelectedModule -eq "batch") {
         if (Test-Path "tests/test_batch_processing.py") {
             $integrationTests += @{Name="批处理测试"; Path="tests/test_batch_processing.py"; Category="Batch"}
         }
     }
-    
+
     if ($SelectedModule -eq "all" -or $SelectedModule -eq "video") {
         if (Test-Path "tests/test_video_processor.py") {
             $integrationTests += @{Name="视频处理测试"; Path="tests/test_video_processor.py"; Category="Video"}
         }
     }
-    
+
     if ($integrationTests.Count -eq 0) {
         Write-Host "⚠️ 未找到匹配的集成测试文件" -ForegroundColor $Colors.Warning
         return
     }
-    
+
     foreach ($test in $integrationTests) {
         Write-Host "🧪 运行 $($test.Name)..." -ForegroundColor $Colors.Detail
         try {
@@ -367,7 +367,7 @@ function Run-IntegrationTests {
             Write-Host "❌ $($test.Name) 执行异常: $($_.Exception.Message)" -ForegroundColor $Colors.Error
             Record-TestResult "IntegrationTests" $test.Category $false "$($test.Name) execution error: $($_.Exception.Message)"
         }
-        
+
         if ($Quick -and $LASTEXITCODE -ne 0) {
             Write-Host "⚠️ 快速模式：遇到失败后停止" -ForegroundColor $Colors.Warning
             break
@@ -379,27 +379,27 @@ function Run-IntegrationTests {
 #region 音频处理测试函数
 function Run-AudioTests {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "audio" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "🎵 音频处理测试..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "tests/test_audio_processing.ps1")) {
         Write-Host "⚠️ 音频处理测试脚本不存在" -ForegroundColor $Colors.Warning
         Record-TestResult "AudioTests" "AudioProcessing" $false "音频处理测试脚本不存在"
         return
     }
-    
+
     try {
         $audioArgs = @()
         if ($Quick) { $audioArgs += "-Quick" }
         if ($Verbose) { $audioArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "tests/test_audio_processing.ps1"
         ) + $audioArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "✅ 音频处理测试通过" -ForegroundColor $Colors.Success
             Record-TestResult "AudioTests" "AudioProcessing" $true "音频处理测试通过"
@@ -417,27 +417,27 @@ function Run-AudioTests {
 #region 端到端测试函数
 function Run-E2ETests {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "e2e" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "🎬 端到端工作流测试..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "tests/test_end_to_end.ps1")) {
         Write-Host "⚠️ 端到端测试脚本不存在" -ForegroundColor $Colors.Warning
         Record-TestResult "E2ETests" "EndToEnd" $false "端到端测试脚本不存在"
         return
     }
-    
+
     try {
         $e2eArgs = @()
         if ($Quick) { $e2eArgs += "-Quick" }
         if ($Verbose) { $e2eArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "tests/test_end_to_end.ps1"
         ) + $e2eArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "✅ 端到端测试通过" -ForegroundColor $Colors.Success
             Record-TestResult "E2ETests" "EndToEnd" $true "端到端测试通过"
@@ -455,27 +455,27 @@ function Run-E2ETests {
 #region 用户偏好设置测试函数
 function Run-PreferencesTests {
     param([string]$SelectedModule = "all")
-    
+
     if ($Type -ne "preferences" -and $Type -ne "all") { return }
-    
+
     Write-Host ""
     Write-Host "👤 用户偏好设置测试..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "tests/test_user_preferences.ps1")) {
         Write-Host "⚠️ 用户偏好设置测试脚本不存在" -ForegroundColor $Colors.Warning
         Record-TestResult "PreferencesTests" "UserPreferences" $false "用户偏好设置测试脚本不存在"
         return
     }
-    
+
     try {
         $prefsArgs = @()
         if ($Quick) { $prefsArgs += "-Quick" }
         if ($Verbose) { $prefsArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "tests/test_user_preferences.ps1"
         ) + $prefsArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "✅ 用户偏好设置测试通过" -ForegroundColor $Colors.Success
             Record-TestResult "PreferencesTests" "UserPreferences" $true "用户偏好设置测试通过"
@@ -493,25 +493,25 @@ function Run-PreferencesTests {
 #region 代码覆盖率测试函数
 function Run-CoverageTests {
     if (-not $Coverage) { return }
-    
+
     Write-Host ""
     Write-Host "📊 代码覆盖率分析..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "scripts/test-coverage.ps1")) {
         Write-Host "⚠️ 代码覆盖率脚本不存在，跳过覆盖率分析" -ForegroundColor $Colors.Warning
-        Record-TestResult "CoverageResults" "Coverage" $false "代码覆盖率脚本不存在" 
+        Record-TestResult "CoverageResults" "Coverage" $false "代码覆盖率脚本不存在"
         return
     }
-    
+
     try {
         $coverageArgs = @()
         if ($Quick) { $coverageArgs += "-Quick" }
         if ($Verbose) { $coverageArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test-coverage.ps1"
         ) + $coverageArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "✅ 代码覆盖率分析完成" -ForegroundColor $Colors.Success
             Record-TestResult "CoverageResults" "Coverage" $true "代码覆盖率分析完成"
@@ -529,25 +529,25 @@ function Run-CoverageTests {
 #region 性能基准测试函数
 function Run-PerformanceTests {
     if (-not $Performance) { return }
-    
+
     Write-Host ""
     Write-Host "🚀 性能基准测试..." -ForegroundColor $Colors.Progress
-    
+
     if (-not (Test-Path "scripts/test-performance.ps1")) {
         Write-Host "⚠️ 性能测试脚本不存在，跳过性能测试" -ForegroundColor $Colors.Warning
         Record-TestResult "PerformanceTests" "Performance" $false "性能测试脚本不存在"
         return
     }
-    
+
     try {
         $perfArgs = @()
         if ($Quick) { $perfArgs += "-Quick" }
         if ($Verbose) { $perfArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test-performance.ps1"
         ) + $perfArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "✅ 性能基准测试完成" -ForegroundColor $Colors.Success
             Record-TestResult "PerformanceTests" "Performance" $true "性能基准测试完成"
@@ -566,22 +566,22 @@ function Run-PerformanceTests {
 try {
     # 根据参数执行相应的测试
     Run-QualityChecks -SelectedModule $Module
-    Run-UnitTests -SelectedModule $Module  
+    Run-UnitTests -SelectedModule $Module
     Run-IntegrationTests -SelectedModule $Module
     Run-AudioTests -SelectedModule $Module
     Run-E2ETests -SelectedModule $Module
     Run-PreferencesTests -SelectedModule $Module
-    
+
     # 运行可选的额外测试
     Run-CoverageTests
     Run-PerformanceTests
-    
+
     # 显示测试摘要
     Show-TestSummary
-    
+
     # 保存测试报告
     Save-TestReport
-    
+
 } catch {
     Write-Host "❌ 测试执行过程中发生严重错误: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     exit 1

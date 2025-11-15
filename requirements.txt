@@ -1,9 +1,8 @@
-# 智能视频水印去除工具 - 依赖文件
-# Phase 3 产品化完善版本依赖
+# 智能视频水印去除工具 - 生产环境依赖
+# 仅包含运行应用所必需的依赖
 
 # ===== 核心GUI框架 =====
 PyQt6>=6.6.0
-PyQt6-Qt6>=6.6.0
 
 # ===== 计算机视觉和图像处理 =====
 opencv-python>=4.8.0
@@ -11,65 +10,30 @@ numpy>=1.25.0
 Pillow>=10.0.0
 
 # ===== 深度学习框架 (可选，用于AI模型) =====
-torch>=2.1.0
-torchvision>=0.16.0
-torchaudio>=2.1.0
+# 注意：深度学习框架体积较大，如果不使用深度学习功能可以不安装
+# torch>=2.1.0
+# torchvision>=0.16.0
+# torchaudio>=2.1.0
 
 # ===== ONNX运行时 (可选，用于模型推理) =====
-onnx>=1.15.0
-onnxruntime>=1.16.0  # CPU版本
+# onnx>=1.15.0
+# onnxruntime>=1.16.0  # CPU版本
 # onnxruntime-gpu>=1.16.0  # GPU版本，需要CUDA支持
 
-# ===== 音频视频处理 =====
-# 注意：FFmpeg需要单独安装系统级别的ffmpeg可执行文件
-# Windows: 从 https://ffmpeg.org/download.html 下载
-# Ubuntu/Debian: sudo apt install ffmpeg
-# macOS: brew install ffmpeg
-
-# ===== 用户偏好设置和配置管理 =====
-# 使用Python标准库：json, configparser, pathlib, tempfile
-
-# ===== 现代化界面样式 =====
-# 内置样式管理器，无需额外依赖
-
-# ===== 批量处理和多线程 =====
-# 使用PyQt6内置的QThread和信号槽机制
-
-# ===== 高级参数控制 =====
-# 使用PyQt6的UI组件：QSlider, QSpinBox, QComboBox等
-
-# ===== 开发和测试工具 =====
-pytest>=7.0.0  # 单元测试框架
-pytest-qt>=4.2.0  # PyQt测试支持
-
-# ===== 代码质量工具 =====
-black>=23.0.0  # 代码格式化
-flake8>=6.0.0  # 代码检查
-mypy>=1.0.0  # 类型检查
-
-# ===== 打包和分发 (可选) =====
-PyInstaller>=5.0.0  # 打包为可执行文件
-cx-Freeze>=6.14.0  # 另一个打包选项
-
 # ===== 系统依赖说明 =====
-# 1. FFmpeg: 需要系统级安装
-#    - Windows: 下载并添加到PATH
-#    - Linux: sudo apt install ffmpeg
+# 1. FFmpeg: 需要系统级安装（用于音频处理）
+#    - Windows: 从 https://ffmpeg.org/download.html 下载并添加到PATH
+#    - Ubuntu/Debian: sudo apt install ffmpeg
 #    - macOS: brew install ffmpeg
 #
-# 2. CUDA (可选，用于GPU加速):
-#    - 下载并安装NVIDIA CUDA Toolkit
-#    - 确保版本与PyTorch兼容
+# 2. 深度学习框架安装（可选）:
+#    GPU版本 (需要NVIDIA GPU和CUDA):
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#      pip install onnxruntime-gpu
 #
-# 3. PyQt6特定安装命令:
-#    pip install PyQt6 PyQt6-tools PyQt6-Qt6
+#    CPU版本 (推荐用于大多数用户):
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+#      pip install onnxruntime
 #
-# 4. 完整安装命令示例:
+# 3. 安装命令:
 #    pip install -r requirements.txt
-#
-# 5. GPU版本安装 (如果有NVIDIA GPU):
-#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-#    pip install onnxruntime-gpu
-#
-# 6. CPU版本安装 (推荐用于大多数用户):
-#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu

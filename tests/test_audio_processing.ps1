@@ -5,10 +5,10 @@
 param(
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [string]$TestDataPath = "tests/test_data"
 )
@@ -20,7 +20,7 @@ $ErrorActionPreference = "Stop"
 $Colors = @{
     Header = "Green"
     Success = "Green"
-    Warning = "Yellow" 
+    Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
     Detail = "White"
@@ -44,7 +44,7 @@ function Record-TestResult {
         [string]$Details = "",
         [bool]$Skipped = $false
     )
-    
+
     $result = @{
         TestName = $TestName
         Passed = $Passed
@@ -52,9 +52,9 @@ function Record-TestResult {
         Details = $Details
         Timestamp = Get-Date
     }
-    
+
     $TestResults.Details += $result
-    
+
     if ($Skipped) {
         $TestResults.Skipped++
         Write-Host "⏭️ $TestName - 跳过" -ForegroundColor $Colors.Warning
@@ -74,7 +74,7 @@ function Record-TestResult {
 function Show-TestSummary {
     $endTime = Get-Date
     $duration = $endTime - $TestResults.StartTime
-    
+
     Write-Host ""
     Write-Host "🎵 音频处理测试摘要" -ForegroundColor $Colors.Header
     Write-Host "=" * 50 -ForegroundColor $Colors.Info
@@ -83,7 +83,7 @@ function Show-TestSummary {
     Write-Host "❌ 失败: $($TestResults.Failed)" -ForegroundColor $Colors.Error
     Write-Host "⏭️ 跳过: $($TestResults.Skipped)" -ForegroundColor $Colors.Warning
     Write-Host "📋 总计: $(($TestResults.Passed + $TestResults.Failed + $TestResults.Skipped))" -ForegroundColor $Colors.Info
-    
+
     if ($TestResults.Failed -eq 0) {
         Write-Host ""
         Write-Host "🎉 所有音频处理测试通过！" -ForegroundColor $Colors.Success
@@ -154,10 +154,10 @@ except Exception as e:
 
 print('所有音频处理模块导入成功')
 "@
-    
+
     Write-Host $importTest -ForegroundColor $Colors.Detail
     Record-TestResult "音频处理模块导入" $true "所有模块导入成功"
-    
+
 } catch {
     Record-TestResult "音频处理模块导入" $false "模块导入失败: $($_.Exception.Message)"
 }
@@ -182,22 +182,22 @@ detector = FFmpegDetector()
 if detector.is_available():
     print('✅ FFmpeg可用')
     print(f'FFmpeg路径: {detector.get_ffmpeg_path()}')
-    
+
     # 检查FFmpeg版本
     version = detector.get_version()
     if version:
         print(f'FFmpeg版本: {version}')
-    
+
     print('FFmpeg检测测试通过')
 else:
     print('⚠️ FFmpeg不可用，请检查安装')
     print('FFmpeg检测测试失败')
     sys.exit(1)
 "@
-    
+
     Write-Host $ffmpegTest -ForegroundColor $Colors.Detail
     Record-TestResult "FFmpeg检测" $true "FFmpeg检测和版本获取成功"
-    
+
 } catch {
     Record-TestResult "FFmpeg检测" $false "FFmpeg检测失败: $($_.Exception.Message)"
 }
@@ -207,9 +207,9 @@ else:
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🎧 创建测试音频文件..." -ForegroundColor $Colors.Progress
-    
+
     $testAudioPath = "$TestDataPath/test_audio.wav"
-    
+
     try {
         $createAudioTest = python -c @"
 import numpy as np
@@ -237,10 +237,10 @@ with wave.open('$testAudioPath', 'wb') as wav_file:
 print('✅ 测试音频文件创建成功')
 print(f'音频文件路径: $testAudioPath')
 "@
-        
+
         Write-Host $createAudioTest -ForegroundColor $Colors.Detail
         Record-TestResult "创建测试音频文件" $true "测试音频文件创建成功"
-        
+
     } catch {
         Record-TestResult "创建测试音频文件" $false "测试音频文件创建失败: $($_.Exception.Message)"
     }
@@ -251,7 +251,7 @@ print(f'音频文件路径: $testAudioPath')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🎤 音频提取器功能测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $extractorTest = python -c @"
 import sys
@@ -291,14 +291,14 @@ except Exception as e:
 
 print('音频提取器功能测试通过')
 "@
-        
+
         if ($LASTEXITCODE -eq 2) {
             Record-TestResult "音频提取器功能" $false "FFmpeg不可用，无法测试" $true
         } else {
             Write-Host $extractorTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频提取器功能" $true "音频提取器初始化和参数验证成功"
         }
-        
+
     } catch {
         Record-TestResult "音频提取器功能" $false "音频提取器测试失败: $($_.Exception.Message)"
     }
@@ -309,7 +309,7 @@ print('音频提取器功能测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🔗 音频合并器功能测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $mergerTest = python -c @"
 import sys
@@ -349,14 +349,14 @@ except Exception as e:
 
 print('音频合并器功能测试通过')
 "@
-        
+
         if ($LASTEXITCODE -eq 2) {
             Record-TestResult "音频合并器功能" $false "FFmpeg不可用，无法测试" $true
         } else {
             Write-Host $mergerTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频合并器功能" $true "音频合并器初始化和参数验证成功"
         }
-        
+
     } catch {
         Record-TestResult "音频合并器功能" $false "音频合并器测试失败: $($_.Exception.Message)"
     }
@@ -367,7 +367,7 @@ print('音频合并器功能测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🎼 音频处理集成测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $integrationTest = python -c @"
 import sys
@@ -402,14 +402,14 @@ print('✅ 临时文件清理功能正常')
 
 print('音频处理集成测试通过')
 "@
-        
+
         if ($LASTEXITCODE -eq 2) {
             Record-TestResult "音频处理集成" $false "FFmpeg不可用，无法测试" $true
         } else {
             Write-Host $integrationTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频处理集成" $true "音频处理组件集成测试成功"
         }
-        
+
     } catch {
         Record-TestResult "音频处理集成" $false "音频处理集成测试失败: $($_.Exception.Message)"
     }
@@ -454,10 +454,10 @@ except Exception as e:
 
 print('错误处理测试通过')
 "@
-    
+
     Write-Host $errorTest -ForegroundColor $Colors.Detail
     Record-TestResult "错误处理" $true "音频处理错误处理机制正常"
-    
+
 } catch {
     Record-TestResult "错误处理" $false "错误处理测试失败: $($_.Exception.Message)"
 }

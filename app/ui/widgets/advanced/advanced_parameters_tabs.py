@@ -4,7 +4,7 @@
 
 包含各个参数控制Tab的具体实现：
 1. 水印检测参数Tab
-2. 图像修复参数Tab  
+2. 图像修复参数Tab
 3. 性能参数Tab
 4. 输出参数Tab
 
@@ -13,26 +13,26 @@
 版本: v1.0 (重构版)
 """
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QLabel,
-    QSlider,
-    QSpinBox,
-    QComboBox,
-    QCheckBox,
-    QPushButton,
-    QFormLayout,
-)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class DetectionParametersTab:
     """水印检测参数Tab页面"""
-    
+
     @staticmethod
     def create_tab(parent_widget):
         """创建检测参数标签页"""
@@ -98,7 +98,7 @@ class DetectionParametersTab:
 
 class InpaintingParametersTab:
     """图像修复参数Tab页面"""
-    
+
     @staticmethod
     def create_tab(parent_widget):
         """创建修复参数标签页"""
@@ -163,7 +163,7 @@ class InpaintingParametersTab:
 
 class PerformanceParametersTab:
     """性能参数Tab页面"""
-    
+
     @staticmethod
     def create_tab(parent_widget):
         """创建性能参数标签页"""
@@ -223,8 +223,8 @@ class PerformanceParametersTab:
 
 class OutputParametersTab:
     """输出参数Tab页面"""
-    
-    @staticmethod  
+
+    @staticmethod
     def create_tab(parent_widget):
         """创建输出参数标签页"""
         tab = QWidget()
@@ -235,9 +235,7 @@ class OutputParametersTab:
         format_layout = QFormLayout(format_group)
 
         parent_widget.output_format_combo = QComboBox()
-        parent_widget.output_format_combo.addItems(
-            ["保持原格式", "JPG", "PNG", "BMP", "TIFF"]
-        )
+        parent_widget.output_format_combo.addItems(["保持原格式", "JPG", "PNG", "BMP", "TIFF"])
         format_layout.addRow("输出格式:", parent_widget.output_format_combo)
 
         layout.addWidget(format_group)

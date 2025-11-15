@@ -4,66 +4,66 @@
 # 继承生产环境依赖
 -r requirements.txt
 
-# ===== 开发工具 =====
-# 代码格式化和检查
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
-mypy>=1.0.0
-pylint>=2.17.0
+# ===== 代码格式化和风格检查 =====
+black>=23.0.0              # 代码自动格式化
+isort>=5.12.0              # import语句排序
+flake8>=6.0.0              # PEP 8风格检查
+mypy>=1.0.0                # 静态类型检查
+pylint>=2.17.0             # 代码质量检查
 
-# 测试框架
-pytest>=7.0.0
-pytest-qt>=4.2.0
-pytest-cov>=4.0.0
-pytest-mock>=3.10.0
+# ===== 测试框架 =====
+pytest>=7.0.0              # 单元测试框架
+pytest-qt>=4.2.0           # PyQt6测试支持
+pytest-cov>=4.0.0          # 代码覆盖率
+pytest-mock>=3.10.0        # Mock支持
 
-# 文档生成
-sphinx>=6.0.0
-sphinx-rtd-theme>=1.2.0
+# ===== 文档生成 =====
+sphinx>=6.0.0              # 文档生成工具
+sphinx-rtd-theme>=1.2.0    # ReadTheDocs主题
 
-# 调试工具
-ipdb>=0.13.0
-pdbpp>=0.10.3
+# ===== 调试工具 =====
+ipdb>=0.13.0               # 交互式调试器（IPython增强调试器，支持彩色输出和自动补全）
 
-# 性能分析
-memory-profiler>=0.60.0
-line-profiler>=4.0.0
+# ===== 性能分析 =====
+memory-profiler>=0.60.0    # 内存分析
+line-profiler>=4.0.0       # 行级性能分析
 
-# 代码安全检查
-bandit>=1.7.0
-safety>=2.3.0
+# ===== 代码安全检查 =====
+bandit>=1.7.0              # 安全漏洞扫描
+safety>=2.3.0              # 依赖安全检查
 
-# Git钩子
-pre-commit>=3.0.0
+# ===== Git钩子 =====
+pre-commit>=3.0.0          # Git pre-commit hooks
 
-# 依赖管理
-pip-tools>=6.12.0
-pipdeptree>=2.7.0
+# ===== 依赖管理 =====
+pip-tools>=6.12.0          # 依赖锁定和编译
+pipdeptree>=2.7.0          # 依赖树可视化
 
-# 打包工具
-build>=0.10.0
-twine>=4.0.0
-wheel>=0.40.0
+# ===== 打包工具 =====
+build>=0.10.0              # PEP 517构建工具
+twine>=4.0.0               # PyPI上传工具
+wheel>=0.40.0              # Wheel打包格式
+PyInstaller>=5.0.0         # 打包为可执行文件
 
-# IDE支持
-python-lsp-server>=1.7.0
-pylsp-mypy>=0.6.0
+# ===== IDE支持 =====
+python-lsp-server>=1.7.0   # Python语言服务器
+pylsp-mypy>=0.6.0          # MyPy集成
 
 # ===== 开发环境设置 =====
 # 1. 安装开发依赖：
 #    pip install -r requirements-dev.txt
+#    或使用 uv: uv pip install -r requirements-dev.txt
 #
 # 2. 设置pre-commit钩子：
 #    pre-commit install
 #
-# 3. 运行代码检查：
-#    black . --check
-#    flake8 .
-#    mypy app/
+# 3. 运行代码质量检查：
+#    .\scripts\check-quality.ps1
+#    或手动运行: black . --check && flake8 . && mypy app/
 #
 # 4. 运行测试：
-#    pytest tests/ -v --cov=app
+#    .\scripts\test.ps1
+#    或手动运行: pytest tests/ -v --cov=app
 #
 # 5. 生成文档：
-#    cd docs && make html
+#    cd docs && make html (需要先安装sphinx)

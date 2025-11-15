@@ -1,14 +1,15 @@
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QGroupBox,
-    QProgressBar,
-    QTabWidget,
-)
-from PyQt6.QtCore import pyqtSignal
 import logging
+
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QProgressBar,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class ControlPanel(QWidget):

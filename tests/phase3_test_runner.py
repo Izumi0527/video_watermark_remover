@@ -19,8 +19,8 @@ python tests/phase3_test_runner.py
 版本: v2.0 (重构版)
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -30,12 +30,12 @@ sys.path.insert(0, str(project_root))
 # 导入测试模块
 from phase3_core_tests import test_component_imports, test_file_structure, test_integration
 from phase3_feature_tests import (
-    test_user_preferences,
-    test_modern_style_manager, 
+    test_advanced_parameters,
     test_ffmpeg_audio_processor,
-    test_advanced_parameters
+    test_modern_style_manager,
+    test_user_preferences,
 )
-from phase3_test_utilities import generate_test_report, run_test_suite, print_test_summary
+from phase3_test_utilities import generate_test_report, print_test_summary, run_test_suite
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
     print("智能视频水印去除工具 - 第三阶段功能测试（重构版）")
     print("=" * 60)
     print(f"项目根目录: {project_root}")
-    
+
     # 定义所有测试函数
     all_test_functions = {
         "组件导入": test_component_imports,
@@ -52,48 +52,48 @@ def main():
         "现代化样式管理器": test_modern_style_manager,
         "FFmpeg音频处理器": test_ffmpeg_audio_processor,
         "高级参数功能": test_advanced_parameters,
-        "组件集成": test_integration
+        "组件集成": test_integration,
     }
-    
+
     # 运行核心测试套件
     core_tests = {
         "组件导入": test_component_imports,
         "文件结构": test_file_structure,
-        "组件集成": test_integration
+        "组件集成": test_integration,
     }
     core_passed, core_total, core_results = run_test_suite(core_tests, "核心组件测试套件")
     print_test_summary(core_passed, core_total, core_results, "核心组件")
-    
+
     # 运行功能测试套件
     feature_tests = {
         "用户偏好设置": test_user_preferences,
         "现代化样式管理器": test_modern_style_manager,
         "FFmpeg音频处理器": test_ffmpeg_audio_processor,
-        "高级参数功能": test_advanced_parameters
+        "高级参数功能": test_advanced_parameters,
     }
     feature_passed, feature_total, feature_results = run_test_suite(feature_tests, "功能特性测试套件")
     print_test_summary(feature_passed, feature_total, feature_results, "功能特性")
-    
+
     # 合并所有结果
     all_results = {**core_results, **feature_results}
     total_passed = core_passed + feature_passed
     total_tests = core_total + feature_total
-    
+
     # 生成综合报告
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"[统计] 第三阶段测试总结果: {total_passed}/{total_tests} 通过")
     print(f"[统计] 测试通过率: {(total_passed/total_tests)*100:.1f}%")
-    
+
     # 显示失败的测试
     failed_tests = [name for name, result in all_results.items() if not result]
     if failed_tests:
         print(f"[警告] 失败的测试 ({len(failed_tests)}个):")
         for test_name in failed_tests:
             print(f"  - {test_name}")
-    
+
     # 生成详细报告
     generate_test_report(all_results)
-    
+
     # 返回结果
     if total_passed == total_tests:
         print("\n[SUCCESS] 所有测试通过！第三阶段功能实现完成。")

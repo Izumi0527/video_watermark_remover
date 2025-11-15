@@ -13,22 +13,24 @@ AI处理协调器 - 主模块
 版本: v1.0 (重构版)
 """
 
-import torch
-import cv2
-import numpy as np
 import logging
 import time
 from typing import Optional, Tuple
 
+import cv2
+import numpy as np
+import torch
+
+from .image_inpainter import ImageInpainter
+
 # 导入拆分出的检测和修复模块
 from .watermark_detector import WatermarkDetector
-from .image_inpainter import ImageInpainter
 
 
 class AIHandler:
     """
     AI处理协调器
-    
+
     统一管理水印检测和图像修复功能，提供完整的处理流程
     """
 
@@ -37,11 +39,11 @@ class AIHandler:
         self.ai_params = ai_params  # 选定的模型、置信度阈值等参数
 
         self.device = None
-        
+
         # 初始化检测器和修复器
         self.watermark_detector = WatermarkDetector(config)
         self.image_inpainter = ImageInpainter(config)
-        
+
         self.logger = logging.getLogger(__name__)
 
         self._setup_device()
@@ -68,7 +70,7 @@ class AIHandler:
         """
         加载Phase 2轻量级模型
         使用基于OpenCV的传统图像处理方法
-        
+
         Returns:
             bool: 加载是否成功
         """
@@ -77,7 +79,7 @@ class AIHandler:
         # 加载检测器和修复器的模型
         detector_loaded = self.watermark_detector.load_model()
         inpainter_loaded = self.image_inpainter.load_model()
-        
+
         if detector_loaded and inpainter_loaded:
             self.logger.info("All AI models loaded successfully:")
             self.logger.info("  - Watermark Detection: OpenCV traditional methods")
@@ -87,22 +89,19 @@ class AIHandler:
             self.logger.error("Failed to load some AI models")
             return False
 
-
-
-
     def process_frame(
         self, frame: np.ndarray, watermark_selection_params: dict
     ) -> Tuple[np.ndarray, dict]:
         """
         完整的单帧处理流程：检测和修复水印
-        
+
         Args:
             frame: 输入帧，numpy数组(BGR格式)
             watermark_selection_params: 水印检测/选择参数
                 - 'auto_detect': bool, 是否使用自动检测
                 - 'user_mask': np.ndarray, 用户提供的掩码(可选)
                 - 'detection_sensitivity': float, 检测敏感度(0.1-1.0)
-                
+
         Returns:
             Tuple of (processed_frame, processing_info)
         """
@@ -212,18 +211,18 @@ class AIHandler:
     def detect_watermark(self, frame: np.ndarray, sensitivity: float = 0.5) -> Optional[np.ndarray]:
         """
         直接调用水印检测功能
-        
+
         Args:
             frame: 输入图像，numpy数组(BGR格式)
             sensitivity: 检测敏感度 (0.1-1.0)
-            
+
         Returns:
             二值掩码，255=水印区域，0=干净区域
         """
-        if not hasattr(self, 'watermark_detector') or self.watermark_detector is None:
+        if not hasattr(self, "watermark_detector") or self.watermark_detector is None:
             self.logger.error("WatermarkDetector not initialized")
             return None
-            
+
         try:
             self.logger.debug("Direct watermark detection called")
             return self.watermark_detector.detect_watermark(frame)
@@ -234,18 +233,18 @@ class AIHandler:
     def inpaint_frame(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
         直接调用图像修复功能
-        
+
         Args:
-            frame: 输入图像，numpy数组(BGR格式)  
+            frame: 输入图像，numpy数组(BGR格式)
             mask: 二值掩码，255=需要修复的区域，0=保持原始
-            
+
         Returns:
             修复后的图像
         """
-        if not hasattr(self, 'image_inpainter') or self.image_inpainter is None:
+        if not hasattr(self, "image_inpainter") or self.image_inpainter is None:
             self.logger.error("ImageInpainter not initialized")
             return frame
-            
+
         try:
             self.logger.debug("Direct image inpainting called")
             return self.image_inpainter.inpaint_frame(frame, mask)
@@ -257,15 +256,15 @@ class AIHandler:
 # 测试代码
 if __name__ == "__main__":
     print("AIHandler module loaded for testing purposes.")
-    
+
     # 创建AI处理器实例
     ai_handler = AIHandler()
     ai_handler.load_models()
-    
+
     # 创建测试帧和参数
     test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    test_params = {'auto_detect': True, 'detection_sensitivity': 0.5}
-    
+    test_params = {"auto_detect": True, "detection_sensitivity": 0.5}
+
     # 执行完整处理流程
     processed_frame, info = ai_handler.process_frame(test_frame, test_params)
     print(f"Processing completed. Frame shape: {processed_frame.shape}")

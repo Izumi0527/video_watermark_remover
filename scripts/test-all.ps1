@@ -5,28 +5,28 @@
 param(
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [switch]$SkipPerformance,
-    
+
     [Parameter()]
     [switch]$SkipCoverage,
-    
+
     [Parameter()]
     [switch]$Parallel,
-    
+
     [Parameter()]
     [switch]$GenerateReport,
-    
+
     [Parameter()]
     [string]$ReportFormat = "html",
-    
+
     [Parameter()]
     [switch]$OpenReport,
-    
+
     [Parameter()]
     [switch]$FailFast
 )
@@ -38,7 +38,7 @@ $ErrorActionPreference = "Stop"
 $Colors = @{
     Header = "Green"
     Success = "Green"
-    Warning = "Yellow" 
+    Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
     Detail = "White"
@@ -113,7 +113,7 @@ $TestSteps = @(
     },
     @{
         Name = "性能基准测试"
-        ScriptPath = "scripts/test-performance.ps1" 
+        ScriptPath = "scripts/test-performance.ps1"
         Function = $null
         Required = $false
         Description = "性能基准测试和资源使用监控"
@@ -129,7 +129,7 @@ function Record-StepResult {
         [bool]$Skipped = $false,
         [double]$Duration = 0
     )
-    
+
     $TestSuite.TestResults[$StepName] = @{
         Passed = $Passed
         Skipped = $Skipped
@@ -137,7 +137,7 @@ function Record-StepResult {
         Duration = $Duration
         Timestamp = Get-Date
     }
-    
+
     if ($Skipped) {
         $TestSuite.SkippedTests++
         Write-Host "⏭️ $StepName - 跳过" -ForegroundColor $Colors.Warning
@@ -151,29 +151,29 @@ function Record-StepResult {
             Write-Host "   详细信息: $Details" -ForegroundColor $Colors.Detail
         }
     }
-    
+
     $TestSuite.TotalTests++
 }
 
 # 环境检查函数
 function Test-Environment {
     $startTime = Get-Date
-    
+
     try {
         # 检查虚拟环境
         if (-not (Test-Path ".venv")) {
             throw "虚拟环境不存在"
         }
-        
+
         # 激活虚拟环境
         . .\.venv\Scripts\Activate.ps1
-        
+
         # 检查Python版本
         $pythonVersion = python --version 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Python不可用: $pythonVersion"
         }
-        
+
         # 检查关键包
         $packages = @("pytest", "PyQt6", "opencv-python", "numpy", "pillow")
         foreach ($package in $packages) {
@@ -182,13 +182,13 @@ function Test-Environment {
                 throw "包 $package 不可用: $result"
             }
         }
-        
+
         $TestSuite.Environment.PythonVersion = $pythonVersion
         $TestSuite.Environment.VirtualEnv = $true
-        
+
         $endTime = Get-Date
         Record-StepResult "环境检查" $true "Python环境和依赖包检查通过" $false ($endTime - $startTime).TotalSeconds
-        
+
     } catch {
         $endTime = Get-Date
         Record-StepResult "环境检查" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -199,23 +199,23 @@ function Test-Environment {
 # 代码质量检查函数
 function Test-CodeQuality {
     $startTime = Get-Date
-    
+
     try {
         $qualityArgs = @("quality")
         if ($Quick) { $qualityArgs += "-Quick" }
         if ($Verbose) { $qualityArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test.ps1"
         ) + $qualityArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             $endTime = Get-Date
             Record-StepResult "代码质量检查" $true "代码格式和风格检查通过" $false ($endTime - $startTime).TotalSeconds
         } else {
             throw "代码质量检查失败，退出码: $($process.ExitCode)"
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-StepResult "代码质量检查" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -226,23 +226,23 @@ function Test-CodeQuality {
 # 单元测试函数
 function Test-Units {
     $startTime = Get-Date
-    
+
     try {
         $unitArgs = @("unit")
         if ($Quick) { $unitArgs += "-Quick" }
         if ($Verbose) { $unitArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", "scripts/test.ps1"
         ) + $unitArgs -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             $endTime = Get-Date
             Record-StepResult "单元测试" $true "pytest单元测试通过" $false ($endTime - $startTime).TotalSeconds
         } else {
             throw "单元测试失败，退出码: $($process.ExitCode)"
         }
-        
+
     } catch {
         $endTime = Get-Date
         Record-StepResult "单元测试" $false $_.Exception.Message $false ($endTime - $startTime).TotalSeconds
@@ -253,58 +253,58 @@ function Test-Units {
 # 执行脚本测试步骤
 function Invoke-ScriptTest {
     param([hashtable]$Step)
-    
+
     $startTime = Get-Date
-    
+
     # 检查是否应该跳过
     $shouldSkip = $false
     if ($Step.Name -eq "性能基准测试" -and $SkipPerformance) { $shouldSkip = $true }
     if ($Step.Name -eq "代码覆盖率分析" -and $SkipCoverage) { $shouldSkip = $true }
-    
+
     if ($shouldSkip) {
         Record-StepResult $Step.Name $true "用户选择跳过" $true 0
         return
     }
-    
+
     # 检查脚本文件是否存在
     if (-not (Test-Path $Step.ScriptPath)) {
         Record-StepResult $Step.Name $false "脚本文件不存在: $($Step.ScriptPath)" $false 0
-        if ($Step.Required -and $FailFast) { 
+        if ($Step.Required -and $FailFast) {
             throw "必需的测试脚本不存在: $($Step.ScriptPath)"
         }
         return
     }
-    
+
     try {
         $scriptArgs = @()
         if ($Quick) { $scriptArgs += "-Quick" }
         if ($Verbose) { $scriptArgs += "-Verbose" }
-        
+
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
             "-File", $Step.ScriptPath
         ) + $scriptArgs -Wait -PassThru -NoNewWindow
-        
+
         $endTime = Get-Date
         $duration = ($endTime - $startTime).TotalSeconds
-        
+
         if ($process.ExitCode -eq 0) {
             Record-StepResult $Step.Name $true "$($Step.Description)执行成功" $false $duration
         } else {
             $errorMsg = "$($Step.Description)执行失败，退出码: $($process.ExitCode)"
             Record-StepResult $Step.Name $false $errorMsg $false $duration
-            
+
             if ($Step.Required -and $FailFast) {
                 throw $errorMsg
             }
         }
-        
+
     } catch {
         $endTime = Get-Date
         $duration = ($endTime - $startTime).TotalSeconds
         Record-StepResult $Step.Name $false $_.Exception.Message $false $duration
-        
-        if ($Step.Required -and $FailFast) { 
-            throw 
+
+        if ($Step.Required -and $FailFast) {
+            throw
         }
     }
 }
@@ -313,17 +313,17 @@ function Invoke-ScriptTest {
 function Show-TestSuiteSummary {
     $TestSuite.EndTime = Get-Date
     $totalDuration = ($TestSuite.EndTime - $TestSuite.StartTime)
-    
+
     Write-Host ""
     Write-Host "🧪 完整测试套件执行摘要" -ForegroundColor $Colors.Summary
     Write-Host "=" * 60 -ForegroundColor $Colors.Info
     Write-Host "🕒 总执行时间: $($totalDuration.ToString('mm\:ss'))" -ForegroundColor $Colors.Info
     Write-Host "📋 总测试数: $($TestSuite.TotalTests)" -ForegroundColor $Colors.Info
     Write-Host "✅ 通过: $($TestSuite.PassedTests)" -ForegroundColor $Colors.Success
-    Write-Host "❌ 失败: $($TestSuite.FailedTests)" -ForegroundColor $Colors.Error  
+    Write-Host "❌ 失败: $($TestSuite.FailedTests)" -ForegroundColor $Colors.Error
     Write-Host "⏭️ 跳过: $($TestSuite.SkippedTests)" -ForegroundColor $Colors.Warning
     Write-Host "📊 成功率: $([math]::Round($TestSuite.PassedTests / $TestSuite.TotalTests * 100, 1))%" -ForegroundColor $Colors.Info
-    
+
     Write-Host ""
     Write-Host "📋 测试步骤详情:" -ForegroundColor $Colors.Header
     foreach ($result in $TestSuite.TestResults.GetEnumerator()) {
@@ -331,7 +331,7 @@ function Show-TestSuiteSummary {
         $color = if ($result.Value.Skipped) { $Colors.Warning } elseif ($result.Value.Passed) { $Colors.Success } else { $Colors.Error }
         Write-Host "  $status $($result.Key): $([math]::Round($result.Value.Duration, 2))s" -ForegroundColor $color
     }
-    
+
     # 显示失败的测试
     $failedTests = $TestSuite.TestResults.GetEnumerator() | Where-Object { -not $_.Value.Passed -and -not $_.Value.Skipped }
     if ($failedTests.Count -gt 0) {
@@ -341,7 +341,7 @@ function Show-TestSuiteSummary {
             Write-Host "  • $($failed.Key): $($failed.Value.Details)" -ForegroundColor $Colors.Error
         }
     }
-    
+
     # 总体结果
     if ($TestSuite.FailedTests -eq 0) {
         Write-Host ""
@@ -355,16 +355,16 @@ function Show-TestSuiteSummary {
 # 生成测试报告
 function Generate-TestReport {
     if (-not $GenerateReport) { return }
-    
+
     Write-Host ""
     Write-Host "📄 生成测试报告..." -ForegroundColor $Colors.Progress
-    
+
     try {
         # 确保日志目录存在
         if (-not (Test-Path "logs")) {
             New-Item -ItemType Directory -Path "logs" -Force | Out-Null
         }
-        
+
         # 准备报告数据
         $reportData = @{
             TestSuite = "智能视频水印去除工具 - 完整测试套件"
@@ -387,14 +387,14 @@ function Generate-TestReport {
                 Parallel = $Parallel
             }
         }
-        
+
         # 生成JSON报告
         $jsonReport = $reportData | ConvertTo-Json -Depth 4
         $jsonPath = "logs/test_suite_report_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
         $jsonReport | Out-File -FilePath $jsonPath -Encoding UTF8
         $TestSuite.Reports += $jsonPath
         Write-Host "✅ JSON报告生成: $jsonPath" -ForegroundColor $Colors.Success
-        
+
         # 生成HTML报告
         if ($ReportFormat -eq "html" -or $ReportFormat -eq "all") {
             $htmlContent = @"
@@ -430,7 +430,7 @@ function Generate-TestReport {
         <p><strong>项目:</strong> 智能视频水印去除工具</p>
         <p><strong>执行时间:</strong> $($TestSuite.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))</p>
         <p><strong>总执行时长:</strong> $($totalDuration.ToString('mm\:ss'))</p>
-        
+
         <h2>📊 测试摘要</h2>
         <div class="summary">
             <div class="metric">
@@ -454,15 +454,15 @@ function Generate-TestReport {
                 <div class="metric-label">成功率</div>
             </div>
         </div>
-        
+
         <h2>📋 测试结果详情</h2>
         <div class="test-results">
 "@
-            
+
             foreach ($result in $TestSuite.TestResults.GetEnumerator()) {
                 $statusClass = if ($result.Value.Skipped) { "status-skipped" } elseif ($result.Value.Passed) { "status-passed" } else { "status-failed" }
                 $statusIcon = if ($result.Value.Skipped) { "⏭️" } elseif ($result.Value.Passed) { "✅" } else { "❌" }
-                
+
                 $htmlContent += @"
             <div class="test-item">
                 <span class="$statusClass">$statusIcon $($result.Key)</span>
@@ -470,10 +470,10 @@ function Generate-TestReport {
             </div>
 "@
             }
-            
+
             $htmlContent += @"
         </div>
-        
+
         <div class="footer">
             <p>报告生成时间: $(Get-Date)</p>
             <p>智能视频水印去除工具 - 自动化测试报告</p>
@@ -482,12 +482,12 @@ function Generate-TestReport {
 </body>
 </html>
 "@
-            
+
             $htmlPath = "logs/test_suite_report_$(Get-Date -Format 'yyyyMMdd_HHmmss').html"
             $htmlContent | Out-File -FilePath $htmlPath -Encoding UTF8
             $TestSuite.Reports += $htmlPath
             Write-Host "✅ HTML报告生成: $htmlPath" -ForegroundColor $Colors.Success
-            
+
             if ($OpenReport) {
                 try {
                     Start-Process $htmlPath
@@ -497,7 +497,7 @@ function Generate-TestReport {
                 }
             }
         }
-        
+
     } catch {
         Write-Host "❌ 测试报告生成失败: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     }
@@ -514,18 +514,18 @@ try {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
     $env:PYTHONPATH = (Get-Location).Path
-    
+
     # 确保日志目录存在
     if (-not (Test-Path "logs")) {
         New-Item -ItemType Directory -Path "logs" -Force | Out-Null
     }
-    
+
     # 执行所有测试步骤
     foreach ($step in $TestSteps) {
         Write-Host ""
         Write-Host "🔄 执行: $($step.Name)" -ForegroundColor $Colors.Progress
         Write-Host "📝 $($step.Description)" -ForegroundColor $Colors.Detail
-        
+
         if ($step.Function) {
             # 执行内置函数
             & $step.Function
@@ -533,23 +533,23 @@ try {
             # 执行外部脚本
             Invoke-ScriptTest $step
         }
-        
+
         # 如果启用了快速失败且测试失败，停止执行
-        if ($FailFast -and $TestSuite.TestResults[$step.Name] -and 
-            -not $TestSuite.TestResults[$step.Name].Passed -and 
+        if ($FailFast -and $TestSuite.TestResults[$step.Name] -and
+            -not $TestSuite.TestResults[$step.Name].Passed -and
             -not $TestSuite.TestResults[$step.Name].Skipped -and
             $step.Required) {
             Write-Host "💥 快速失败模式：停止测试执行" -ForegroundColor $Colors.Error
             break
         }
     }
-    
+
     # 显示测试摘要
     Show-TestSuiteSummary
-    
+
     # 生成测试报告
     Generate-TestReport
-    
+
 } catch {
     Write-Host "❌ 测试套件执行过程中发生严重错误: $($_.Exception.Message)" -ForegroundColor $Colors.Error
     $TestSuite.EndTime = Get-Date

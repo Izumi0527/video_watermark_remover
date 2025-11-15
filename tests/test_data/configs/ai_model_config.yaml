@@ -6,24 +6,24 @@ model:
   version: "v2.1.0"
   type: "pytorch"
   architecture: "unet"
-  
+
   # 输入输出设置
   input:
     channels: 3
     height: 512
     width: 512
     normalization: "imagenet"
-    
+
   output:
     channels: 3
     activation: "sigmoid"
-    
+
   # 模型文件路径
   weights:
     path: "models/watermark_removal.pth"
     url: "https://example.com/models/watermark_removal_v2.1.0.pth"
     checksum: "sha256:abc123def456..."
-    
+
 training:
   # 训练参数
   batch_size: 8
@@ -31,7 +31,7 @@ training:
   epochs: 100
   optimizer: "adam"
   loss_function: "mse"
-  
+
   # 数据增强
   augmentation:
     horizontal_flip: true
@@ -39,41 +39,41 @@ training:
     rotation: 15
     brightness: 0.1
     contrast: 0.1
-    
+
 inference:
   # 推理参数
   device: "auto"  # auto, cpu, cuda:0, etc.
   batch_size: 1
   precision: "float32"  # float32, float16
-  
+
   # 预处理
   preprocessing:
     resize_method: "bilinear"
     padding_mode: "reflect"
-    
+
   # 后处理
   postprocessing:
     apply_smoothing: true
     edge_enhancement: false
     color_correction: true
-    
+
 performance:
   # 性能优化
   enable_tensorrt: false
   enable_onnx: false
   memory_optimization: true
-  
+
   # 缓存设置
   cache_preprocessed: true
   cache_size_mb: 512
-  
+
 evaluation:
   # 评估指标
   metrics:
     - "psnr"
-    - "ssim" 
+    - "ssim"
     - "lpips"
-    
+
   # 基准数据集
   benchmark_dataset: "watermark_test_v1.0"
   target_psnr: 25.0

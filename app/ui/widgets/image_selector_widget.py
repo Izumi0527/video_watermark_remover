@@ -14,16 +14,10 @@
 
 import sys
 from typing import List, Tuple
-from PyQt6.QtWidgets import (
-    QWidget,
-    QLabel,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QScrollArea,
-)
-from PyQt6.QtCore import pyqtSignal
+
 import numpy as np
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from .selectable_image_label import SelectableImageLabel
 
@@ -126,7 +120,7 @@ if __name__ == "__main__":
         print(f"选择区域变化: {selections}")
 
     widget.selection_changed.connect(on_selection_changed)
-    
+
     print("✅ 图像选择器重构版启动成功")
     print("模块化架构包含:")
     print("  - SelectableImageLabel: 核心图像显示组件")

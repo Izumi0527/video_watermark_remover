@@ -16,7 +16,7 @@ maintainers = [
     {name = "Claude Code Assistant", email = "noreply@anthropic.com"}
 ]
 keywords = [
-    "watermark", "removal", "video", "image", "ai", "opencv", 
+    "watermark", "removal", "video", "image", "ai", "opencv",
     "computer-vision", "inpainting", "gui", "pyqt6", "batch-processing"
 ]
 classifiers = [
@@ -177,3 +177,21 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+# Bandit安全检查配置
+[tool.bandit]
+targets = ["app", "main.py"]
+exclude_dirs = [
+    "tests",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+skips = [
+    # B404: 导入subprocess模块（用于FFmpeg调用）
+    "B404",
+    # B603: subprocess调用（已做参数验证）
+    "B603",
+]
+severity_level = "medium"

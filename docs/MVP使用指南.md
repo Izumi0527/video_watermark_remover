@@ -199,7 +199,7 @@ default_confidence_threshold = 0.5 # 默认置信度阈值
 - 🔲 **文件保存**: 不执行实际的文件保存操作
 
 ### 系统要求
-- Python 3.9+ 
+- Python 3.9+
 - PyQt6 依赖
 - 建议内存 2GB+
 - 支持的操作系统: Windows 10+, Ubuntu 18+, macOS 10.15+

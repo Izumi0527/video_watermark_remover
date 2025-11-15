@@ -5,13 +5,13 @@
 param(
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [string]$TestDataPath = "tests/test_data",
-    
+
     [Parameter()]
     [switch]$KeepTestFiles
 )
@@ -23,7 +23,7 @@ $ErrorActionPreference = "Stop"
 $Colors = @{
     Header = "Green"
     Success = "Green"
-    Warning = "Yellow" 
+    Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
     Detail = "White"
@@ -48,7 +48,7 @@ function Record-TestResult {
         [string]$Details = "",
         [bool]$Skipped = $false
     )
-    
+
     $result = @{
         TestName = $TestName
         Passed = $Passed
@@ -56,9 +56,9 @@ function Record-TestResult {
         Details = $Details
         Timestamp = Get-Date
     }
-    
+
     $TestResults.Details += $result
-    
+
     if ($Skipped) {
         $TestResults.Skipped++
         Write-Host "⏭️ $TestName - 跳过" -ForegroundColor $Colors.Warning
@@ -78,7 +78,7 @@ function Record-TestResult {
 function Show-TestSummary {
     $endTime = Get-Date
     $duration = $endTime - $TestResults.StartTime
-    
+
     Write-Host ""
     Write-Host "👤 用户偏好设置测试摘要" -ForegroundColor $Colors.Summary
     Write-Host "=" * 50 -ForegroundColor $Colors.Info
@@ -87,7 +87,7 @@ function Show-TestSummary {
     Write-Host "❌ 失败: $($TestResults.Failed)" -ForegroundColor $Colors.Error
     Write-Host "⏭️ 跳过: $($TestResults.Skipped)" -ForegroundColor $Colors.Warning
     Write-Host "📋 总计: $(($TestResults.Passed + $TestResults.Failed + $TestResults.Skipped))" -ForegroundColor $Colors.Info
-    
+
     if ($TestResults.Failed -eq 0) {
         Write-Host ""
         Write-Host "🎉 所有用户偏好设置测试通过！" -ForegroundColor $Colors.Success
@@ -135,7 +135,7 @@ sys.path.insert(0, os.getcwd())
 # 测试用户偏好相关模块导入
 modules = [
     'app.config.user_preferences_manager',
-    'app.config.preferences_storage', 
+    'app.config.preferences_storage',
     'app.config.preferences_validator',
     'app.config.preferences_defaults'
 ]
@@ -155,10 +155,10 @@ if missing_modules:
 else:
     print('所有用户偏好模块导入成功')
 "@
-    
+
     Write-Host $importTest -ForegroundColor $Colors.Detail
     Record-TestResult "用户偏好模块导入" $true "所有模块导入成功"
-    
+
 } catch {
     Record-TestResult "用户偏好模块导入" $false "模块导入失败: $($_.Exception.Message)"
 }
@@ -201,10 +201,10 @@ if missing_keys:
 
 print('偏好设置管理器初始化测试通过')
 "@
-    
+
     Write-Host $managerTest -ForegroundColor $Colors.Detail
     Record-TestResult "偏好设置管理器初始化" $true "偏好设置管理器初始化成功"
-    
+
 } catch {
     Record-TestResult "偏好设置管理器初始化" $false "偏好设置管理器初始化失败: $($_.Exception.Message)"
 }
@@ -261,10 +261,10 @@ else:
 
 print('偏好设置验证测试通过')
 "@
-    
+
     Write-Host $validationTest -ForegroundColor $Colors.Detail
     Record-TestResult "偏好设置验证" $true "偏好设置验证功能正常"
-    
+
 } catch {
     Record-TestResult "偏好设置验证" $false "偏好设置验证测试失败: $($_.Exception.Message)"
 }
@@ -308,14 +308,14 @@ try:
     else:
         print('❌ 偏好设置保存失败')
         sys.exit(1)
-    
+
     # 验证文件是否创建
     if os.path.exists(temp_file):
         print('✅ 偏好设置文件创建成功')
     else:
         print('❌ 偏好设置文件创建失败')
         sys.exit(1)
-    
+
     # 测试加载
     loaded_prefs = storage.load(temp_file)
     if loaded_prefs:
@@ -323,9 +323,9 @@ try:
     else:
         print('❌ 偏好设置加载失败')
         sys.exit(1)
-    
+
     # 测试数据一致性
-    if (loaded_prefs['theme'] == 'dark' and 
+    if (loaded_prefs['theme'] == 'dark' and
         loaded_prefs['language'] == 'zh_CN' and
         loaded_prefs['test_setting'] == 'test_value'):
         print('✅ 偏好设置数据一致性验证通过')
@@ -334,7 +334,7 @@ try:
         print(f'期望 theme=dark, 实际 theme={loaded_prefs.get("theme")}')
         print(f'期望 language=zh_CN, 实际 language={loaded_prefs.get("language")}')
         sys.exit(1)
-    
+
 finally:
     if os.path.exists(temp_file):
         os.unlink(temp_file)
@@ -342,10 +342,10 @@ finally:
 
 print('偏好设置存储测试通过')
 "@
-    
+
     Write-Host $storageTest -ForegroundColor $Colors.Detail
     Record-TestResult "偏好设置存储" $true "偏好设置存储功能正常"
-    
+
 } catch {
     Record-TestResult "偏好设置存储" $false "偏好设置存储测试失败: $($_.Exception.Message)"
 }
@@ -384,11 +384,11 @@ for theme in available_themes:
         # 创建包含新主题的偏好设置
         test_prefs = prefs_manager.get_default_preferences()
         test_prefs['theme'] = theme
-        
+
         # 验证主题是否有效
         if style_manager.is_valid_theme(theme):
             print(f'✅ 主题 {theme} 验证通过')
-            
+
             # 尝试应用主题样式
             style_sheet = style_manager.get_theme_stylesheet(theme)
             if style_sheet:
@@ -398,21 +398,21 @@ for theme in available_themes:
         else:
             print(f'❌ 主题 {theme} 无效')
             sys.exit(1)
-            
+
     except Exception as e:
         print(f'❌ 主题 {theme} 切换失败: {e}')
         sys.exit(1)
 
 print('主题切换测试通过')
 "@
-    
+
     if ($LASTEXITCODE -eq 2) {
         Record-TestResult "主题切换" $false "未找到可用主题" $true
     } else {
         Write-Host $themeTest -ForegroundColor $Colors.Detail
         Record-TestResult "主题切换" $true "主题切换功能正常"
     }
-    
+
 } catch {
     Record-TestResult "主题切换" $false "主题切换测试失败: $($_.Exception.Message)"
 }
@@ -422,7 +422,7 @@ print('主题切换测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🌐 语言设置测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $languageTest = python -c @"
 import sys
@@ -443,24 +443,24 @@ for lang in supported_languages:
         # 创建包含新语言的偏好设置
         test_prefs = prefs_manager.get_default_preferences()
         test_prefs['language'] = lang
-        
+
         # 验证设置
         if prefs_manager.validate_preferences(test_prefs):
             print(f'✅ 语言 {lang} 设置有效')
         else:
             print(f'❌ 语言 {lang} 设置无效')
             sys.exit(1)
-            
+
     except Exception as e:
         print(f'❌ 语言 {lang} 测试失败: {e}')
         sys.exit(1)
 
 print('语言设置测试通过')
 "@
-        
+
         Write-Host $languageTest -ForegroundColor $Colors.Detail
         Record-TestResult "语言设置" $true "语言设置功能正常"
-        
+
     } catch {
         Record-TestResult "语言设置" $false "语言设置测试失败: $($_.Exception.Message)"
     }
@@ -471,7 +471,7 @@ print('语言设置测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🔧 高级偏好设置测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $advancedTest = python -c @"
 import sys
@@ -509,7 +509,7 @@ else:
 # 测试设置项类型检查
 type_tests = [
     ('auto_save', True, bool),
-    ('backup_count', 5, int), 
+    ('backup_count', 5, int),
     ('memory_limit', 2048, int),
     ('log_level', 'INFO', str)
 ]
@@ -523,10 +523,10 @@ for key, value, expected_type in type_tests:
 
 print('高级偏好设置测试通过')
 "@
-        
+
         Write-Host $advancedTest -ForegroundColor $Colors.Detail
         Record-TestResult "高级偏好设置" $true "高级偏好设置功能正常"
-        
+
     } catch {
         Record-TestResult "高级偏好设置" $false "高级偏好设置测试失败: $($_.Exception.Message)"
     }
@@ -569,12 +569,12 @@ if reset_prefs == default_prefs:
     print('✅ 偏好设置重置验证通过')
 else:
     print('❌ 偏好设置重置验证失败')
-    
+
     # 显示差异
     for key in default_prefs:
         if key not in reset_prefs or reset_prefs[key] != default_prefs[key]:
             print(f'差异项 {key}: 默认={default_prefs[key]}, 重置后={reset_prefs.get(key)}')
-    
+
     sys.exit(1)
 
 # 测试部分重置功能
@@ -597,10 +597,10 @@ else:
 
 print('偏好设置重置测试通过')
 "@
-    
+
     Write-Host $resetTest -ForegroundColor $Colors.Detail
     Record-TestResult "偏好设置重置" $true "偏好设置重置功能正常"
-    
+
 } catch {
     Record-TestResult "偏好设置重置" $false "偏好设置重置测试失败: $($_.Exception.Message)"
 }
@@ -610,7 +610,7 @@ print('偏好设置重置测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "📦 偏好设置迁移测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $migrationTest = python -c @"
 import sys
@@ -641,24 +641,24 @@ with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
 try:
     # 测试迁移功能
     migrated_prefs = prefs_manager.migrate_preferences(legacy_file)
-    
+
     if migrated_prefs:
         print('✅ 偏好设置迁移成功')
-        
+
         # 验证迁移后的格式
         expected_mappings = {
             'theme': 'dark',  # theme_name -> theme
             'language': 'zh_CN',  # lang -> language (并标准化)
             'auto_save': True     # auto_save_enabled -> auto_save
         }
-        
+
         for new_key, expected_value in expected_mappings.items():
             if new_key in migrated_prefs:
                 print(f'✅ 迁移映射 {new_key}: {migrated_prefs[new_key]}')
             else:
                 print(f'❌ 缺少迁移映射: {new_key}')
                 sys.exit(1)
-        
+
         # 验证迁移后设置的有效性
         if prefs_manager.validate_preferences(migrated_prefs):
             print('✅ 迁移后设置验证通过')
@@ -667,17 +667,17 @@ try:
             sys.exit(1)
     else:
         print('⚠️ 偏好设置迁移返回空结果')
-        
+
 finally:
     if os.path.exists(legacy_file):
         os.unlink(legacy_file)
 
 print('偏好设置迁移测试通过')
 "@
-        
+
         Write-Host $migrationTest -ForegroundColor $Colors.Detail
         Record-TestResult "偏好设置迁移" $true "偏好设置迁移功能正常"
-        
+
     } catch {
         Record-TestResult "偏好设置迁移" $false "偏好设置迁移测试失败: $($_.Exception.Message)"
     }

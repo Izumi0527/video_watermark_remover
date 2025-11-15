@@ -1,5 +1,11 @@
 import configparser
+import logging
 import os
+from configparser import ConfigParser
+from typing import Any, Optional
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_FILENAME = "config.ini"
 # Could be in user's app data directory or alongside the executable
@@ -54,12 +60,12 @@ class ConfigManager:
     """
 
     @staticmethod
-    def get_config_path():
+    def get_config_path() -> str:
         """Returns the determined config path."""
         return DEFAULT_CONFIG_PATH
 
     @staticmethod
-    def load_config(config_path=None):
+    def load_config(config_path: Optional[str] = None) -> ConfigParser:
         """
         Loads configuration from the given path or the default path.
         If the config file doesn't exist, it creates one with default values.
@@ -68,13 +74,13 @@ class ConfigManager:
         config = configparser.ConfigParser()
 
         if not os.path.exists(path_to_load):
-            print(f"Config file not found at {path_to_load}. Creating with defaults.")
+            logger.info(f"Config file not found at {path_to_load}. Creating with defaults.")
             ConfigManager._create_default_config(path_to_load)
 
         try:
             config.read(path_to_load, encoding="utf-8")
         except configparser.Error as e:
-            print(f"Error reading config file {path_to_load}: {e}. Loading defaults.")
+            logger.error(f"Error reading config file {path_to_load}: {e}. Loading defaults.")
             # Fallback to in-memory defaults if read fails badly
             config = ConfigManager._get_default_config_parser()
 
@@ -83,7 +89,7 @@ class ConfigManager:
         return config
 
     @staticmethod
-    def _get_default_config_parser():
+    def _get_default_config_parser() -> ConfigParser:
         """Returns a ConfigParser object populated with default settings."""
         config = configparser.ConfigParser()
         config["Paths"] = {
@@ -112,7 +118,7 @@ class ConfigManager:
         return config
 
     @staticmethod
-    def _ensure_default_sections(config_parser_instance):
+    def _ensure_default_sections(config_parser_instance: ConfigParser) -> None:
         """Ensures that the loaded config has all default sections and options."""
         defaults = ConfigManager._get_default_config_parser()
         for section in defaults.sections():
@@ -123,7 +129,7 @@ class ConfigManager:
                     config_parser_instance.set(section, option, value)
 
     @staticmethod
-    def _create_default_config(config_path):
+    def _create_default_config(config_path: str) -> None:
         """
         Creates a new configuration file with default settings.
         """
@@ -131,9 +137,9 @@ class ConfigManager:
         if not os.path.exists(config_dir):
             try:
                 os.makedirs(config_dir, exist_ok=True)
-                print(f"Created config directory: {config_dir}")
+                logger.info(f"Created config directory: {config_dir}")
             except OSError as e:
-                print(f"Error creating config directory {config_dir}: {e}")
+                logger.error(f"Error creating config directory {config_dir}: {e}")
                 # Cannot proceed if directory creation fails
                 return
 
@@ -141,12 +147,12 @@ class ConfigManager:
         try:
             with open(config_path, "w", encoding="utf-8") as configfile:
                 config.write(configfile)
-            print(f"Default config file created at {config_path}")
+            logger.info(f"Default config file created at {config_path}")
         except IOError as e:
-            print(f"Error writing default config file to {config_path}: {e}")
+            logger.error(f"Error writing default config file to {config_path}: {e}")
 
     @staticmethod
-    def save_config(config, config_path=None):
+    def save_config(config: ConfigParser, config_path: Optional[str] = None) -> bool:
         """
         Saves the configuration object to the given path or the default path.
         """
@@ -156,20 +162,22 @@ class ConfigManager:
             try:
                 os.makedirs(config_dir, exist_ok=True)
             except OSError as e:
-                print(f"Error creating directory {config_dir} for saving config: {e}")
+                logger.error(f"Error creating directory {config_dir} for saving config: {e}")
                 return False
 
         try:
             with open(path_to_save, "w", encoding="utf-8") as configfile:
                 config.write(configfile)
-            print(f"Config saved to {path_to_save}")
+            logger.info(f"Config saved to {path_to_save}")
             return True
         except IOError as e:
-            print(f"Error saving config to {path_to_save}: {e}")
+            logger.error(f"Error saving config to {path_to_save}: {e}")
             return False
 
     @staticmethod
-    def update_config_value(section, option, value, config_path=None):
+    def update_config_value(
+        section: str, option: str, value: Any, config_path: Optional[str] = None
+    ) -> bool:
         """
         Updates a specific value in the config file and saves it.
         """
@@ -182,22 +190,22 @@ class ConfigManager:
 
 if __name__ == "__main__":
     # Example usage:
-    print(f"Default config path: {ConfigManager.get_config_path()}")
+    logger.info(f"Default config path: {ConfigManager.get_config_path()}")
 
     # Load (or create if not exists)
     my_config = ConfigManager.load_config()
 
     # Get a value
     ffmpeg_path = my_config.get("Paths", "ffmpeg_path", fallback="ffmpeg_not_found")
-    print(f"FFmpeg path from config: {ffmpeg_path}")
+    logger.info(f"FFmpeg path from config: {ffmpeg_path}")
 
     log_level = my_config.get("Logging", "log_level")
-    print(f"Log level: {log_level}")
+    logger.info(f"Log level: {log_level}")
 
     # Update a value
     # ConfigManager.update_config_value('Paths', 'last_input_dir', '/new/path/to/videos')
     # updated_config = ConfigManager.load_config() # Reload to see change
-    # print(f"Updated last_input_dir: {updated_config.get('Paths', 'last_input_dir')}")
+    # logger.info(f"Updated last_input_dir: {updated_config.get('Paths', 'last_input_dir')}")
 
     # Ensure the default config file (default_config.ini in project's configs
     # dir) is also created for reference
@@ -206,9 +214,11 @@ if __name__ == "__main__":
     )
     reference_default_config_path = os.path.join(project_configs_dir, "default_config.ini")
     if not os.path.exists(reference_default_config_path):
-        print(f"Creating reference default_config.ini at {reference_default_config_path}")
+        logger.info(f"Creating reference default_config.ini at {reference_default_config_path}")
         ConfigManager._create_default_config(reference_default_config_path)
     else:
-        print(f"Reference default_config.ini already exists at {reference_default_config_path}")
+        logger.info(
+            f"Reference default_config.ini already exists at {reference_default_config_path}"
+        )
 
-    print("config_manager.py executed directly (for testing purposes).")
+    logger.info("config_manager.py executed directly (for testing purposes).")

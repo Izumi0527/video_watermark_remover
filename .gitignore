@@ -124,6 +124,12 @@ dmypy.json
 # pytype
 .pytype/
 
+# Ruff (modern Python linter)
+.ruff_cache/
+
+# Black (code formatter cache)
+.black/
+
 # IDEs and editors
 .idea/
 .vscode/

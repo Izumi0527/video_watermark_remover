@@ -41,18 +41,52 @@
 ## 📦 安装使用
 
 ### 环境要求
-- Python 3.8+
-- Windows 10/11 (推荐)
+- Python 3.8+ (推荐 3.12)
+- Windows 10/11 (推荐) / Linux / macOS
 - FFmpeg (可选，用于音频处理)
 
-### 安装依赖
-```bash
-pip install -r requirements.txt
+### 快速开始
+
+**方式一：使用自动化脚本（推荐）**
+```powershell
+# 1. 环境初始化（仅首次运行）
+.\scripts\setup.ps1
+
+# 2. 启动应用
+.\scripts\start.ps1
 ```
 
-### 运行程序
+**方式二：手动安装**
 ```bash
+# 1. 创建虚拟环境
+python -m venv .venv
+
+# 2. 激活虚拟环境
+# Windows:
+.\.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 运行程序
 python main.py
+```
+
+### 开发环境配置
+```bash
+# 安装开发依赖（包括测试、代码质量工具）
+pip install -r requirements-dev.txt
+
+# 安装 pre-commit hooks
+pre-commit install
+
+# 运行代码质量检查
+.\scripts\check-quality.ps1
+
+# 运行测试
+.\scripts\test.ps1
 ```
 
 ## 🎯 使用指南
@@ -107,22 +141,78 @@ video_watermark_remover/
 ## 🧪 开发测试
 
 ### 运行测试
-```bash
-# 第二阶段AI功能测试
-python tests/test_phase2.py
 
-# 第三阶段UI功能测试  
-python tests/test_phase3.py
+**使用自动化脚本（推荐）**
+```powershell
+# 运行所有测试
+.\scripts\test.ps1
 
-# 代码质量检查
-python scripts/check_code_quality.py
+# 仅运行单元测试
+.\scripts\test.ps1 unit
+
+# 运行测试并生成覆盖率报告
+.\scripts\test.ps1 -Coverage
+
+# 运行代码质量检查
+.\scripts\test.ps1 quality
+
+# 快速测试（跳过耗时检查）
+.\scripts\test.ps1 -Quick
 ```
 
-### 代码质量
-当前项目保持高代码质量标准：
-- **代码合规率**：90.2%
-- **模块化程度**：61个模块，平均每个模块<300行
-- **单元测试覆盖**：核心功能100%覆盖
+**手动运行测试**
+```bash
+# 运行所有单元测试
+pytest tests/ -v
+
+# 运行特定测试文件
+pytest tests/unit/test_config_manager.py -v
+
+# 生成覆盖率报告
+pytest tests/ --cov=app --cov-report=html
+
+# 运行代码质量检查
+black app main.py --check
+flake8 app main.py
+mypy app main.py
+```
+
+### 测试覆盖情况
+
+当前项目建立了完善的测试体系：
+
+**单元测试**:
+- ✅ ConfigManager: 18个测试用例
+- ✅ WatermarkDetector: 23+个测试用例
+- ✅ ImageInpainter: 28+个测试用例
+- 📊 总计: 69+ 测试用例
+
+**代码质量**:
+- ✅ Black 代码格式化
+- ✅ Flake8 代码风格检查
+- ✅ MyPy 类型检查
+- ✅ Bandit 安全检查
+- ✅ Pre-commit hooks 自动化检查
+
+**测试覆盖率目标**: ≥60% (核心模块)
+
+### 代码质量检查
+
+```powershell
+# 运行所有质量检查
+.\scripts\check-quality.ps1
+
+# 自动修复格式问题
+.\scripts\check-quality.ps1 -Fix
+
+# 快速检查（跳过类型检查）
+.\scripts\check-quality.ps1 -Quick
+
+# 仅检查特定类型
+.\scripts\check-quality.ps1 -Check format   # 代码格式
+.\scripts\check-quality.ps1 -Check style    # 代码风格
+.\scripts\check-quality.ps1 -Check type     # 类型注解
+```
 
 ## 🔧 配置说明
 
@@ -167,6 +257,17 @@ cache_size_mb = 512
 ### v0.1.0
 - ✅ 基础GUI框架
 - ✅ 文件选择和预览功能
+
+## 📚 文档
+
+完整的技术文档请参考 `docs/` 目录：
+
+- **[架构设计文档](docs/architecture.md)** - 详细的系统架构和设计模式
+- **[API 接口文档](docs/api.md)** - 核心模块的API接口说明
+- **[测试文档](docs/testing.md)** - 测试策略和测试用例说明
+- **[开发指南](docs/development.md)** - 开发环境配置和代码规范
+- **[Windows 使用指南](docs/Windows使用指南.md)** - Windows平台特定说明
+- **[MVP 使用指南](docs/MVP使用指南.md)** - 最小可行产品使用说明
 
 ## 🤝 贡献指南
 

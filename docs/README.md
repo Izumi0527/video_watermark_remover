@@ -2,7 +2,7 @@
 
    平台设 应用程 先进的  模型，旨在智能识别并尽可能无损地去除视频和图片中的水印（包括文本和图形），并通过图像处理技术对去除水印后的区域进行智能填充修复，提供便捷的图形化操作界面。
 
-**🎯 当前版本**: v0.4.0 
+**🎯 当前版本**: v0.4.0
 **📅 最近更新**: 2025-09-06  
 **🚀 开发状态**: 代码架构重构完成，手动选择和预览对比功能已实现
 
@@ -338,13 +338,13 @@ def detect_watermark(self, frame):
     # 1. 多色彩空间分析
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
     # 2. 边缘检测（文字识别）
     edges = cv2.Canny(gray, 50, 150)
-    
+
     # 3. 色彩一致性检测
     # 检测半透明叠加和均匀色彩区域
-    
+
     # 4. 形态学后处理
     # 去噪声，精确定位水印边界
 ```
@@ -356,7 +356,7 @@ def repair_watermark(self, frame, mask):
     mask_area = cv2.countNonZero(mask)
     total_area = frame.shape[0] * frame.shape[1]
     area_ratio = mask_area / total_area
-    
+
     if area_ratio < 0.05:    # 小面积：高质量插值
         return self._custom_interpolation_repair(frame, mask)
     elif area_ratio < 0.15:  # 中面积：TELEA快速修复
@@ -377,8 +377,8 @@ def repair_watermark(self, frame, mask):
 [Paths]
 ffmpeg_path = ffmpeg
 default_model_dir = ./models
-last_input_dir = 
-last_output_dir = 
+last_input_dir =
+last_output_dir =
 
 [Processing]
 default_output_suffix = _processed
@@ -390,8 +390,8 @@ log_level = INFO
 log_file_path = /path/to/logs/app.log
 
 [Models]
-detection_model_path = 
-inpainting_model_path = 
+detection_model_path =
+inpainting_model_path =
 default_confidence_threshold = 0.5
 ```
 
@@ -493,7 +493,7 @@ addopts = ["--strict-markers", "--verbose"]
    # 双击运行或命令行执行
    scripts\setup.bat
    ```
-   
+
    **自动完成所有配置**:
    - ✅ 检查并安装 uv 现代包管理器  
    - ✅ 创建 .venv 虚拟环境
@@ -527,10 +527,10 @@ addopts = ["--strict-markers", "--verbose"]
 2.  **创建虚拟环境 (推荐)**
     ```bash
     python -m venv venv
-    
+
     # Windows 激活
     venv\Scripts\activate
-    
+
     # Linux/macOS 激活
     # source venv/bin/activate
     ```
@@ -539,7 +539,7 @@ addopts = ["--strict-markers", "--verbose"]
     ```bash
     pip install -r requirements.txt
     ```
-    
+
     **当前 `requirements.txt` 内容:**
     ```txt
     PyQt6>=6.6.0
@@ -552,7 +552,7 @@ addopts = ["--strict-markers", "--verbose"]
     ```bash
     # 运行第二阶段测试验证AI功能
     python test_phase2.py
-    
+
     # 运行MVP基础功能测试
     python test_mvp.py
     ```
@@ -650,7 +650,7 @@ addopts = ["--strict-markers", "--verbose"]
 ### 🚀 当前性能表现
 
 #### 📊 处理速度 (基于OpenCV算法)
-- **图片处理**: 
+- **图片处理**:
   - 400x300像素: ~0.1-0.3秒
   - 1920x1080像素: ~0.5-1.0秒
   - 4K图片: ~2-4秒

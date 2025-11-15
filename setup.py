@@ -3,42 +3,46 @@
 智能视频水印去除工具 - 安装配置文件
 """
 
-from setuptools import setup, find_packages
 import os
+
+from setuptools import find_packages, setup
+
 
 # 读取README文件
 def read_readme():
-    readme_path = os.path.join(os.path.dirname(__file__), 'README.md')
+    readme_path = os.path.join(os.path.dirname(__file__), "README.md")
     if os.path.exists(readme_path):
-        with open(readme_path, 'r', encoding='utf-8') as f:
+        with open(readme_path, "r", encoding="utf-8") as f:
             return f.read()
     return "智能视频水印去除工具 - AI驱动的水印检测和去除应用"
+
 
 # 读取requirements文件
 def read_requirements(filename):
     requirements = []
     req_path = os.path.join(os.path.dirname(__file__), filename)
     if os.path.exists(req_path):
-        with open(req_path, 'r', encoding='utf-8') as f:
+        with open(req_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 # 跳过注释和空行
-                if line and not line.startswith('#') and not line.startswith('-r'):
+                if line and not line.startswith("#") and not line.startswith("-r"):
                     # 处理内联注释
-                    if '#' in line:
-                        line = line.split('#')[0].strip()
+                    if "#" in line:
+                        line = line.split("#")[0].strip()
                     if line:
                         requirements.append(line)
     return requirements
 
+
 # 基础依赖
-install_requires = read_requirements('requirements-minimal.txt')
+install_requires = read_requirements("requirements-minimal.txt")
 
 # 可选依赖组
 extras_require = {
-    'full': read_requirements('requirements.txt'),
-    'dev': read_requirements('requirements-dev.txt'),
-    'minimal': install_requires,
+    "full": read_requirements("requirements.txt"),
+    "dev": read_requirements("requirements-dev.txt"),
+    "minimal": install_requires,
 }
 
 setup(
@@ -86,8 +90,17 @@ setup(
         ],
     },
     keywords=[
-        "watermark", "removal", "video", "image", "ai", "opencv", 
-        "computer-vision", "inpainting", "gui", "pyqt6", "batch-processing"
+        "watermark",
+        "removal",
+        "video",
+        "image",
+        "ai",
+        "opencv",
+        "computer-vision",
+        "inpainting",
+        "gui",
+        "pyqt6",
+        "batch-processing",
     ],
     project_urls={
         "Bug Reports": "https://github.com/yourusername/video-watermark-remover/issues",

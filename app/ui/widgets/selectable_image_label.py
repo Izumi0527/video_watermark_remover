@@ -13,16 +13,26 @@
 版本: v1.0 (重构版)
 """
 
-from typing import List, Tuple, Optional
-from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal
-from PyQt6.QtGui import (QPixmap, QPainter, QPen, QBrush, QColor, 
-                        QMouseEvent, QPaintEvent, QFont, QImage)
+from typing import List, Optional, Tuple
+
 import cv2
 import numpy as np
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
+)
+from PyQt6.QtWidgets import QLabel
 
-from .selection_handlers import SelectionEventHandler
 from .coordinate_converter import CoordinateConverter
+from .selection_handlers import SelectionEventHandler
 
 
 class SelectableImageLabel(QLabel):
@@ -76,12 +86,12 @@ class SelectableImageLabel(QLabel):
         """初始化事件处理器"""
         self.event_handler = SelectionEventHandler()
         self.coordinate_converter = CoordinateConverter()
-        
+
         # 设置回调函数
         self.event_handler.set_callbacks(
             selection_changed=self._emit_selection_changed,
             cursor_change=self.setCursor,
-            update_display=self.update
+            update_display=self.update,
         )
 
     def set_default_text(self):
@@ -97,7 +107,7 @@ class SelectableImageLabel(QLabel):
 
         Args:
             image_path: 图像文件路径
-            
+
         Returns:
             加载是否成功
         """
@@ -127,7 +137,7 @@ class SelectableImageLabel(QLabel):
 
         Args:
             image_array: OpenCV格式的图像数组 (BGR)
-            
+
         Returns:
             转换是否成功
         """
@@ -168,7 +178,7 @@ class SelectableImageLabel(QLabel):
         self.scale_factor = CoordinateConverter.calculate_scale_factor(
             widget_size, pixmap_size, 0.1
         )
-        
+
         # 更新坐标转换器
         self.coordinate_converter.set_scale_factor(self.scale_factor)
 
@@ -218,7 +228,7 @@ class SelectableImageLabel(QLabel):
 
         # 绘制已保存的选择区域
         self._draw_saved_selections(painter)
-        
+
         # 绘制当前正在选择的区域
         self._draw_current_selection(painter)
 
@@ -232,14 +242,16 @@ class SelectableImageLabel(QLabel):
         for original_rect in self.event_handler.get_selections():
             # 转换到缩放坐标系
             scaled_rect = self.coordinate_converter.original_to_scaled_rect(original_rect)
-            display_rect = self.coordinate_converter.image_to_display_rect(scaled_rect, self.image_offset)
+            display_rect = self.coordinate_converter.image_to_display_rect(
+                scaled_rect, self.image_offset
+            )
             painter.drawRect(display_rect)
 
     def _draw_current_selection(self, painter: QPainter):
         """绘制当前正在选择的区域"""
         if not self.event_handler.is_currently_selecting():
             return
-            
+
         current_selection = self.event_handler.get_current_selection()
         if current_selection.isEmpty():
             return
@@ -247,8 +259,10 @@ class SelectableImageLabel(QLabel):
         pen = QPen(self.selection_border_color, 2)
         pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
-        
-        display_rect = self.coordinate_converter.image_to_display_rect(current_selection, self.image_offset)
+
+        display_rect = self.coordinate_converter.image_to_display_rect(
+            current_selection, self.image_offset
+        )
         painter.drawRect(display_rect)
 
     def clearSelections(self):

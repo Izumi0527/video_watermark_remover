@@ -5,13 +5,13 @@
 param(
     [Parameter()]
     [switch]$Verbose,
-    
+
     [Parameter()]
     [switch]$Quick,
-    
+
     [Parameter()]
     [string]$TestDataPath = "tests/test_data",
-    
+
     [Parameter()]
     [switch]$KeepTestFiles
 )
@@ -23,7 +23,7 @@ $ErrorActionPreference = "Stop"
 $Colors = @{
     Header = "Green"
     Success = "Green"
-    Warning = "Yellow" 
+    Warning = "Yellow"
     Error = "Red"
     Info = "Cyan"
     Detail = "White"
@@ -48,7 +48,7 @@ function Record-TestResult {
         [string]$Details = "",
         [bool]$Skipped = $false
     )
-    
+
     $result = @{
         TestName = $TestName
         Passed = $Passed
@@ -56,9 +56,9 @@ function Record-TestResult {
         Details = $Details
         Timestamp = Get-Date
     }
-    
+
     $TestResults.Details += $result
-    
+
     if ($Skipped) {
         $TestResults.Skipped++
         Write-Host "⏭️ $TestName - 跳过" -ForegroundColor $Colors.Warning
@@ -78,7 +78,7 @@ function Record-TestResult {
 function Show-TestSummary {
     $endTime = Get-Date
     $duration = $endTime - $TestResults.StartTime
-    
+
     Write-Host ""
     Write-Host "🎬 端到端工作流测试摘要" -ForegroundColor $Colors.Summary
     Write-Host "=" * 50 -ForegroundColor $Colors.Info
@@ -87,7 +87,7 @@ function Show-TestSummary {
     Write-Host "❌ 失败: $($TestResults.Failed)" -ForegroundColor $Colors.Error
     Write-Host "⏭️ 跳过: $($TestResults.Skipped)" -ForegroundColor $Colors.Warning
     Write-Host "📋 总计: $(($TestResults.Passed + $TestResults.Failed + $TestResults.Skipped))" -ForegroundColor $Colors.Info
-    
+
     if ($TestResults.Failed -eq 0) {
         Write-Host ""
         Write-Host "🎉 所有端到端测试通过！" -ForegroundColor $Colors.Success
@@ -135,7 +135,7 @@ sys.path.insert(0, os.getcwd())
 # 检查关键模块导入
 essential_modules = [
     'app.core.video.video_processor',
-    'app.core.ai.ai_handler', 
+    'app.core.ai.ai_handler',
     'app.config.config_manager',
     'app.ui.main_window'
 ]
@@ -155,10 +155,10 @@ if missing_modules:
 else:
     print('所有关键模块导入成功')
 "@
-    
+
     Write-Host $envCheckTest -ForegroundColor $Colors.Detail
     Record-TestResult "系统环境检查" $true "所有关键模块可用"
-    
+
 } catch {
     Record-TestResult "系统环境检查" $false "系统环境检查失败: $($_.Exception.Message)"
 }
@@ -198,26 +198,26 @@ with tempfile.NamedTemporaryFile(mode='w', suffix='.ini', delete=False) as f:
 try:
     config_manager.save_config(default_config, temp_config_file)
     print('✅ 配置保存成功')
-    
+
     loaded_config = config_manager.load_config(temp_config_file)
     print('✅ 配置加载成功')
-    
+
     if loaded_config == default_config:
         print('✅ 配置保存和加载一致性验证通过')
     else:
         print('❌ 配置保存和加载不一致')
         sys.exit(1)
-        
+
 finally:
     if os.path.exists(temp_config_file):
         os.unlink(temp_config_file)
 
 print('配置管理器测试通过')
 "@
-    
+
     Write-Host $configTest -ForegroundColor $Colors.Detail
     Record-TestResult "配置管理器测试" $true "配置管理器功能正常"
-    
+
 } catch {
     Record-TestResult "配置管理器测试" $false "配置管理器测试失败: $($_.Exception.Message)"
 }
@@ -248,17 +248,17 @@ print('✅ VideoProcessor 初始化成功')
 # 测试处理器状态
 if hasattr(video_processor, 'is_busy'):
     print(f'处理器忙碌状态: {video_processor.is_busy}')
-    
+
 if hasattr(video_processor, 'get_supported_formats'):
     formats = video_processor.get_supported_formats()
     print(f'✅ 支持的视频格式数量: {len(formats)}')
 
 print('视频处理器初始化测试通过')
 "@
-    
+
     Write-Host $videoProcessorTest -ForegroundColor $Colors.Detail
     Record-TestResult "视频处理器初始化" $true "视频处理器初始化成功"
-    
+
 } catch {
     Record-TestResult "视频处理器初始化" $false "视频处理器初始化失败: $($_.Exception.Message)"
 }
@@ -294,10 +294,10 @@ if hasattr(ai_handler, 'get_model_info'):
 
 print('AI处理器初始化测试通过')
 "@
-    
+
     Write-Host $aiHandlerTest -ForegroundColor $Colors.Detail
     Record-TestResult "AI处理器初始化" $true "AI处理器初始化成功"
-    
+
 } catch {
     Record-TestResult "AI处理器初始化" $false "AI处理器初始化失败: $($_.Exception.Message)"
 }
@@ -307,7 +307,7 @@ print('AI处理器初始化测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🖥️ UI组件初始化测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $uiTest = python -c @"
 import sys
@@ -339,13 +339,13 @@ for component in ui_components:
     except Exception as e:
         print(f'❌ {component} 导入失败: {e}')
         # UI组件失败不会导致测试中断，只是警告
-        
+
 print('UI组件初始化测试完成')
 "@
-        
+
         Write-Host $uiTest -ForegroundColor $Colors.Detail
         Record-TestResult "UI组件初始化" $true "UI组件初始化成功"
-        
+
     } catch {
         Record-TestResult "UI组件初始化" $false "UI组件初始化失败: $($_.Exception.Message)"
     }
@@ -356,7 +356,7 @@ print('UI组件初始化测试完成')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "🔄 完整工作流集成测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $workflowTest = python -c @"
 import sys
@@ -381,7 +381,7 @@ config = config_manager.get_default_config()
 # 模拟工作流程设置
 workflow_steps = [
     '初始化配置',
-    '视频文件验证', 
+    '视频文件验证',
     '水印检测',
     '图像修复',
     '音频处理',
@@ -403,10 +403,10 @@ except Exception as e:
 
 print('完整工作流集成测试通过')
 "@
-        
+
         Write-Host $workflowTest -ForegroundColor $Colors.Detail
         Record-TestResult "完整工作流集成" $true "工作流集成测试成功"
-        
+
     } catch {
         Record-TestResult "完整工作流集成" $false "工作流集成测试失败: $($_.Exception.Message)"
     }
@@ -417,7 +417,7 @@ print('完整工作流集成测试通过')
 if (-not $Quick) {
     Write-Host ""
     Write-Host "📚 批量处理工作流测试..." -ForegroundColor $Colors.Progress
-    
+
     try {
         $batchTest = python -c @"
 import sys
@@ -450,10 +450,10 @@ print(f'✅ 状态管理测试通过，文件状态: {status}')
 
 print('批量处理工作流测试通过')
 "@
-        
+
         Write-Host $batchTest -ForegroundColor $Colors.Detail
         Record-TestResult "批量处理工作流" $true "批量处理工作流测试成功"
-        
+
     } catch {
         Record-TestResult "批量处理工作流" $false "批量处理工作流测试失败: $($_.Exception.Message)"
     }
@@ -490,32 +490,32 @@ try:
     test_prefs = default_prefs.copy()
     test_prefs['theme'] = 'dark'
     test_prefs['language'] = 'zh_CN'
-    
+
     # 保存偏好设置
     prefs_manager.save_preferences(test_prefs, temp_prefs_file)
     print('✅ 偏好设置保存成功')
-    
+
     # 加载偏好设置
     loaded_prefs = prefs_manager.load_preferences(temp_prefs_file)
     print('✅ 偏好设置加载成功')
-    
+
     # 验证一致性
     if loaded_prefs['theme'] == 'dark' and loaded_prefs['language'] == 'zh_CN':
         print('✅ 偏好设置保存和加载一致性验证通过')
     else:
         print('❌ 偏好设置保存和加载不一致')
         sys.exit(1)
-        
+
 finally:
     if os.path.exists(temp_prefs_file):
         os.unlink(temp_prefs_file)
 
 print('用户偏好设置工作流测试通过')
 "@
-    
+
     Write-Host $preferencesTest -ForegroundColor $Colors.Detail
     Record-TestResult "用户偏好设置工作流" $true "用户偏好设置工作流测试成功"
-    
+
 } catch {
     Record-TestResult "用户偏好设置工作流" $false "用户偏好设置工作流测试失败: $($_.Exception.Message)"
 }
@@ -568,10 +568,10 @@ else:
 
 print('内存和资源管理测试完成')
 "@
-    
+
     Write-Host $memoryTest -ForegroundColor $Colors.Detail
     Record-TestResult "内存和资源管理" $true "内存和资源管理测试完成"
-    
+
 } catch {
     Record-TestResult "内存和资源管理" $false "内存和资源管理测试失败: $($_.Exception.Message)"
 }

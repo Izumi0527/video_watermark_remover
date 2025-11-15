@@ -1,8 +1,5 @@
 """
-Tests package for the Video Watermark Remover application.
+单元测试包
 
-This package will contain unit tests and integration tests
-for various modules of the application.
-
-Example test frameworks: unittest (built-in), pytest.
+包含所有单元测试和集成测试模块。
 """

@@ -1,0 +1,41 @@
+[flake8]
+# Max line length (consistent with Black)
+max-line-length = 100
+
+# Max complexity (cyclomatic complexity)
+max-complexity = 10
+
+# Ignored errors
+ignore =
+    # E203: whitespace before ':' (conflicts with Black)
+    E203,
+    # W503: line break before binary operator (conflicts with Black)
+    W503,
+    # E501: line too long (controlled by max-line-length)
+    E501,
+
+# Excluded directories
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    build,
+    dist,
+    *.egg-info,
+    .mypy_cache,
+    .pytest_cache,
+    .tox,
+    docs,
+    scripts,
+    models,
+
+# Max docstring line length
+max-doc-length = 100
+
+# Docstring convention (requires flake8-docstrings plugin)
+docstring-convention = google
+
+# Show statistics
+statistics = True
+count = True

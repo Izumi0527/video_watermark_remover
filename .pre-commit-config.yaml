@@ -1,0 +1,83 @@
+# Pre-commit hooks 配置
+# 用于在 git commit 前自动运行代码质量检查
+#
+# 安装方法:
+#   1. 安装 pre-commit: uv pip install pre-commit
+#   2. 安装 git hooks: pre-commit install
+#   3. (可选) 对所有文件运行: pre-commit run --all-files
+#
+# 使用方法:
+#   - git commit 时会自动运行这些检查
+#   - 如果检查失败,提交会被阻止
+#   - Black 会自动修复格式问题,需要重新 add 和 commit
+#   - Flake8 和 MyPy 需要手动修复问题
+
+repos:
+  # Black - 代码格式化
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=100]
+
+  # isort - 导入排序
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=100]
+
+  # Flake8 - 代码风格检查
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: [--config=.flake8]
+        additional_dependencies: [flake8-docstrings]
+
+  # MyPy - 类型检查
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - types-setuptools
+        exclude: ^tests/
+
+  # Trailing whitespace - 删除行尾空格
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: detect-private-key
+
+  # Bandit - 安全检查
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.6
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml]
+        additional_dependencies: ["bandit[toml]"]
+        exclude: ^tests/
+
+# CI 配置 (可选)
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
