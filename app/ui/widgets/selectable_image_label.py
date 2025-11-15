@@ -10,13 +10,11 @@
 从 image_selector_widget.py 重构拆分
 作者: Claude Code Assistant
 创建时间: 2025-09-06
-版本: v1.0 (重构版)
+版本: v1.1 (延迟导入优化)
 """
 
 from typing import List, Optional, Tuple
 
-import cv2
-import numpy as np
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
@@ -131,7 +129,7 @@ class SelectableImageLabel(QLabel):
             self.setText(f"❌ 图像加载失败\n{str(e)}")
             return False
 
-    def setImageFromArray(self, image_array: np.ndarray) -> bool:
+    def setImageFromArray(self, image_array: "np.ndarray") -> bool:
         """
         从numpy数组设置图像
 
@@ -142,6 +140,10 @@ class SelectableImageLabel(QLabel):
             转换是否成功
         """
         try:
+            # 延迟导入：只在实际使用时才导入OpenCV和NumPy
+            import cv2
+            import numpy as np
+
             # 转换BGR到RGB
             rgb_image = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
 

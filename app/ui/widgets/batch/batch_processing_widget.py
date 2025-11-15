@@ -51,6 +51,12 @@ class BatchProcessingWidget(QWidget):
         self.ai_params = {}
         self.config = None
 
+        # AI模型预加载支持
+        self.preloaded_ai_handler = None
+
+        # 并发处理配置
+        self.max_concurrent_files = 4  # 默认并发处理4个文件
+
         # UI组件引用
         self.ui_components = {}
         self.control_buttons = {}
@@ -100,6 +106,24 @@ class BatchProcessingWidget(QWidget):
         """设置配置"""
         self.config = config
 
+    def set_preloaded_ai_handler(self, ai_handler):
+        """
+        设置预加载的AI处理器
+
+        Args:
+            ai_handler: 预加载的AIHandler实例，用于批量处理时复用
+        """
+        self.preloaded_ai_handler = ai_handler
+
+    def set_max_concurrent_files(self, max_concurrent: int):
+        """
+        设置最大并发文件数
+
+        Args:
+            max_concurrent: 最大并发文件数（建议1-8，默认4）
+        """
+        self.max_concurrent_files = max(1, min(max_concurrent, 8))  # 限制在1-8之间
+
     def add_files(self):
         """添加文件到队列"""
         selected_files = self.file_manager.show_add_files_dialog()
@@ -130,8 +154,15 @@ class BatchProcessingWidget(QWidget):
         # 重置所有文件状态为等待
         self.file_manager.reset_all_files_to_waiting()
 
-        # 创建并启动批量处理线程
-        self.batch_processor = BatchProcessorThread(queue, self.ai_params, self.config, self)
+        # 创建并启动批量处理线程（支持预加载AI模型和并发处理）
+        self.batch_processor = BatchProcessorThread(
+            queue=queue,
+            ai_params=self.ai_params,
+            config=self.config,
+            preloaded_ai_handler=self.preloaded_ai_handler,  # 传递预加载的AI处理器
+            max_concurrent_files=self.max_concurrent_files,  # 传递并发数配置
+            parent=self,
+        )
 
         # 连接信号
         self.batch_processor.current_file_changed.connect(self._on_current_file_changed)
@@ -172,21 +203,34 @@ class BatchProcessingWidget(QWidget):
         self.control_buttons["clear_queue"].setEnabled(not processing)
 
     def _reset_ui_state(self):
-        """重置UI状态"""
+        """重置UI状态 (Phase 4 Stage 1.4 - 增强版)"""
         self._set_processing_ui_state(False)
         self.ui_components["current_progress_bar"].setValue(0)
         self.ui_components["overall_progress_bar"].setValue(0)
+        self._update_statistics()  # 更新统计信息
+
+    def _update_statistics(self):
+        """更新批量处理统计信息 (Phase 4 Stage 1.4)"""
+        stats = self.file_manager.get_queue_statistics()
+
+        # 更新统计标签
+        self.ui_components["total_label"].setText(f"总计: {stats['total']}")
+        self.ui_components["success_label"].setText(f"✅ 成功: {stats['completed']}")
+        self.ui_components["failed_label"].setText(f"❌ 失败: {stats['failed']}")
+        self.ui_components["waiting_label"].setText(f"⏳ 等待: {stats['waiting']}")
+        self.ui_components["concurrent_label"].setText(f"🔄 处理中: {stats['processing']}")
 
     # 批量处理事件处理方法
     def _on_current_file_changed(self, index: int, filename: str):
-        """当前处理文件变化"""
+        """当前处理文件变化 (Phase 4 Stage 1.4 - 增强版)"""
         self.ui_components["current_file_label"].setText(f"正在处理: {filename}")
         queue_manager = self.file_manager.get_queue_manager()
         queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
         self._update_queue_display()
+        self._update_statistics()  # 更新统计信息
 
     def _on_file_progress(self, progress: int, file_index: int):
-        """文件处理进度更新"""
+        """文件处理进度更新 (Phase 4 Stage 1.4 - 增强版)"""
         self.ui_components["current_progress_bar"].setValue(progress)
         queue_manager = self.file_manager.get_queue_manager()
         queue_manager.update_file_status(file_index, ProcessingStatus.PROCESSING, progress)
@@ -197,11 +241,12 @@ class BatchProcessingWidget(QWidget):
         self.ui_components["overall_progress_bar"].setValue(progress)
 
     def _on_file_completed(self, index: int, output_path: str, success: bool):
-        """文件处理完成"""
+        """文件处理完成 (Phase 4 Stage 1.4 - 增强版)"""
         status = ProcessingStatus.COMPLETED if success else ProcessingStatus.FAILED
         queue_manager = self.file_manager.get_queue_manager()
         queue_manager.update_file_status(index, status, 100)
         self._update_queue_display()
+        self._update_statistics()  # 更新统计信息
 
     def _on_batch_completed(self):
         """批量处理完成"""

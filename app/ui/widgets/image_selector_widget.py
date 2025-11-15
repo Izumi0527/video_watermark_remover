@@ -9,15 +9,21 @@
 
 重构完成日期: 2025-09-06
 作者: Claude Code Assistant
-版本: v1.0 (重构版)
+版本: v1.1 (延迟导入优化)
 """
 
 import sys
-from typing import List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple
 
-import numpy as np
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .selectable_image_label import SelectableImageLabel
 
@@ -74,7 +80,7 @@ class ImageSelectorWidget(QWidget):
             self.info_label.setText("拖拽鼠标选择水印区域")
         return result
 
-    def setImageFromArray(self, image_array: np.ndarray) -> bool:
+    def setImageFromArray(self, image_array: "np.ndarray") -> bool:
         """从数组设置图像"""
         result = self.image_label.setImageFromArray(image_array)
         if result:

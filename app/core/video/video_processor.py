@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from configparser import ConfigParser
 from typing import Any, Dict, Optional, Tuple
 
@@ -23,6 +24,8 @@ class VideoProcessorThread(QThread):
     """
     Handles video processing in a separate thread to avoid freezing the GUI.
     Emits signals for progress, status updates, and completion.
+
+    Version: v1.1 (Phase 4 Stage 1.4 - Enhanced Progress Indicators)
     """
 
     progress = pyqtSignal(int)  # Percentage of completion
@@ -31,12 +34,16 @@ class VideoProcessorThread(QThread):
     error = pyqtSignal(str)  # Error messages
     preview_update = pyqtSignal(object)  # Processed frame for preview
 
+    # 新增: 详细进度信号 (Phase 4 Stage 1.4)
+    detailed_progress = pyqtSignal(dict)  # 详细进度信息字典
+
     def __init__(
         self,
         input_path: str,
         output_path: str,
         ai_params: Optional[Dict[str, Any]],
         config: Optional[ConfigParser] = None,
+        preloaded_ai_handler: Optional[AIHandler] = None,
         parent: Optional[QThread] = None,
     ) -> None:
         super().__init__(parent)
@@ -44,13 +51,22 @@ class VideoProcessorThread(QThread):
         self.output_path = output_path
         self.ai_params = ai_params or {}
         self.config = config
-        self.ai_handler: Optional[AIHandler] = None
+        self.ai_handler: Optional[AIHandler] = preloaded_ai_handler  # 使用预加载的AI处理器
         self.ffmpeg_processor: Optional[FFmpegAudioProcessor] = None
         self._is_running = True
+
+        # 进度跟踪 (Phase 4 Stage 1.4)
+        self._start_time = 0.0  # 处理开始时间
+        self._last_frame_time = 0.0  # 上一帧处理时间
+        self._processing_speeds = []  # 处理速度历史记录 (用于平滑计算)
+        self._current_phase = "idle"  # 当前处理阶段
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"VideoProcessorThread initialized for {input_path}")
+
+        if preloaded_ai_handler:
+            self.logger.info("使用预加载的AI模型，处理速度将得到优化")
 
         # Initialize FFmpeg processor
         self.ffmpeg_processor = FFmpegAudioProcessor(config)
@@ -59,20 +75,89 @@ class VideoProcessorThread(QThread):
         else:
             self.logger.warning("FFmpeg not available, audio will not be preserved")
 
+    def _emit_detailed_progress(
+        self,
+        phase: str,
+        current_frame: int = 0,
+        total_frames: int = 0,
+        additional_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        发送详细进度信息
+
+        Args:
+            phase: 当前处理阶段 (loading_models, detecting_watermarks, processing_frames, merging_audio)
+            current_frame: 当前处理的帧数
+            total_frames: 总帧数
+            additional_info: 额外信息字典
+        """
+        self._current_phase = phase
+
+        # 计算时间信息
+        current_time = time.time()
+        time_elapsed = current_time - self._start_time if self._start_time > 0 else 0
+
+        # 计算处理速度 (fps)
+        processing_speed = 0.0
+        eta = 0.0
+
+        if current_frame > 0 and time_elapsed > 0:
+            # 当前瞬时速度
+            instant_speed = current_frame / time_elapsed
+
+            # 添加到历史记录 (最多保留10个样本)
+            self._processing_speeds.append(instant_speed)
+            if len(self._processing_speeds) > 10:
+                self._processing_speeds.pop(0)
+
+            # 使用平滑后的速度 (移动平均)
+            processing_speed = sum(self._processing_speeds) / len(self._processing_speeds)
+
+            # 计算ETA
+            if processing_speed > 0 and total_frames > 0:
+                remaining_frames = total_frames - current_frame
+                eta = remaining_frames / processing_speed
+
+        # 构建详细进度字典
+        progress_data = {
+            "phase": phase,
+            "current_frame": current_frame,
+            "total_frames": total_frames,
+            "processing_speed": processing_speed,  # fps
+            "time_elapsed": time_elapsed,  # seconds
+            "eta": eta,  # seconds
+            "percentage": int((current_frame / total_frames) * 100) if total_frames > 0 else 0,
+        }
+
+        # 添加额外信息
+        if additional_info:
+            progress_data.update(additional_info)
+
+        # 发送信号
+        self.detailed_progress.emit(progress_data)
+
     def run(self) -> None:
         """
         Main processing loop for images and videos.
         Reads input file, applies AI processing, and writes output.
         """
         try:
+            # 开始计时 (Phase 4 Stage 1.4)
+            self._start_time = time.time()
+
             self.status.emit(f"🚀 开始处理文件: {os.path.basename(self.input_path)}")
 
-            # Initialize AI handler
-            self.ai_handler = AIHandler(self.config, self.ai_params)
-            if not self.ai_handler.load_models():
-                raise ModelLoadError("无法加载 AI 模型")
-
-            self.status.emit("🤖 AI 模型加载完成")
+            # Initialize AI handler (如果没有预加载，则现在加载)
+            if self.ai_handler is None:
+                self._emit_detailed_progress("loading_models", 0, 1)
+                self.status.emit("🔄 正在加载AI模型...")
+                self.ai_handler = AIHandler(self.config, self.ai_params)
+                if not self.ai_handler.load_models():
+                    raise ModelLoadError("无法加载 AI 模型")
+                self._emit_detailed_progress("loading_models", 1, 1)
+                self.status.emit("🤖 AI 模型加载完成")
+            else:
+                self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
 
             # Determine file type and process accordingly
             file_ext = os.path.splitext(self.input_path)[1].lower()
@@ -202,6 +287,9 @@ class VideoProcessorThread(QThread):
             processed_frames = 0
             total_watermark_areas = 0
 
+            # 发送初始详细进度 (Phase 4 Stage 1.4)
+            self._emit_detailed_progress("processing_frames", 0, total_frames)
+
             while self._is_running and cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
@@ -238,6 +326,18 @@ class VideoProcessorThread(QThread):
                 if current_frame % max(1, int(fps)) == 0:
                     self.status.emit(f"🎨 处理中: {current_frame}/{total_frames} 帧")
 
+                # 发送详细进度 (Phase 4 Stage 1.4) - 每10帧或每秒更新一次
+                if current_frame % max(1, int(fps / 10)) == 0:
+                    self._emit_detailed_progress(
+                        "processing_frames",
+                        current_frame,
+                        total_frames,
+                        {
+                            "processed_frames": processed_frames,
+                            "total_watermark_areas": total_watermark_areas,
+                        },
+                    )
+
                 # Emit preview update every 30 frames
                 if current_frame % 30 == 0:
                     self.preview_update.emit(processed_frame)
@@ -263,6 +363,8 @@ class VideoProcessorThread(QThread):
                 if os.path.exists(self.output_path):
                     os.rename(self.output_path, temp_video_path)
 
+                # 发送音频合并阶段进度 (Phase 4 Stage 1.4)
+                self._emit_detailed_progress("merging_audio", 0, 1)
                 self.status.emit("🎵 正在合并原始音频...")
                 self.progress.emit(95)
 
@@ -275,6 +377,7 @@ class VideoProcessorThread(QThread):
 
                 if audio_success:
                     self.logger.info("Audio merged successfully")
+                    self._emit_detailed_progress("merging_audio", 1, 1)
                     self.status.emit("✅ 音频合并完成")
                 else:
                     self.logger.warning("Audio merge failed, using video-only output")

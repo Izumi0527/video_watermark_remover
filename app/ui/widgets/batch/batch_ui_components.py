@@ -110,7 +110,7 @@ class BatchUIComponents:
     @staticmethod
     def create_progress_group() -> Tuple[QGroupBox, Dict[str, Any]]:
         """
-        创建进度显示组
+        创建进度显示组 (Phase 4 Stage 1.4 - 增强版)
 
         Returns:
             (分组框, 进度组件字典)
@@ -119,8 +119,45 @@ class BatchUIComponents:
         progress_layout = QVBoxLayout(progress_group)
         progress_components = {}
 
+        # 统计信息区域 (Phase 4 Stage 1.4)
+        stats_layout = QHBoxLayout()
+
+        # 总文件数
+        total_label = QLabel("总计: 0")
+        total_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #E3F2FD; border-radius: 3px;")
+        progress_components["total_label"] = total_label
+        stats_layout.addWidget(total_label)
+
+        # 成功数
+        success_label = QLabel("✅ 成功: 0")
+        success_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #E8F5E9; border-radius: 3px;")
+        progress_components["success_label"] = success_label
+        stats_layout.addWidget(success_label)
+
+        # 失败数
+        failed_label = QLabel("❌ 失败: 0")
+        failed_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #FFEBEE; border-radius: 3px;")
+        progress_components["failed_label"] = failed_label
+        stats_layout.addWidget(failed_label)
+
+        # 等待数
+        waiting_label = QLabel("⏳ 等待: 0")
+        waiting_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #FFF9C4; border-radius: 3px;")
+        progress_components["waiting_label"] = waiting_label
+        stats_layout.addWidget(waiting_label)
+
+        # 并发处理数 (Phase 4 Stage 1.4)
+        concurrent_label = QLabel("🔄 处理中: 0")
+        concurrent_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #F3E5F5; border-radius: 3px;")
+        progress_components["concurrent_label"] = concurrent_label
+        stats_layout.addWidget(concurrent_label)
+
+        stats_layout.addStretch()
+        progress_layout.addLayout(stats_layout)
+
         # 当前文件信息
         current_file_label = QLabel("等待开始处理...")
+        current_file_label.setStyleSheet("font-size: 12px; color: #666; margin-top: 10px;")
         progress_components["current_file_label"] = current_file_label
         progress_layout.addWidget(current_file_label)
 
@@ -128,6 +165,20 @@ class BatchUIComponents:
         current_progress_bar = QProgressBar()
         current_progress_bar.setRange(0, 100)
         current_progress_bar.setValue(0)
+        current_progress_bar.setStyleSheet(
+            """
+            QProgressBar {
+                border: 2px solid #ccc;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #2196F3;
+                border-radius: 3px;
+            }
+        """
+        )
         progress_components["current_progress_bar"] = current_progress_bar
         progress_layout.addWidget(current_progress_bar)
 
@@ -137,6 +188,20 @@ class BatchUIComponents:
         overall_progress_bar = QProgressBar()
         overall_progress_bar.setRange(0, 100)
         overall_progress_bar.setValue(0)
+        overall_progress_bar.setStyleSheet(
+            """
+            QProgressBar {
+                border: 2px solid #ccc;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 3px;
+            }
+        """
+        )
         progress_components["overall_progress_bar"] = overall_progress_bar
         overall_layout.addWidget(overall_progress_bar)
         progress_layout.addLayout(overall_layout)
@@ -144,7 +209,7 @@ class BatchUIComponents:
         # 状态标签
         status_label = QLabel("准备就绪")
         status_label.setStyleSheet(
-            "padding: 5px; background-color: #f0f0f0; border: 1px solid #ddd; border-radius: 3px;"
+            "padding: 8px; background-color: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; font-size: 11px;"
         )
         progress_components["status_label"] = status_label
         progress_layout.addWidget(status_label)

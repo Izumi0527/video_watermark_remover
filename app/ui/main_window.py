@@ -1,7 +1,7 @@
 import logging
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 from ..config.config_manager import ConfigManager
 from ..config.preferences import get_preferences_manager
 from ..config.styles import ModernStyleManager
+from ..core.ai.ai_handler import AIHandler
 from .components.control_panel import ControlPanel
 
 # 导入重构后的组件
@@ -16,6 +17,41 @@ from .components.file_panel import FilePanel
 from .components.log_panel import LogPanel
 from .components.preview_panel import PreviewPanel
 from .signal_handler import SignalHandler
+
+
+class AIModelPreloader(QThread):
+    """
+    AI模型预加载线程
+    在后台异步加载AI模型，避免阻塞UI，提升用户体验
+    """
+
+    # 信号：加载完成时发送AIHandler实例
+    finished = pyqtSignal(object)
+    # 信号：加载失败时发送错误信息
+    error = pyqtSignal(str)
+
+    def __init__(self, config=None, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    def run(self):
+        """后台加载AI模型"""
+        try:
+            self.logger.info("开始后台加载AI模型...")
+            # 创建AIHandler并加载模型
+            ai_handler = AIHandler(self.config, ai_params={})
+            if ai_handler.load_models():
+                self.logger.info("AI模型加载成功")
+                self.finished.emit(ai_handler)
+            else:
+                error_msg = "AI模型加载失败"
+                self.logger.error(error_msg)
+                self.error.emit(error_msg)
+        except Exception as e:
+            error_msg = f"AI模型加载异常: {str(e)}"
+            self.logger.error(error_msg)
+            self.error.emit(error_msg)
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +71,11 @@ class MainWindow(QMainWindow):
 
         # 初始化核心属性
         self.config = config or ConfigManager.load_config()
+
+        # AI模型预加载相关
+        self.ai_handler = None  # 预加载的AI处理器（全局共享）
+        self.ai_preload_thread = None  # 预加载线程
+        self.ai_models_ready = False  # AI模型是否已就绪
 
         # 初始化偏好设置和样式管理
         self.preferences = get_preferences_manager()
@@ -56,6 +97,7 @@ class MainWindow(QMainWindow):
             log_panel=self.log_panel,
             preferences=self.preferences,
             style_manager=self.style_manager,
+            main_window=self,  # 传入主窗口引用，以便访问预加载的AI模型
             parent=self,
         )
 
@@ -67,6 +109,9 @@ class MainWindow(QMainWindow):
         # 设置日志
         self.logger = logging.getLogger(__name__)
         self.logger.info("MainWindow initialized successfully (refactored version)")
+
+        # 🚀 延迟500ms后启动AI模型预加载（不阻塞UI）
+        QTimer.singleShot(500, self._start_preload_ai_models)
 
     def _init_ui(self):
         """初始化用户界面 - 模块化组件组装"""
@@ -218,6 +263,35 @@ class MainWindow(QMainWindow):
         # 恢复预览标签页
         tab_index = self.preferences.get_preference("ui", "preview_tab_index", 0)
         self.preview_panel.set_current_tab_index(tab_index)
+
+    def _start_preload_ai_models(self):
+        """启动AI模型预加载线程"""
+        try:
+            self.logger.info("开始预加载AI模型...")
+            self.lbl_status.setText("🔄 正在后台加载AI模型...")
+
+            # 创建并启动预加载线程
+            self.ai_preload_thread = AIModelPreloader(self.config, self)
+            self.ai_preload_thread.finished.connect(self._on_ai_models_loaded)
+            self.ai_preload_thread.error.connect(self._on_ai_models_load_error)
+            self.ai_preload_thread.start()
+
+        except Exception as e:
+            self.logger.error(f"启动AI模型预加载失败: {e}")
+            self.lbl_status.setText("⚠️ AI模型预加载失败，首次处理时将重新加载")
+
+    def _on_ai_models_loaded(self, ai_handler):
+        """AI模型加载完成回调"""
+        self.ai_handler = ai_handler
+        self.ai_models_ready = True
+        self.lbl_status.setText("✅ AI模型已就绪，可以开始处理")
+        self.logger.info("AI模型预加载完成，处理速度将得到优化")
+
+    def _on_ai_models_load_error(self, error_msg):
+        """AI模型加载失败回调"""
+        self.ai_models_ready = False
+        self.lbl_status.setText(f"⚠️ AI模型加载失败: {error_msg}，首次处理时将重新加载")
+        self.logger.warning(f"AI模型预加载失败: {error_msg}")
 
     def closeEvent(self, event):
         """窗口关闭事件处理"""

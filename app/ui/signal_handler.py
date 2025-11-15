@@ -14,6 +14,9 @@ import logging
 from typing import Optional, List, Any
 from PyQt6.QtCore import QObject, pyqtSignal
 
+# 导入视频处理线程
+from ..core.video.video_processor import VideoProcessorThread
+
 
 class SignalHandler(QObject):
     """
@@ -34,7 +37,8 @@ class SignalHandler(QObject):
         log_panel,
         preferences,
         style_manager,
-        parent: Optional[QObject] = None
+        main_window=None,
+        parent: Optional[QObject] = None,
     ):
         """
         初始化信号处理器
@@ -46,6 +50,7 @@ class SignalHandler(QObject):
             log_panel: 日志面板组件
             preferences: 偏好设置管理器
             style_manager: 样式管理器
+            main_window: 主窗口引用（用于访问共享资源如预加载的AI模型）
             parent: 父对象（可选）
         """
         super().__init__(parent)
@@ -57,6 +62,7 @@ class SignalHandler(QObject):
         self.log_panel = log_panel
         self.preferences = preferences
         self.style_manager = style_manager
+        self.main_window = main_window  # 主窗口引用
 
         # 初始化状态变量
         self.input_file_path: Optional[str] = None
@@ -218,7 +224,7 @@ class SignalHandler(QObject):
     # ==================== 处理控制信号 ====================
 
     def handle_start_processing(self) -> None:
-        """处理开始处理请求"""
+        """处理开始处理请求 (Phase 4 Stage 1.4 - 集成详细进度)"""
         if not self.input_file_path:
             self.log_panel.add_warning_log("请先选择要处理的文件")
             return
@@ -230,8 +236,47 @@ class SignalHandler(QObject):
             # 显示处理进度状态
             self.preview_panel.show_processing_progress()
 
-            # TODO: 集成VideoProcessorThread
-            self.logger.info("Processing started")
+            # 准备输出路径
+            import os
+            input_dir = os.path.dirname(self.input_file_path)
+            input_filename = os.path.basename(self.input_file_path)
+            input_name, input_ext = os.path.splitext(input_filename)
+            output_path = os.path.join(input_dir, f"{input_name}_processed{input_ext}")
+
+            # 创建VideoProcessorThread实例
+            ai_params = {
+                "auto_detect": self.preferences.get_preference("processing", "auto_mode"),
+                "detection_sensitivity": self.preferences.get_preference("advanced", "detection_sensitivity"),
+                "user_mask": None,  # TODO: 从手动选择获取
+            }
+
+            # 使用预加载的AI模型 (如果可用)
+            preloaded_ai_handler = None
+            if self.main_window and hasattr(self.main_window, 'ai_handler'):
+                preloaded_ai_handler = self.main_window.ai_handler
+
+            self.video_processor = VideoProcessorThread(
+                input_path=self.input_file_path,
+                output_path=output_path,
+                ai_params=ai_params,
+                config=None,  # TODO: 传递config
+                preloaded_ai_handler=preloaded_ai_handler,
+            )
+
+            # 连接信号
+            self.video_processor.progress.connect(self.control_panel.update_progress)
+            self.video_processor.status.connect(self.log_panel.add_status_message)
+            self.video_processor.finished.connect(self._on_processing_finished)
+            self.video_processor.error.connect(self._on_processing_error)
+            self.video_processor.preview_update.connect(self.preview_panel.update_preview)
+
+            # 连接详细进度信号 (Phase 4 Stage 1.4)
+            self.video_processor.detailed_progress.connect(self.control_panel.update_detailed_progress)
+
+            # 启动处理线程
+            self.video_processor.start()
+
+            self.logger.info("Processing started with detailed progress tracking")
 
         except Exception as e:
             error_msg = f"处理启动失败: {str(e)}"
@@ -239,9 +284,31 @@ class SignalHandler(QObject):
             self.control_panel.set_processing_state(False)
             self.logger.error(error_msg)
 
-    def handle_stop_processing(self) -> None:
-        """处理停止处理请求"""
+    def _on_processing_finished(self, output_path: str):
+        """处理完成回调 (Phase 4 Stage 1.4)"""
         self.control_panel.set_processing_state(False)
+        if output_path:
+            self.log_panel.add_success_message(f"处理完成: {output_path}")
+            self.status_updated.emit("处理完成")
+            # TODO: 自动加载处理后的结果
+        else:
+            self.log_panel.add_warning_log("处理被取消")
+            self.status_updated.emit("处理取消")
+
+    def _on_processing_error(self, error_msg: str):
+        """处理错误回调 (Phase 4 Stage 1.4)"""
+        self.control_panel.set_processing_state(False)
+        self.log_panel.add_error_message(f"处理失败: {error_msg}")
+        self.status_updated.emit("处理失败")
+
+    def handle_stop_processing(self) -> None:
+        """处理停止处理请求 (Phase 4 Stage 1.4)"""
+        if hasattr(self, 'video_processor') and self.video_processor:
+            self.video_processor.stop()
+            self.video_processor.wait(5000)  # 等待最多5秒
+
+        self.control_panel.set_processing_state(False)
+        self.control_panel.reset_progress()  # 同时重置详细进度
         self.status_updated.emit("处理已停止")
         self.logger.info("Processing stopped")
 

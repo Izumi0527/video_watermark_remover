@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .detailed_progress_widget import DetailedProgressWidget
+
 
 class ControlPanel(QWidget):
     """
@@ -101,11 +103,15 @@ class ControlPanel(QWidget):
         main_layout.addWidget(control_group)
 
     def _create_progress_group(self, main_layout):
-        """创建进度显示组"""
+        """创建进度显示组 (Phase 4 Stage 1.4 - 增强版)"""
         progress_group = QGroupBox("处理进度")
         progress_layout = QVBoxLayout(progress_group)
 
-        # 进度条
+        # 添加详细进度组件 (Phase 4 Stage 1.4)
+        self.detailed_progress = DetailedProgressWidget()
+        progress_layout.addWidget(self.detailed_progress)
+
+        # 保留原有的简单进度条 (用于兼容性)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -124,7 +130,8 @@ class ControlPanel(QWidget):
             }
         """
         )
-        progress_layout.addWidget(self.progress_bar)
+        # 隐藏简单进度条,使用详细进度组件代替
+        self.progress_bar.hide()
 
         main_layout.addWidget(progress_group)
 
@@ -215,3 +222,13 @@ class ControlPanel(QWidget):
     def reset_progress(self):
         """重置进度条"""
         self.progress_bar.setValue(0)
+        self.detailed_progress.reset()
+
+    def update_detailed_progress(self, progress_data: dict):
+        """
+        更新详细进度信息 (Phase 4 Stage 1.4)
+
+        Args:
+            progress_data: 详细进度数据字典
+        """
+        self.detailed_progress.update_progress(progress_data)
