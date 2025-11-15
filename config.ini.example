@@ -1,0 +1,128 @@
+# 智能视频水印去除工具 - 配置文件模板
+# ============================================================
+# 使用说明：
+# 1. 将此文件复制为 config.ini（在同一目录下）
+#    Windows: copy config.ini.example config.ini
+#    Linux/Mac: cp config.ini.example config.ini
+# 2. 根据需要修改配置项
+# 3. 修改配置后需要重启应用程序才能生效
+# 4. 如需恢复默认设置，删除 config.ini 后重启程序即可
+# ============================================================
+
+[Paths]
+# FFmpeg可执行文件路径（如果FFmpeg在系统PATH中，使用"ffmpeg"即可）
+ffmpeg_path = ffmpeg
+
+# 默认模型存储目录（相对于项目根目录）
+default_model_dir = ./models
+
+# 最后使用的输入目录（程序会自动更新此选项）
+last_input_dir =
+
+# 最后使用的输出目录（程序会自动更新此选项）
+last_output_dir =
+
+[Processing]
+# 默认输出文件后缀
+default_output_suffix = _processed
+
+# 是否自动开始处理（选项：yes/no）
+auto_start_processing = no
+
+# GPU加速设置（选项：auto/yes/no）
+# auto: 自动检测并使用GPU（如果可用）
+# yes: 强制使用GPU（如果不可用则报错）
+# no: 仅使用CPU处理
+gpu_acceleration = auto
+
+# 默认检测敏感度（0.1-1.0，值越高检测越敏感）
+default_detection_sensitivity = 0.5
+
+# 默认修复方法（选项：auto/telea/navier_stokes）
+default_inpainting_method = auto
+
+# 是否保留音频（选项：yes/no）
+preserve_audio = yes
+
+# 输出质量（选项：low/medium/high）
+output_quality = high
+
+[Logging]
+# 日志级别（选项：DEBUG/INFO/WARNING/ERROR/CRITICAL）
+# DEBUG: 详细的调试信息
+# INFO: 一般信息
+# WARNING: 警告信息
+# ERROR: 错误信息
+# CRITICAL: 严重错误信息
+log_level = INFO
+
+# 日志文件路径（相对路径或绝对路径）
+log_file_path = logs/app.log
+
+# 是否在控制台显示日志（选项：yes/no）
+console_logging = yes
+
+# 日志文件最大大小（MB），超过后自动轮转
+max_log_file_size = 10
+
+# 保留的日志文件数量
+log_file_backup_count = 5
+
+[Models]
+# 水印检测模型路径（当前版本使用OpenCV，此选项保留供未来使用）
+detection_model_path =
+
+# 图像修复模型路径（当前版本使用OpenCV，此选项保留供未来使用）
+inpainting_model_path =
+
+# 默认置信度阈值（0.0-1.0）
+default_confidence_threshold = 0.5
+
+# 模型类型（选项：opencv/deep_learning）
+model_type = opencv
+
+[UI]
+# 默认主题（选项：dark/light）
+default_theme = dark
+
+# 默认窗口大小
+default_window_width = 1400
+default_window_height = 900
+
+# 是否在启动时最大化窗口（选项：yes/no）
+start_maximized = no
+
+# 是否记住窗口位置和大小（选项：yes/no）
+remember_window_geometry = yes
+
+[Advanced]
+# 最大线程数（-1表示自动检测，0表示单线程，>0表示指定线程数）
+max_threads = -1
+
+# 缓存大小（MB）
+cache_size_mb = 512
+
+# 是否启用缓存（选项：yes/no）
+enable_cache = yes
+
+# 自动保存间隔（秒，0表示不自动保存）
+auto_save_interval = 300
+
+# 临时文件清理策略（选项：always/on_exit/manual）
+temp_file_cleanup = on_exit
+
+[Batch]
+# 批量处理时的最大并发文件数
+max_concurrent_files = 1
+
+# 是否自动重试失败的文件（选项：yes/no）
+auto_retry_failed = yes
+
+# 失败重试次数
+max_retry_count = 3
+
+# 是否在处理完成后删除临时文件（选项：yes/no）
+delete_temp_files = yes
+
+# 是否显示详细的处理进度（选项：yes/no）
+show_progress_details = yes

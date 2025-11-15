@@ -1,0 +1,69 @@
+# 智能视频水印去除工具 - 开发环境依赖
+# 包含开发、测试、调试所需的所有工具
+
+# 继承生产环境依赖
+-r requirements.txt
+
+# ===== 开发工具 =====
+# 代码格式化和检查
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.0.0
+pylint>=2.17.0
+
+# 测试框架
+pytest>=7.0.0
+pytest-qt>=4.2.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
+# 文档生成
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+
+# 调试工具
+ipdb>=0.13.0
+pdbpp>=0.10.3
+
+# 性能分析
+memory-profiler>=0.60.0
+line-profiler>=4.0.0
+
+# 代码安全检查
+bandit>=1.7.0
+safety>=2.3.0
+
+# Git钩子
+pre-commit>=3.0.0
+
+# 依赖管理
+pip-tools>=6.12.0
+pipdeptree>=2.7.0
+
+# 打包工具
+build>=0.10.0
+twine>=4.0.0
+wheel>=0.40.0
+
+# IDE支持
+python-lsp-server>=1.7.0
+pylsp-mypy>=0.6.0
+
+# ===== 开发环境设置 =====
+# 1. 安装开发依赖：
+#    pip install -r requirements-dev.txt
+#
+# 2. 设置pre-commit钩子：
+#    pre-commit install
+#
+# 3. 运行代码检查：
+#    black . --check
+#    flake8 .
+#    mypy app/
+#
+# 4. 运行测试：
+#    pytest tests/ -v --cov=app
+#
+# 5. 生成文档：
+#    cd docs && make html

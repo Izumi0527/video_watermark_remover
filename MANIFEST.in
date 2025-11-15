@@ -1,0 +1,58 @@
+# 智能视频水印去除工具 - 项目清单文件
+# 确保所有必要文件都包含在发布中
+
+include README.md
+include LICENSE
+include CHANGELOG.md
+include PHASE3_COMPLETION_SUMMARY.md
+
+# 依赖文件
+include requirements.txt
+include requirements-minimal.txt
+include requirements-dev.txt
+
+# 安装脚本
+include install.sh
+include install.bat
+include setup.py
+
+# 配置文件
+include configs/*.ini
+recursive-include configs *
+
+# 应用程序文件
+recursive-include app *.py
+recursive-include app *.ui
+recursive-include app *.qrc
+
+# 测试文件
+include test_*.py
+recursive-include tests *.py
+
+# 资源文件
+recursive-include assets *
+recursive-include icons *.png *.ico *.icns
+recursive-include docs *.md *.rst *.txt
+
+# 排除不必要的文件
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude Thumbs.db
+global-exclude *.tmp
+global-exclude *.log
+
+# 排除开发文件
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude tox.ini
+exclude .coverage
+prune .vscode
+prune .idea
+prune venv
+prune env
+prune .pytest_cache
+prune .mypy_cache

@@ -1,0 +1,115 @@
+{
+  "model_info": {
+    "name": "WatermarkRemovalNet",
+    "version": "2.1.0",
+    "description": "深度学习水印去除模型，基于UNet架构",
+    "author": "AI Research Team",
+    "created_date": "2024-01-15",
+    "updated_date": "2024-06-20",
+    "license": "MIT"
+  },
+  
+  "model_specs": {
+    "framework": "PyTorch",
+    "framework_version": "2.1.0",
+    "model_size_mb": 45.2,
+    "parameters_count": 12500000,
+    "input_shape": [3, 512, 512],
+    "output_shape": [3, 512, 512],
+    "supported_formats": ["pth", "onnx", "tensorrt"]
+  },
+  
+  "performance": {
+    "inference_time_ms": {
+      "cpu_intel_i7": 850,
+      "gpu_rtx_3080": 25,
+      "gpu_gtx_1660": 45
+    },
+    "memory_usage_mb": {
+      "cpu": 1200,
+      "gpu": 800
+    },
+    "quality_metrics": {
+      "average_psnr": 26.8,
+      "average_ssim": 0.87,
+      "processing_accuracy": 0.92
+    }
+  },
+  
+  "training_info": {
+    "dataset_size": 50000,
+    "training_epochs": 150,
+    "validation_split": 0.2,
+    "data_sources": [
+      "Watermark Dataset v3.0",
+      "Synthetic Watermark Collection",
+      "User Contributed Samples"
+    ],
+    "training_duration_hours": 48
+  },
+  
+  "compatibility": {
+    "minimum_python": "3.8",
+    "required_packages": [
+      "torch>=1.12.0",
+      "torchvision>=0.13.0",
+      "opencv-python>=4.5.0",
+      "pillow>=8.0.0",
+      "numpy>=1.21.0"
+    ],
+    "supported_os": ["Windows", "Linux", "macOS"],
+    "gpu_requirements": {
+      "minimum_vram_gb": 4,
+      "recommended_vram_gb": 8,
+      "compute_capability": "6.0+"
+    }
+  },
+  
+  "usage_examples": [
+    {
+      "scenario": "单张图像处理",
+      "code": "model.process_image('input.jpg', 'output.jpg')",
+      "description": "处理单张包含水印的图像"
+    },
+    {
+      "scenario": "批量处理",
+      "code": "model.process_batch(image_list, output_dir)",
+      "description": "批量处理多张图像"
+    },
+    {
+      "scenario": "视频处理",
+      "code": "model.process_video('input.mp4', 'output.mp4')",
+      "description": "处理视频文件中的水印"
+    }
+  ],
+  
+  "changelog": [
+    {
+      "version": "2.1.0",
+      "date": "2024-06-20",
+      "changes": [
+        "改进了对透明水印的检测能力",
+        "优化了GPU内存使用",
+        "修复了边缘处理的问题"
+      ]
+    },
+    {
+      "version": "2.0.0", 
+      "date": "2024-03-15",
+      "changes": [
+        "全新的UNet v2架构",
+        "支持更大分辨率图像",
+        "新增批量处理模式"
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "date": "2024-01-15",
+      "changes": [
+        "初始版本发布",
+        "支持常见水印类型",
+        "基础的图像处理功能"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+Please place your AI model files (e.g., .onnx, .pth) in this directory.
+
+Refer to the application's configuration (e.g., config.ini)
+to specify the paths to these models if they are not automatically detected
+or if you are using custom model names.
+
+For example:
+- detection_model.onnx
+- inpainting_model.onnx (e.g., LaMa model)
