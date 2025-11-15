@@ -134,7 +134,7 @@ class WatermarkDetector:
             final_mask: np.ndarray = np.zeros_like(combined_mask)
             for contour in contours:
                 if cv2.contourArea(contour) > min_area:
-                    cv2.fillPoly(final_mask, [contour], 255)
+                    cv2.fillPoly(final_mask, [contour], 255)  # type: ignore[arg-type]
 
             # 轻微扩张以确保完全覆盖
             kernel = cv2.getStructuringElement(MORPH_KERNEL_SHAPE, DILATE_KERNEL_SIZE)
@@ -143,7 +143,7 @@ class WatermarkDetector:
             self.logger.debug(
                 f"Watermark detection completed. Found {len(contours)} potential watermark regions"
             )
-            result_mask = final_mask.astype(np.uint8)
+            result_mask: np.ndarray = final_mask.astype(np.uint8)
             return result_mask
 
         except Exception as e:

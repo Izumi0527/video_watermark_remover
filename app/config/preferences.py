@@ -23,7 +23,7 @@
 import os
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 from pathlib import Path
 
 
@@ -86,27 +86,27 @@ class PreferencesDefaults:
     @classmethod
     def get_ui_defaults(cls) -> Dict[str, Any]:
         """获取UI相关默认设置"""
-        return cls.DEFAULT_PREFERENCES["ui"].copy()
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["ui"]).copy()
 
     @classmethod
     def get_processing_defaults(cls) -> Dict[str, Any]:
         """获取处理相关默认设置"""
-        return cls.DEFAULT_PREFERENCES["processing"].copy()
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["processing"]).copy()
 
     @classmethod
     def get_paths_defaults(cls) -> Dict[str, Any]:
         """获取路径相关默认设置"""
-        return cls.DEFAULT_PREFERENCES["paths"].copy()
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["paths"]).copy()
 
     @classmethod
     def get_advanced_defaults(cls) -> Dict[str, Any]:
         """获取高级功能默认设置"""
-        return cls.DEFAULT_PREFERENCES["advanced"].copy()
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["advanced"]).copy()
 
     @classmethod
     def get_batch_defaults(cls) -> Dict[str, Any]:
         """获取批量处理默认设置"""
-        return cls.DEFAULT_PREFERENCES["batch"].copy()
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["batch"]).copy()
 
 
 # ============================================================
