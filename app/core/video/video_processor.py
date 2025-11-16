@@ -1,3 +1,4 @@
+import gc
 import logging
 import multiprocessing
 import os
@@ -24,7 +25,6 @@ from ..exceptions import (
     VideoReadError,
     VideoWriteError,
 )
-
 
 # ============================================================================
 # Module-level function for multiprocessing (Phase 4 Stage 2.1)
@@ -309,7 +309,7 @@ def frame_writer_worker(
     progress_queue: multiprocessing.Queue,
 ) -> Tuple[bool, Optional[str]]:
     """
-    帧写入工作线程 (Phase 4 Stage 2.2)
+    帧写入工作线程 (Phase 4 Stage 2.2, 优化 Phase 4 Stage 2.4)
 
     Args:
         result_queue: 结果队列
@@ -323,6 +323,9 @@ def frame_writer_worker(
         (success, error_message)
     """
     logger = logging.getLogger(__name__)
+
+    # Phase 4 Stage 2.4: 限制缓冲区大小,避免内存占用过大
+    MAX_BUFFER_SIZE = 50
 
     out = None
     frame_buffer = {}  # 乱序缓冲区: {frame_index: processed_frame}
@@ -347,6 +350,10 @@ def frame_writer_worker(
         # 循环处理结果
         while received_count < total_frames and not stop_event.is_set():
             try:
+                # Phase 4 Stage 2.4: 如果缓冲区过大,等待写入进度
+                while len(frame_buffer) >= MAX_BUFFER_SIZE and not stop_event.is_set():
+                    time.sleep(0.01)  # 等待写入线程消化缓冲区
+
                 # 从队列取结果 (阻塞等待)
                 item = result_queue.get(timeout=1)
 
@@ -362,7 +369,9 @@ def frame_writer_worker(
 
                 # 按顺序写入
                 while next_frame_index in frame_buffer:
-                    out.write(frame_buffer.pop(next_frame_index))
+                    frame = frame_buffer.pop(next_frame_index)  # Phase 4 Stage 2.4: 立即删除
+                    out.write(frame)
+                    del frame  # Phase 4 Stage 2.4: 显式删除引用
                     next_frame_index += 1
 
                     # 发送进度 (每10帧)
@@ -378,6 +387,10 @@ def frame_writer_worker(
                         except Exception:
                             pass
 
+                    # Phase 4 Stage 2.4: 定期触发垃圾回收
+                    if next_frame_index % 50 == 0:
+                        gc.collect()
+
             except Exception as e:
                 if "timeout" not in str(e).lower():
                     logger.warning(f"Frame writer error: {e}")
@@ -385,7 +398,9 @@ def frame_writer_worker(
 
         # 写入剩余缓冲的帧
         while next_frame_index < total_frames and next_frame_index in frame_buffer:
-            out.write(frame_buffer.pop(next_frame_index))
+            frame = frame_buffer.pop(next_frame_index)
+            out.write(frame)
+            del frame  # Phase 4 Stage 2.4: 显式删除引用
             next_frame_index += 1
 
         logger.info(f"Frame writer completed: {next_frame_index}/{total_frames} frames written")
@@ -680,9 +695,7 @@ class VideoProcessorThread(QThread):
             end = total_frames if i == num_processes - 1 else (i + 1) * chunk_size
 
             # 使用 tempfile 创建临时文件路径
-            temp_path = os.path.join(
-                tempfile.gettempdir(), f"video_chunk_{i}_{os.getpid()}.mp4"
-            )
+            temp_path = os.path.join(tempfile.gettempdir(), f"video_chunk_{i}_{os.getpid()}.mp4")
             chunks.append((start, end, temp_path))
 
         self.logger.info(f"Calculated {num_processes} chunks for {total_frames} frames")
@@ -708,10 +721,10 @@ class VideoProcessorThread(QThread):
 
                 # 计算总体进度 (假设所有块平均分配)
                 chunk_progress = (current / total) if total > 0 else 0
-                overall_progress = int(
-                    (chunk_id / self.num_processes + chunk_progress / self.num_processes)
-                    * 90
-                ) + 10  # 10-100%
+                overall_progress = (
+                    int((chunk_id / self.num_processes + chunk_progress / self.num_processes) * 90)
+                    + 10
+                )  # 10-100%
 
                 # 发送 PyQt 信号
                 self.progress.emit(overall_progress)
@@ -761,9 +774,7 @@ class VideoProcessorThread(QThread):
             self.logger.info(f"Running FFmpeg merge: {' '.join(ffmpeg_cmd)}")
 
             # 3. 执行 FFmpeg
-            result = subprocess.run(
-                ffmpeg_cmd, capture_output=True, text=True, timeout=300
-            )
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
 
             # 4. 检查结果
             if result.returncode != 0:
@@ -799,12 +810,8 @@ class VideoProcessorThread(QThread):
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
 
-            self.logger.info(
-                f"Video info: {width}x{height}, {fps} fps, {total_frames} frames"
-            )
-            self.status.emit(
-                f"🚀 使用 {self.num_processes} 个进程并行处理 {total_frames} 帧"
-            )
+            self.logger.info(f"Video info: {width}x{height}, {fps} fps, {total_frames} frames")
+            self.status.emit(f"🚀 使用 {self.num_processes} 个进程并行处理 {total_frames} 帧")
 
             # 2. 计算分块
             chunks = self._calculate_chunks(total_frames, self.num_processes)
@@ -825,7 +832,9 @@ class VideoProcessorThread(QThread):
             # 5. 将 ConfigParser 转换为字典 (ConfigParser 无法 pickle)
             config_dict = None
             if self.config:
-                config_dict = {section: dict(self.config[section]) for section in self.config.sections()}
+                config_dict = {
+                    section: dict(self.config[section]) for section in self.config.sections()
+                }
 
             # 6. 并行处理
             self.status.emit("🎨 开始并行处理视频块...")
@@ -906,7 +915,9 @@ class VideoProcessorThread(QThread):
             self.logger.info(f"Multiprocess video processing completed: {self.output_path}")
 
         except Exception as e:
-            self.logger.error(f"Multiprocess processing failed, falling back to single-process: {e}")
+            self.logger.error(
+                f"Multiprocess processing failed, falling back to single-process: {e}"
+            )
             self.status.emit("⚠️ 多进程失败，切换到单进程模式")
 
             # 降级到单进程处理
@@ -954,21 +965,20 @@ class VideoProcessorThread(QThread):
             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
             cap.release()
 
-            self.logger.info(
-                f"Video info: {width}x{height}, {fps} fps, {total_frames} frames"
-            )
-            self.status.emit(
-                f"🚀 使用流水线模式处理 (读取 → {self.num_processes}进程 → 写入)"
-            )
+            self.logger.info(f"Video info: {width}x{height}, {fps} fps, {total_frames} frames")
+            self.status.emit(f"🚀 使用流水线模式处理 (读取 → {self.num_processes}进程 → 写入)")
 
             # 2. 创建队列 (Windows兼容: 使用 Manager)
             manager = multiprocessing.Manager()
 
-            # 帧队列: 缓冲待处理帧 (50帧 ≈ 310MB @1080p)
-            frame_queue = manager.Queue(maxsize=50)
+            # 动态计算队列大小 (Phase 4 Stage 2.4)
+            frame_queue_size, result_queue_size = self._calculate_queue_sizes()
 
-            # 结果队列: 缓冲处理结果 (100帧 ≈ 620MB @1080p)
-            result_queue = manager.Queue(maxsize=100)
+            # 帧队列: 缓冲待处理帧
+            frame_queue = manager.Queue(maxsize=frame_queue_size)
+
+            # 结果队列: 缓冲处理结果
+            result_queue = manager.Queue(maxsize=result_queue_size)
 
             # 进度队列: 进度报告
             progress_queue = manager.Queue()
@@ -1001,8 +1011,7 @@ class VideoProcessorThread(QThread):
             config_dict = None
             if self.config:
                 config_dict = {
-                    section: dict(self.config[section])
-                    for section in self.config.sections()
+                    section: dict(self.config[section]) for section in self.config.sections()
                 }
 
             # 启动处理进程
@@ -1189,6 +1198,46 @@ class VideoProcessorThread(QThread):
 
         except Exception as e:
             self.logger.warning(f"Pipeline progress polling error: {e}")
+
+    def _calculate_queue_sizes(self) -> Tuple[int, int]:
+        """
+        根据系统可用内存动态计算队列大小 (Phase 4 Stage 2.4)
+
+        Returns:
+            (frame_queue_size, result_queue_size)
+        """
+        try:
+            import psutil
+
+            available_mb = psutil.virtual_memory().available / (1024 * 1024)
+
+            if available_mb < 4096:
+                # 低端设备: < 4GB 可用内存
+                self.logger.info(
+                    f"Low memory detected ({available_mb:.0f}MB), using small queues (20+40)"
+                )
+                return (20, 40)
+            elif available_mb < 8192:
+                # 中端设备: 4-8GB 可用内存 (默认)
+                self.logger.info(
+                    f"Medium memory detected ({available_mb:.0f}MB), using medium queues (30+50)"
+                )
+                return (30, 50)
+            else:
+                # 高端设备: > 8GB 可用内存
+                self.logger.info(
+                    f"High memory detected ({available_mb:.0f}MB), using large queues (50+100)"
+                )
+                return (50, 100)
+
+        except ImportError:
+            # psutil 不可用,使用中等配置
+            self.logger.warning("psutil not available, using default queue sizes (30+50)")
+            return (30, 50)
+
+        except Exception as e:
+            self.logger.warning(f"Failed to detect memory: {e}, using default queue sizes (30+50)")
+            return (30, 50)
 
     def _process_video_singleprocess(self) -> None:
         """
