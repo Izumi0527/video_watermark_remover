@@ -3,12 +3,14 @@ import multiprocessing
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from configparser import ConfigParser
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
+import numpy as np
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
 from ..ai.ai_handler import AIHandler
@@ -144,6 +146,268 @@ def process_video_chunk(
         return (None, False, error_msg)
 
 
+# ============================================================================
+# Pipeline workers for Stage 2.2 (I/O & Processing Pipeline)
+# Must be at module level for pickle compatibility
+# ============================================================================
+
+
+def frame_reader_worker(
+    video_path: str,
+    frame_queue: multiprocessing.Queue,
+    total_frames: int,
+    stop_event: multiprocessing.Event,
+) -> None:
+    """
+    帧读取工作线程 (Phase 4 Stage 2.2)
+
+    Args:
+        video_path: 视频路径
+        frame_queue: 帧队列
+        total_frames: 总帧数
+        stop_event: 停止事件
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        # 打开视频文件
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.error(f"Failed to open video: {video_path}")
+            frame_queue.put(None)  # 发送结束信号
+            return
+
+        logger.info(f"Frame reader started: {total_frames} frames to read")
+
+        # 顺序读取所有帧
+        for frame_index in range(total_frames):
+            if stop_event.is_set():
+                logger.info("Frame reader stopped by user request")
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                logger.warning(f"Failed to read frame {frame_index}")
+                break
+
+            # 放入队列 (阻塞等待,如果队列满)
+            try:
+                frame_queue.put((frame_index, frame), timeout=10)
+            except Exception as e:
+                logger.error(f"Failed to put frame {frame_index} into queue: {e}")
+                break
+
+            # 每100帧输出日志
+            if frame_index % 100 == 0:
+                logger.debug(f"Frame reader: {frame_index}/{total_frames} frames read")
+
+        # 发送结束信号
+        frame_queue.put(None)
+        logger.info("Frame reader completed")
+
+    except Exception as e:
+        logger.error(f"Frame reader error: {e}")
+        frame_queue.put(None)  # 确保发送结束信号
+
+    finally:
+        if cap:
+            cap.release()
+
+
+def frame_processor_worker(
+    frame_queue: multiprocessing.Queue,
+    result_queue: multiprocessing.Queue,
+    ai_params: dict,
+    config_dict: Optional[dict],
+    stop_event: multiprocessing.Event,
+    progress_queue: multiprocessing.Queue,
+    worker_id: int,
+) -> None:
+    """
+    帧处理工作进程 (Phase 4 Stage 2.2)
+
+    Args:
+        frame_queue: 帧队列
+        result_queue: 结果队列
+        ai_params: AI 参数
+        config_dict: 配置字典
+        stop_event: 停止事件
+        progress_queue: 进度队列
+        worker_id: 工作进程ID
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        # 加载 AI 模型
+        logger.info(f"Worker {worker_id} loading AI models...")
+        ai_handler = AIHandler(None, ai_params)
+        if not ai_handler.load_models():
+            logger.error(f"Worker {worker_id} failed to load AI models")
+            return
+
+        logger.info(f"Worker {worker_id} started")
+        processed_count = 0
+
+        while not stop_event.is_set():
+            try:
+                # 从队列取帧 (阻塞等待,如果队列空)
+                item = frame_queue.get(timeout=1)
+
+                # 检查结束信号
+                if item is None:
+                    # 传递给其他进程
+                    frame_queue.put(None)
+                    logger.info(f"Worker {worker_id} received end signal")
+                    break
+
+                frame_index, frame = item
+
+                # AI 处理
+                processing_params = {
+                    "auto_detect": ai_params.get("auto_detect", True),
+                    "detection_sensitivity": ai_params.get("detection_sensitivity", 0.5),
+                    "user_mask": ai_params.get("user_mask", None),
+                }
+
+                processed_frame, _ = ai_handler.process_frame(frame, processing_params)
+
+                # 放入结果队列
+                result_queue.put((frame_index, processed_frame), timeout=10)
+
+                processed_count += 1
+
+                # 发送进度 (每10帧)
+                if processed_count % 10 == 0:
+                    try:
+                        progress_queue.put(
+                            {
+                                "worker_id": worker_id,
+                                "processed": processed_count,
+                            },
+                            block=False,
+                        )
+                    except Exception:
+                        pass  # 队列满时忽略
+
+            except Exception as e:
+                if "timeout" not in str(e).lower():
+                    logger.warning(f"Worker {worker_id} processing error: {e}")
+                continue
+
+        logger.info(f"Worker {worker_id} completed: {processed_count} frames processed")
+
+    except Exception as e:
+        logger.error(f"Worker {worker_id} fatal error: {e}")
+
+
+def frame_writer_worker(
+    result_queue: multiprocessing.Queue,
+    output_path: str,
+    video_params: dict,
+    total_frames: int,
+    stop_event: multiprocessing.Event,
+    progress_queue: multiprocessing.Queue,
+) -> Tuple[bool, Optional[str]]:
+    """
+    帧写入工作线程 (Phase 4 Stage 2.2)
+
+    Args:
+        result_queue: 结果队列
+        output_path: 输出路径
+        video_params: 视频参数 (fps, width, height, fourcc)
+        total_frames: 总帧数
+        stop_event: 停止事件
+        progress_queue: 进度队列
+
+    Returns:
+        (success, error_message)
+    """
+    logger = logging.getLogger(__name__)
+
+    out = None
+    frame_buffer = {}  # 乱序缓冲区: {frame_index: processed_frame}
+    next_frame_index = 0
+    received_count = 0
+
+    try:
+        # 创建视频写入器
+        fps = video_params["fps"]
+        width = video_params["width"]
+        height = video_params["height"]
+        fourcc = video_params["fourcc"]
+
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        if not out.isOpened():
+            error_msg = f"Failed to create video writer: {output_path}"
+            logger.error(error_msg)
+            return (False, error_msg)
+
+        logger.info(f"Frame writer started: writing to {output_path}")
+
+        # 循环处理结果
+        while received_count < total_frames and not stop_event.is_set():
+            try:
+                # 从队列取结果 (阻塞等待)
+                item = result_queue.get(timeout=1)
+
+                if item is None:
+                    logger.info("Frame writer received end signal")
+                    break
+
+                frame_index, processed_frame = item
+
+                # 放入缓冲区
+                frame_buffer[frame_index] = processed_frame
+                received_count += 1
+
+                # 按顺序写入
+                while next_frame_index in frame_buffer:
+                    out.write(frame_buffer.pop(next_frame_index))
+                    next_frame_index += 1
+
+                    # 发送进度 (每10帧)
+                    if next_frame_index % 10 == 0:
+                        try:
+                            progress_queue.put(
+                                {
+                                    "written_frames": next_frame_index,
+                                    "total_frames": total_frames,
+                                },
+                                block=False,
+                            )
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                if "timeout" not in str(e).lower():
+                    logger.warning(f"Frame writer error: {e}")
+                continue
+
+        # 写入剩余缓冲的帧
+        while next_frame_index < total_frames and next_frame_index in frame_buffer:
+            out.write(frame_buffer.pop(next_frame_index))
+            next_frame_index += 1
+
+        logger.info(f"Frame writer completed: {next_frame_index}/{total_frames} frames written")
+
+        # 检查是否写入了所有帧
+        if next_frame_index < total_frames:
+            warning_msg = f"Warning: Only {next_frame_index}/{total_frames} frames written"
+            logger.warning(warning_msg)
+            return (True, warning_msg)  # 部分成功
+
+        return (True, None)
+
+    except Exception as e:
+        error_msg = f"Frame writer fatal error: {str(e)}"
+        logger.error(error_msg)
+        return (False, error_msg)
+
+    finally:
+        if out:
+            out.release()
+
+
 class VideoProcessorThread(QThread):
     """
     Handles video processing in a separate thread to avoid freezing the GUI.
@@ -170,6 +434,7 @@ class VideoProcessorThread(QThread):
         preloaded_ai_handler: Optional[AIHandler] = None,
         enable_multiprocess: bool = True,  # 新增: 是否启用多进程 (Phase 4 Stage 2.1)
         num_processes: Optional[int] = None,  # 新增: 进程数(None=自动检测)
+        use_pipeline: bool = False,  # 新增: 是否使用流水线模式 (Phase 4 Stage 2.2)
         parent: Optional[QThread] = None,
     ) -> None:
         super().__init__(parent)
@@ -181,11 +446,17 @@ class VideoProcessorThread(QThread):
         self.ffmpeg_processor: Optional[FFmpegAudioProcessor] = None
         self._is_running = True
 
-        # 多进程配置 (Phase 4 Stage 2.1)
+        # 多进程配置 (Phase 4 Stage 2.1 & 2.2)
         self.enable_multiprocess = enable_multiprocess
         self.num_processes = num_processes or min(multiprocessing.cpu_count(), 4)
+        self.use_pipeline = use_pipeline  # 流水线 vs 分块批处理
         self._progress_timer: Optional[QTimer] = None
         self._stop_event: Optional[multiprocessing.Event] = None
+
+        # 流水线相关 (Phase 4 Stage 2.2)
+        self._reader_thread: Optional[threading.Thread] = None
+        self._writer_thread: Optional[threading.Thread] = None
+        self._processor_pool: Optional[ProcessPoolExecutor] = None
 
         # 进度跟踪 (Phase 4 Stage 1.4)
         self._start_time = 0.0  # 处理开始时间
@@ -297,10 +568,14 @@ class VideoProcessorThread(QThread):
             if file_ext in [".jpg", ".jpeg", ".png", ".bmp"]:
                 self._process_image()
             elif file_ext in [".mp4", ".avi", ".mkv", ".mov"]:
-                # 视频处理: 根据配置选择单/多进程模式 (Phase 4 Stage 2.1)
+                # 视频处理: 根据配置选择单/多进程模式 (Phase 4 Stage 2.1 & 2.2)
                 if self.enable_multiprocess:
-                    self.logger.info(f"Using multiprocess mode with {self.num_processes} processes")
-                    self._process_video_multiprocess()
+                    if self.use_pipeline:
+                        self.logger.info(f"Using pipeline mode with {self.num_processes} processes")
+                        self._process_video_pipeline()
+                    else:
+                        self.logger.info(f"Using chunk mode with {self.num_processes} processes")
+                        self._process_video_multiprocess()
                 else:
                     self.logger.info("Using single-process mode")
                     self._process_video_singleprocess()
@@ -655,6 +930,265 @@ class VideoProcessorThread(QThread):
                         self.logger.debug(f"Removed temp file: {temp_file}")
                     except Exception as e:
                         self.logger.warning(f"Failed to remove temp file {temp_file}: {e}")
+
+    def _process_video_pipeline(self) -> None:
+        """
+        流水线视频处理 (Phase 4 Stage 2.2)
+        使用 3 阶段流水线: 读取线程 → 处理进程池 → 写入线程
+        """
+        frame_queue = None
+        result_queue = None
+        progress_queue = None
+
+        try:
+            # 1. 获取视频信息
+            self.status.emit("📊 分析视频信息...")
+            cap = cv2.VideoCapture(self.input_path)
+            if not cap.isOpened():
+                raise VideoReadError("无法打开视频文件", details=f"文件路径: {self.input_path}")
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            cap.release()
+
+            self.logger.info(
+                f"Video info: {width}x{height}, {fps} fps, {total_frames} frames"
+            )
+            self.status.emit(
+                f"🚀 使用流水线模式处理 (读取 → {self.num_processes}进程 → 写入)"
+            )
+
+            # 2. 创建队列 (Windows兼容: 使用 Manager)
+            manager = multiprocessing.Manager()
+
+            # 帧队列: 缓冲待处理帧 (50帧 ≈ 310MB @1080p)
+            frame_queue = manager.Queue(maxsize=50)
+
+            # 结果队列: 缓冲处理结果 (100帧 ≈ 620MB @1080p)
+            result_queue = manager.Queue(maxsize=100)
+
+            # 进度队列: 进度报告
+            progress_queue = manager.Queue()
+
+            # 停止事件
+            self._stop_event = manager.Event()
+
+            # 3. 创建临时输出路径
+            temp_output_path = self.output_path.replace(".", "_temp_pipeline.")
+
+            # 4. 启动读取线程
+            self.status.emit("📖 启动帧读取线程...")
+            self._reader_thread = threading.Thread(
+                target=frame_reader_worker,
+                args=(
+                    self.input_path,
+                    frame_queue,
+                    total_frames,
+                    self._stop_event,
+                ),
+                daemon=True,
+            )
+            self._reader_thread.start()
+            self.logger.info("Frame reader thread started")
+
+            # 5. 启动处理进程池
+            self.status.emit(f"🎨 启动 {self.num_processes} 个处理进程...")
+
+            # ConfigParser 转字典
+            config_dict = None
+            if self.config:
+                config_dict = {
+                    section: dict(self.config[section])
+                    for section in self.config.sections()
+                }
+
+            # 启动处理进程
+            self._processor_pool = ProcessPoolExecutor(max_workers=self.num_processes)
+            processor_futures = []
+
+            for i in range(self.num_processes):
+                future = self._processor_pool.submit(
+                    frame_processor_worker,
+                    frame_queue,
+                    result_queue,
+                    self.ai_params,
+                    config_dict,
+                    self._stop_event,
+                    progress_queue,
+                    i,  # worker_id
+                )
+                processor_futures.append(future)
+
+            self.logger.info(f"{self.num_processes} processor workers started")
+
+            # 6. 启动写入线程
+            self.status.emit("💾 启动帧写入线程...")
+
+            video_params = {
+                "fps": fps,
+                "width": width,
+                "height": height,
+                "fourcc": fourcc,
+            }
+
+            # 使用共享的结果容器
+            writer_result = []
+
+            def writer_wrapper():
+                """包装 frame_writer_worker 以捕获返回值"""
+                result = frame_writer_worker(
+                    result_queue,
+                    temp_output_path,
+                    video_params,
+                    total_frames,
+                    self._stop_event,
+                    progress_queue,
+                )
+                writer_result.append(result)
+
+            self._writer_thread = threading.Thread(
+                target=writer_wrapper,
+                daemon=True,
+            )
+            self._writer_thread.start()
+            self.logger.info("Frame writer thread started")
+
+            # 7. 启动进度轮询
+            self._progress_timer = QTimer()
+            self._progress_timer.timeout.connect(
+                lambda: self._check_pipeline_progress(progress_queue, total_frames)
+            )
+            self._progress_timer.start(100)  # 每100ms检查一次
+
+            # 8. 等待所有线程/进程完成
+            self.status.emit("⏳ 流水线处理中...")
+
+            # 等待读取线程
+            self._reader_thread.join()
+            self.logger.info("Frame reader completed")
+
+            # 等待处理进程
+            for i, future in enumerate(processor_futures):
+                future.result()  # 等待进程完成
+            self.logger.info("All processor workers completed")
+
+            # 等待写入线程
+            self._writer_thread.join()
+            self.logger.info("Frame writer completed")
+
+            # 9. 检查写入结果
+            if not writer_result:
+                raise Exception("Writer thread failed to return result")
+
+            success, error_msg = writer_result[0]
+            if not success:
+                raise Exception(f"Frame writer failed: {error_msg}")
+
+            if error_msg:
+                self.logger.warning(error_msg)
+
+            # 10. 处理音频
+            if self.ffmpeg_processor and self.ffmpeg_processor.is_available():
+                self.status.emit("🎵 正在合并原始音频...")
+                self.progress.emit(95)
+
+                audio_success = self.ffmpeg_processor.process_video_with_audio_preservation(
+                    original_video_path=self.input_path,
+                    processed_video_path=temp_output_path,
+                    final_output_path=self.output_path,
+                )
+
+                if audio_success:
+                    self.logger.info("Audio merged successfully")
+                    # 删除临时文件
+                    if os.path.exists(temp_output_path):
+                        os.remove(temp_output_path)
+                else:
+                    self.logger.warning("Audio merge failed, using video-only output")
+                    # 重命名临时文件
+                    if os.path.exists(temp_output_path):
+                        if os.path.exists(self.output_path):
+                            os.remove(self.output_path)
+                        os.rename(temp_output_path, self.output_path)
+            else:
+                # 没有音频处理,直接使用临时文件
+                if os.path.exists(self.output_path):
+                    os.remove(self.output_path)
+                os.rename(temp_output_path, self.output_path)
+
+            # 11. 完成
+            self.progress.emit(100)
+            self.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
+            self.logger.info(f"Pipeline video processing completed: {self.output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Pipeline processing failed, falling back to chunk mode: {e}")
+            self.status.emit("⚠️ 流水线失败，切换到分块模式")
+
+            # 降级到分块处理
+            self._process_video_multiprocess()
+
+        finally:
+            # 12. 清理资源
+            if self._progress_timer:
+                self._progress_timer.stop()
+                self._progress_timer = None
+
+            if self._stop_event:
+                self._stop_event.set()
+                self._stop_event = None
+
+            # 等待线程/进程清理
+            if self._reader_thread and self._reader_thread.is_alive():
+                self._reader_thread.join(timeout=2)
+
+            if self._writer_thread and self._writer_thread.is_alive():
+                self._writer_thread.join(timeout=2)
+
+            if self._processor_pool:
+                self._processor_pool.shutdown(wait=False)
+                self._processor_pool = None
+
+            # 清空队列 (避免死锁)
+            for queue in [frame_queue, result_queue, progress_queue]:
+                if queue:
+                    try:
+                        while not queue.empty():
+                            queue.get_nowait()
+                    except Exception:
+                        pass
+
+    def _check_pipeline_progress(
+        self, progress_queue: multiprocessing.Queue, total_frames: int
+    ) -> None:
+        """
+        检查流水线进度队列并发送信号 (Phase 4 Stage 2.2)
+
+        Args:
+            progress_queue: 进度队列
+            total_frames: 总帧数
+        """
+        try:
+            while not progress_queue.empty():
+                progress_data = progress_queue.get_nowait()
+
+                # 处理不同类型的进度数据
+                if "written_frames" in progress_data:
+                    # 写入线程的进度
+                    written = progress_data["written_frames"]
+                    progress_pct = int((written / total_frames) * 95) + 5  # 5-100%
+                    self.progress.emit(progress_pct)
+                    self.status.emit(f"💾 写入进度: {written}/{total_frames} 帧")
+
+                elif "worker_id" in progress_data:
+                    # 处理进程的进度 (可选: 用于详细监控)
+                    pass
+
+        except Exception as e:
+            self.logger.warning(f"Pipeline progress polling error: {e}")
 
     def _process_video_singleprocess(self) -> None:
         """
