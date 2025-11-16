@@ -9,11 +9,15 @@ opencv-python>=4.8.0
 numpy>=1.25.0
 Pillow>=10.0.0
 
-# ===== 深度学习框架 (可选，用于AI模型) =====
-# 注意：深度学习框架体积较大，如果不使用深度学习功能可以不安装
-# torch>=2.1.0
-# torchvision>=0.16.0
-# torchaudio>=2.1.0
+# ===== 深度学习框架 (Phase 5-6 必需) =====
+# Phase 5: GPU 加速 inpainting (U-Net)
+# Phase 6: YOLO 水印检测
+torch>=2.6.0
+torchvision>=0.21.0
+torchaudio>=2.6.0
+
+# ===== YOLO 水印检测 (Phase 6) =====
+ultralytics>=8.3.0
 
 # ===== ONNX运行时 (可选，用于模型推理) =====
 # onnx>=1.15.0

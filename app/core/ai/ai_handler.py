@@ -21,10 +21,11 @@ import cv2
 import numpy as np
 import torch
 
+from .dl_inpainter import DeepLearningInpainter
 from .image_inpainter import ImageInpainter
 
 # 导入拆分出的检测和修复模块
-from .watermark_detector import WatermarkDetector
+from .yolo_detector import YOLOWatermarkDetector
 
 
 class AIHandler:
@@ -39,55 +40,114 @@ class AIHandler:
         self.ai_params = ai_params  # 选定的模型、置信度阈值等参数
 
         self.device = None
+        self.torch_device = None
+
+        # 检查是否使用 GPU 深度学习修复
+        # ai_params 中的 'use_gpu_inpainting' 参数控制
+        self.use_gpu_inpainting = False
+        if ai_params and isinstance(ai_params, dict):
+            self.use_gpu_inpainting = ai_params.get("use_gpu_inpainting", False)
 
         # 初始化检测器和修复器
-        self.watermark_detector = WatermarkDetector(config)
+        self.watermark_detector = None  # 延迟初始化,需要先设置 device
         self.image_inpainter = ImageInpainter(config)
+        self.dl_inpainter = None  # 深度学习 inpainter (GPU 加速)
 
         self.logger = logging.getLogger(__name__)
 
         self._setup_device()
-        self.logger.info("AIHandler initialized with detector and inpainter modules")
+
+        # 初始化 YOLO 检测器(在设置 device 之后)
+        self.watermark_detector = YOLOWatermarkDetector(
+            model_path="models/yolo11s.pt",
+            conf_threshold=0.5,
+            iou_threshold=0.4,
+            device=self.device,
+        )
+
+        inpaint_method = "GPU Deep Learning" if self.use_gpu_inpainting else "OpenCV"
+        self.logger.info(f"AIHandler initialized - Inpainting method: {inpaint_method}")
 
     def _setup_device(self):
         """
         设置计算设备(CPU或GPU)
-        """
-        # Phase 2使用基于CPU的OpenCV处理
-        # GPU支持将在后续阶段添加
-        self.device = "cpu"
 
-        # 检查CUDA是否可用，供未来使用
-        cuda_available = torch.cuda.is_available() if "torch" in globals() else False
-        if cuda_available:
-            self.logger.info("CUDA is available but using CPU for Phase 2")
+        Phase 5: 支持 GPU 加速深度学习推理
+        """
+        # 检查 CUDA 是否可用
+        cuda_available = torch.cuda.is_available()
+
+        if self.use_gpu_inpainting and cuda_available:
+            # 使用 GPU 深度学习
+            self.device = "cuda"
+            self.torch_device = torch.device("cuda")
+            gpu_name = torch.cuda.get_device_name(0)
+            self.logger.info(f"GPU acceleration enabled: {gpu_name}")
         else:
-            self.logger.info("CUDA not available, using CPU processing")
+            # 使用 CPU
+            self.device = "cpu"
+            self.torch_device = torch.device("cpu")
+
+            if self.use_gpu_inpainting and not cuda_available:
+                self.logger.warning("GPU inpainting requested but CUDA not available")
+                self.logger.warning("Falling back to OpenCV CPU inpainting")
+                self.use_gpu_inpainting = False  # 自动降级
 
         self.logger.info(f"AIHandler: Device set to '{self.device}'")
 
     def load_models(self) -> bool:
         """
-        加载Phase 2轻量级模型
-        使用基于OpenCV的传统图像处理方法
+        加载 AI 模型
+
+        Phase 5: 支持加载 GPU 加速深度学习模型
 
         Returns:
             bool: 加载是否成功
         """
-        self.logger.info("Loading lightweight AI models for Phase 2...")
+        self.logger.info("Loading AI models...")
 
-        # 加载检测器和修复器的模型
+        # 1. 加载水印检测器
         detector_loaded = self.watermark_detector.load_model()
-        inpainter_loaded = self.image_inpainter.load_model()
 
-        if detector_loaded and inpainter_loaded:
-            self.logger.info("All AI models loaded successfully:")
-            self.logger.info("  - Watermark Detection: OpenCV traditional methods")
-            self.logger.info("  - Image Inpainting: OpenCV interpolation-based repair")
-            return True
-        else:
-            self.logger.error("Failed to load some AI models")
-            return False
+        # 2. 加载图像修复器
+        if self.use_gpu_inpainting:
+            # 加载深度学习 GPU inpainter
+            try:
+                self.logger.info("Loading GPU-accelerated deep learning inpainter...")
+                self.dl_inpainter = DeepLearningInpainter(
+                    config=self.config, device=self.torch_device
+                )
+                dl_loaded = self.dl_inpainter.load_model()
+
+                if dl_loaded:
+                    self.logger.info("All AI models loaded successfully:")
+                    self.logger.info("  - Watermark Detection: YOLO v11s deep learning (GPU)")
+                    self.logger.info("  - Image Inpainting: GPU Deep Learning (U-Net)")
+                    return detector_loaded and dl_loaded
+                else:
+                    self.logger.error("Failed to load deep learning inpainter")
+                    self.logger.warning("Falling back to OpenCV inpainter")
+                    self.use_gpu_inpainting = False
+                    # 继续使用 OpenCV inpainter
+            except Exception as e:
+                self.logger.error(f"Error loading DL inpainter: {e}")
+                self.logger.warning("Falling back to OpenCV inpainter")
+                self.use_gpu_inpainting = False
+
+        # 3. 加载 OpenCV inpainter (作为默认或降级选项)
+        if not self.use_gpu_inpainting:
+            inpainter_loaded = self.image_inpainter.load_model()
+
+            if detector_loaded and inpainter_loaded:
+                self.logger.info("All AI models loaded successfully:")
+                self.logger.info("  - Watermark Detection: YOLO v11s deep learning")
+                self.logger.info("  - Image Inpainting: OpenCV interpolation-based repair")
+                return True
+            else:
+                self.logger.error("Failed to load some AI models")
+                return False
+
+        return False
 
     def process_frame(
         self, frame: np.ndarray, watermark_selection_params: dict
@@ -160,8 +220,8 @@ class AIHandler:
                 # 使用水印检测器进行自动检测
                 _ = watermark_selection_params.get("detection_sensitivity", 0.5)
                 mask = self.watermark_detector.detect_watermark(frame)
-                processing_info["detection_method"] = "automatic_opencv"
-                self.logger.info("Using automatic watermark detection")
+                processing_info["detection_method"] = "automatic_yolo"
+                self.logger.info("Using automatic watermark detection (YOLO v11s)")
 
             else:
                 self.logger.info("No watermark detection method specified")
@@ -173,26 +233,30 @@ class AIHandler:
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 processing_info["watermark_areas_found"] = len(contours)
 
-                # 使用图像修复器应用修复
-                processed_frame = self.image_inpainter.inpaint_frame(frame, mask)
+                # 使用图像修复器应用修复 (自动选择 GPU DL 或 OpenCV)
+                processed_frame = self.inpaint_frame(frame, mask)
 
-                # 确定使用的修复方法
-                total_area = sum(cv2.contourArea(c) for c in contours)
-                image_area = frame.shape[0] * frame.shape[1]
-                area_ratio = total_area / image_area
-
-                if area_ratio < 0.05:
-                    processing_info["inpainting_method"] = "custom_interpolation"
-                elif area_ratio < 0.15:
-                    processing_info["inpainting_method"] = "telea"
+                # 记录使用的修复方法
+                if self.use_gpu_inpainting and self.dl_inpainter is not None:
+                    processing_info["inpainting_method"] = "gpu_deep_learning_unet"
                 else:
-                    processing_info["inpainting_method"] = "navier_stokes"
+                    # OpenCV 方法：根据水印区域大小选择算法
+                    total_area = sum(cv2.contourArea(c) for c in contours)
+                    image_area = frame.shape[0] * frame.shape[1]
+                    area_ratio = total_area / image_area
 
-                processing_info["watermark_area_ratio"] = area_ratio
+                    if area_ratio < 0.05:
+                        processing_info["inpainting_method"] = "custom_interpolation"
+                    elif area_ratio < 0.15:
+                        processing_info["inpainting_method"] = "telea"
+                    else:
+                        processing_info["inpainting_method"] = "navier_stokes"
+
+                    processing_info["watermark_area_ratio"] = area_ratio
 
                 self.logger.info(
                     f"Processed frame with {len(contours)} watermark areas "
-                    f"({area_ratio*100:.1f}% of image)"
+                    f"({sum(cv2.contourArea(c) for c in contours) / (frame.shape[0] * frame.shape[1]) * 100:.1f}% of image)"
                 )
 
             else:
@@ -234,6 +298,8 @@ class AIHandler:
         """
         直接调用图像修复功能
 
+        Phase 5: 支持 GPU 深度学习修复或 OpenCV 修复
+
         Args:
             frame: 输入图像，numpy数组(BGR格式)
             mask: 二值掩码，255=需要修复的区域，0=保持原始
@@ -241,13 +307,20 @@ class AIHandler:
         Returns:
             修复后的图像
         """
-        if not hasattr(self, "image_inpainter") or self.image_inpainter is None:
-            self.logger.error("ImageInpainter not initialized")
-            return frame
-
         try:
             self.logger.debug("Direct image inpainting called")
-            return self.image_inpainter.inpaint_frame(frame, mask)
+
+            # 优先使用深度学习 inpainter (如果已启用)
+            if self.use_gpu_inpainting and self.dl_inpainter is not None:
+                return self.dl_inpainter.inpaint_frame(frame, mask)  # type: ignore[no-any-return]
+
+            # 降级使用 OpenCV inpainter
+            if hasattr(self, "image_inpainter") and self.image_inpainter is not None:
+                return self.image_inpainter.inpaint_frame(frame, mask)
+
+            self.logger.error("No inpainter available")
+            return frame
+
         except Exception as e:
             self.logger.error(f"Error in direct image inpainting: {e}")
             return frame
