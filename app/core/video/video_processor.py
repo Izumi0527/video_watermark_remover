@@ -423,6 +423,76 @@ def frame_writer_worker(
             out.release()
 
 
+# ============================================================================
+# Async audio extraction for Stage 2.3 (Audio Parallelization)
+# Must be at module level for threading compatibility
+# ============================================================================
+
+
+def async_audio_extractor(
+    video_path: str,
+    audio_output_path: str,
+    completion_event: threading.Event,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+) -> bool:
+    """
+    异步提取音频到临时文件 (Phase 4 Stage 2.3).
+
+    Args:
+        video_path: 输入视频路径
+        audio_output_path: 临时音频输出路径
+        completion_event: 完成事件(成功时set)
+        stop_event: 停止事件(用户取消时set)
+        logger: 日志记录器
+
+    Returns:
+        bool: 是否成功提取音频
+    """
+    try:
+        logger.info(f"Starting async audio extraction: {video_path}")
+
+        # FFmpeg 命令: 提取音频,不处理视频
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i",
+            video_path,
+            "-vn",  # 不处理视频
+            "-acodec",
+            "copy",  # 复制音频编码,不重新编码
+            audio_output_path,
+            "-y",  # 覆盖已存在文件
+        ]
+
+        # 执行 FFmpeg (设置超时)
+        result = subprocess.run(
+            ffmpeg_cmd, capture_output=True, text=True, timeout=60  # 最多等待60秒
+        )
+
+        # 检查是否被用户取消
+        if stop_event.is_set():
+            logger.info("Audio extraction cancelled by user")
+            return False
+
+        # 检查 FFmpeg 返回码
+        if result.returncode != 0:
+            logger.warning(f"Audio extraction failed: {result.stderr}")
+            return False
+
+        # 标记完成
+        completion_event.set()
+        logger.info(f"Audio extraction completed: {audio_output_path}")
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Audio extraction timeout (>60s)")
+        return False
+
+    except Exception as e:
+        logger.error(f"Audio extraction error: {e}")
+        return False
+
+
 class VideoProcessorThread(QThread):
     """
     Handles video processing in a separate thread to avoid freezing the GUI.
@@ -950,6 +1020,7 @@ class VideoProcessorThread(QThread):
         frame_queue = None
         result_queue = None
         progress_queue = None
+        audio_temp_path = None  # Phase 4 Stage 2.3: 临时音频文件路径
 
         try:
             # 1. 获取视频信息
@@ -988,6 +1059,31 @@ class VideoProcessorThread(QThread):
 
             # 3. 创建临时输出路径
             temp_output_path = self.output_path.replace(".", "_temp_pipeline.")
+
+            # Phase 4 Stage 2.3: 启动异步音频提取
+            audio_temp_path = None
+            audio_completion_event = None
+            audio_thread = None
+
+            if self.ffmpeg_processor and self.ffmpeg_processor.is_available():
+                # 创建临时音频文件路径
+                audio_temp_path = tempfile.mktemp(suffix=".aac", prefix="audio_temp_")
+                audio_completion_event = threading.Event()
+
+                # 启动异步音频提取线程
+                audio_thread = threading.Thread(
+                    target=async_audio_extractor,
+                    args=(
+                        self.input_path,
+                        audio_temp_path,
+                        audio_completion_event,
+                        self._stop_event,
+                        self.logger,
+                    ),
+                    daemon=True,  # 守护线程,主线程退出时自动终止
+                )
+                audio_thread.start()
+                self.logger.info("Async audio extraction started")
 
             # 4. 启动读取线程
             self.status.emit("📖 启动帧读取线程...")
@@ -1099,16 +1195,42 @@ class VideoProcessorThread(QThread):
             if error_msg:
                 self.logger.warning(error_msg)
 
-            # 10. 处理音频
+            # 10. 处理音频 (Phase 4 Stage 2.3: 等待异步音频提取)
             if self.ffmpeg_processor and self.ffmpeg_processor.is_available():
                 self.status.emit("🎵 正在合并原始音频...")
                 self.progress.emit(95)
 
+                # 计算合理的超时时间 (至少10秒,或 total_frames/100)
+                audio_timeout = max(10, total_frames / 100)
+
+                # 等待音频提取完成
+                audio_source = self.input_path  # 默认使用原视频
+
+                if audio_completion_event:
+                    if audio_completion_event.wait(timeout=audio_timeout):
+                        # 音频提取成功,使用提取的音频
+                        self.logger.info(f"Using extracted audio: {audio_temp_path}")
+                        audio_source = audio_temp_path
+                    else:
+                        # 音频提取超时或失败,使用原视频提取
+                        self.logger.warning(
+                            f"Audio extraction incomplete (timeout={audio_timeout:.1f}s), using original video"
+                        )
+
+                # 使用 FFmpegAudioProcessor 合并音频
                 audio_success = self.ffmpeg_processor.process_video_with_audio_preservation(
-                    original_video_path=self.input_path,
+                    original_video_path=audio_source,  # 音频来源
                     processed_video_path=temp_output_path,
                     final_output_path=self.output_path,
                 )
+
+                # 清理临时音频文件
+                if audio_temp_path and os.path.exists(audio_temp_path):
+                    try:
+                        os.remove(audio_temp_path)
+                        self.logger.debug(f"Removed temp audio: {audio_temp_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to remove temp audio: {e}")
 
                 if audio_success:
                     self.logger.info("Audio merged successfully")
@@ -1169,6 +1291,14 @@ class VideoProcessorThread(QThread):
                             queue.get_nowait()
                     except Exception:
                         pass
+
+            # Phase 4 Stage 2.3: 清理临时音频文件
+            if audio_temp_path and os.path.exists(audio_temp_path):
+                try:
+                    os.remove(audio_temp_path)
+                    self.logger.debug(f"Cleaned up temp audio in finally: {audio_temp_path}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to clean up temp audio in finally: {e}")
 
     def _check_pipeline_progress(
         self, progress_queue: multiprocessing.Queue, total_frames: int
