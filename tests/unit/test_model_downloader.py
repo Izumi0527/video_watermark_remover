@@ -110,6 +110,7 @@ class TestModelDownloader:
     @patch("urllib.request.urlretrieve")
     def test_download_model_success(self, mock_urlretrieve, downloader):
         """测试成功下载模型"""
+
         # Mock下载函数
         def mock_download(url, path, reporthook=None):
             # 创建假的模型文件
