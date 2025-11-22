@@ -126,3 +126,37 @@ delete_temp_files = yes
 
 # 是否显示详细的处理进度（选项：yes/no）
 show_progress_details = yes
+
+[YOLO]
+# YOLO水印检测模型配置（Phase 6+）
+#
+# 模型类型选择（选项：yolo11s/yolo11x-watermark/custom）
+# - yolo11s: 通用COCO模型（19MB，适合CPU，检测准确率~70-80%）
+# - yolo11x-watermark: 专用水印模型（114MB，推荐GPU，检测准确率>99%）⭐ 推荐
+# - custom: 使用自定义模型路径
+model_type = yolo11x-watermark
+
+# 自定义模型路径（仅当model_type=custom时使用）
+custom_model_path =
+
+# YOLO置信度阈值（0.0-1.0）
+# 说明：专用水印模型可使用较低阈值（0.25），通用模型建议0.5
+conf_threshold = 0.25
+
+# IoU阈值（0.0-1.0）用于非极大值抑制（NMS）
+# 说明：控制重叠检测框的合并，值越高保留越多框
+iou_threshold = 0.45
+
+# 批处理大小（针对GPU优化）
+# 说明：0=自动检测，1=单帧处理，8-16=批处理
+# 推荐：NVIDIA 4070 Ti Super (16GB)使用8-12获得最佳性能
+batch_size = 8
+
+# 是否自动下载缺失的模型（选项：yes/no）
+# 说明：首次使用时自动从Hugging Face下载模型（约114MB）
+auto_download_model = yes
+
+# 模型下载源（选项：huggingface/github）
+# huggingface: fancyfeast/joycaption-watermark-detection
+# github: ultralytics官方仓库
+model_download_source = huggingface

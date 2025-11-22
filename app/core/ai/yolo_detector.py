@@ -1,56 +1,65 @@
 #!/usr/bin/env python3
 """
-YOLO水印检测器 (Phase 6)
+YOLO水印检测器 (Phase 6+)
 
-基于 YOLOv11s 的深度学习水印检测，纯 GPU 加速。
+基于 YOLOv11 的深度学习水印检测，支持多模型切换和自动下载。
 
 作者: Claude Code Assistant
 创建时间: 2025-11-16
-版本: v1.0 (Phase 6 初始版本)
+更新时间: 2025-11-22
+版本: v2.0 (Phase 6+ 配置化升级)
 """
 
 import logging
+from configparser import ConfigParser
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 import torch
 
+from ...config.config_manager import ConfigManager
+from ...utils.model_downloader import ModelDownloader
 from ..exceptions import DetectionError
 
 
 class YOLOWatermarkDetector:
     """
-    基于 YOLOv11s 的水印检测器（纯 GPU）
+    基于 YOLOv11 的水印检测器（纯 GPU）
 
     特性:
     - 纯 GPU pipeline（预处理 → 推理 → 后处理）
     - 支持批处理检测
     - 自动 boxes → mask 转换
-    - 高精度、高召回率
+    - 多模型支持（yolo11s/yolo11x-watermark/custom）
+    - 自动模型下载功能
+    - 配置文件驱动
     """
 
     def __init__(
         self,
-        model_path: str = "models/yolo11s-watermark.pt",
-        conf_threshold: float = 0.5,
-        iou_threshold: float = 0.4,
+        config: Optional[ConfigParser] = None,
+        model_path: Optional[str] = None,
+        conf_threshold: Optional[float] = None,
+        iou_threshold: Optional[float] = None,
         device: Optional[str] = None,
     ):
         """
         初始化 YOLO 检测器
 
         Args:
-            model_path: YOLO 模型权重路径
-            conf_threshold: 置信度阈值 (0-1)
-            iou_threshold: IoU 阈值 (0-1)
+            config: 配置对象（默认使用默认配置）
+            model_path: 模型路径（覆盖配置文件，用于向后兼容）
+            conf_threshold: 置信度阈值（覆盖配置文件）
+            iou_threshold: IoU 阈值（覆盖配置文件）
             device: 设备 ('cuda' or 'cpu', None=自动检测)
         """
-        self.model_path = model_path
-        self.conf_threshold = conf_threshold
-        self.iou_threshold = iou_threshold
-        self.model = None
         self.logger = logging.getLogger(__name__)
+        self.model = None
+
+        # 加载配置（如果未提供则加载默认配置）
+        config = config or ConfigManager.load_config()
 
         # 设备检测
         if device is None:
@@ -58,11 +67,98 @@ class YOLOWatermarkDetector:
         else:
             self.device = device
 
-        self.logger.info(f"YOLOWatermarkDetector initialized on device: {self.device}")
+        # 从配置读取YOLO参数（支持参数覆盖）
+        self.model_type = config.get("YOLO", "model_type", fallback="yolo11x-watermark")
+        self.custom_model_path = config.get("YOLO", "custom_model_path", fallback="")
+        self.conf_threshold = (
+            conf_threshold
+            if conf_threshold is not None
+            else config.getfloat("YOLO", "conf_threshold", fallback=0.25)
+        )
+        self.iou_threshold = (
+            iou_threshold
+            if iou_threshold is not None
+            else config.getfloat("YOLO", "iou_threshold", fallback=0.45)
+        )
+        self.batch_size = config.getint("YOLO", "batch_size", fallback=8)
+        self.auto_download = config.getboolean("YOLO", "auto_download_model", fallback=True)
+        self.model_dir = Path(config.get("Paths", "default_model_dir", fallback="./models"))
+
+        # 确定模型路径（优先级：参数 > 配置 > 自动选择）
+        if model_path:
+            # 向后兼容：直接使用传入的model_path
+            self.model_path = model_path
+            self.logger.info(f"Using custom model path from parameter: {model_path}")
+        else:
+            # 根据配置选择模型
+            self.model_path = self._resolve_model_path()
+
+        self.logger.info("YOLOWatermarkDetector v2.0 initialized")
+        self.logger.info(f"  - Device: {self.device}")
+        self.logger.info(f"  - Model Type: {self.model_type}")
+        self.logger.info(f"  - Model Path: {self.model_path}")
+        self.logger.info(f"  - Conf Threshold: {self.conf_threshold}")
+        self.logger.info(f"  - IoU Threshold: {self.iou_threshold}")
+        self.logger.info(f"  - Batch Size: {self.batch_size}")
+
+    def _resolve_model_path(self) -> str:
+        """
+        根据配置解析模型路径
+
+        Returns:
+            模型文件路径
+
+        Raises:
+            DetectionError: 模型路径无效或模型不存在
+        """
+        # 情况1：使用自定义模型路径
+        if self.model_type == "custom":
+            if not self.custom_model_path:
+                raise DetectionError("model_type=custom 但未指定 custom_model_path")
+
+            custom_path = Path(self.custom_model_path)
+            if custom_path.exists():
+                return str(custom_path)
+            else:
+                raise DetectionError(f"自定义模型文件不存在: {self.custom_model_path}")
+
+        # 情况2：使用预定义模型（yolo11s / yolo11x-watermark）
+        if self.model_type not in ["yolo11s", "yolo11x-watermark"]:
+            raise DetectionError(
+                f"未知的model_type: {self.model_type}，" f"支持的类型: yolo11s, yolo11x-watermark, custom"
+            )
+
+        # 获取模型文件名
+        downloader = ModelDownloader(str(self.model_dir))
+        model_info = downloader.MODELS.get(self.model_type)
+        if not model_info:
+            raise DetectionError(f"未找到模型配置: {self.model_type}")
+
+        model_file = self.model_dir / model_info["filename"]
+
+        # 检查模型是否存在
+        if not model_file.exists():
+            if self.auto_download:
+                self.logger.warning(f"模型文件不存在: {model_file}")
+                self.logger.info(f"自动下载 {self.model_type} 模型...")
+
+                # 自动下载模型
+                downloaded_path = downloader.download_model(self.model_type, force=False)
+                if not downloaded_path:
+                    raise DetectionError(f"模型下载失败: {self.model_type}")
+
+                self.logger.info(f"✅ 模型下载成功: {downloaded_path}")
+                return str(downloaded_path)
+            else:
+                raise DetectionError(
+                    f"模型文件不存在且自动下载已禁用: {model_file}\n" f"请手动下载或设置 auto_download_model=yes"
+                )
+
+        return str(model_file)
 
     def load_model(self) -> bool:
         """
-        加载 YOLO 模型到 GPU
+        加载 YOLO 模型到 GPU/CPU
 
         Returns:
             bool: 加载是否成功
@@ -78,30 +174,40 @@ class YOLOWatermarkDetector:
             # 移动到设备
             self.model.to(self.device)
 
-            self.logger.info("YOLO model loaded successfully")
-            self.logger.info(f"  - Model: YOLOv11s")
+            self.logger.info("✅ YOLO model loaded successfully")
+            self.logger.info(f"  - Model Type: {self.model_type}")
             self.logger.info(f"  - Device: {self.device}")
             self.logger.info(f"  - Conf threshold: {self.conf_threshold}")
             self.logger.info(f"  - IoU threshold: {self.iou_threshold}")
+            self.logger.info(f"  - Batch size: {self.batch_size}")
 
             return True
 
         except FileNotFoundError:
-            self.logger.error(f"Model file not found: {self.model_path}")
-            self.logger.info("Using pre-trained YOLO11s from Ultralytics...")
+            self.logger.error(f"❌ Model file not found: {self.model_path}")
 
-            try:
-                # 尝试使用预训练模型
-                self.model = YOLO("yolo11s.pt")
-                self.model.to(self.device)
-                self.logger.warning("Loaded generic YOLOv11s (not watermark-specific)")
-                return True
-            except Exception as e:
-                self.logger.error(f"Failed to load fallback model: {e}")
-                return False
+            # 如果是预定义模型且auto_download开启，尝试下载
+            if self.model_type in ["yolo11s", "yolo11x-watermark"] and self.auto_download:
+                self.logger.info("Attempting to download missing model...")
+                try:
+                    downloader = ModelDownloader(str(self.model_dir))
+                    downloaded_path = downloader.download_model(self.model_type, force=False)
+                    if downloaded_path:
+                        self.model_path = str(downloaded_path)
+                        # 递归调用load_model重新加载
+                        return self.load_model()
+                except Exception as e:
+                    self.logger.error(f"Failed to download model: {e}")
+                    return False
+
+            # 模型下载失败或auto_download未开启，直接返回False
+            self.logger.error(
+                "Model loading failed. Please ensure model file exists or enable auto_download_model."
+            )
+            return False
 
         except Exception as e:
-            self.logger.error(f"Failed to load YOLO model: {e}")
+            self.logger.error(f"❌ Failed to load YOLO model: {e}")
             return False
 
     def detect_watermark(self, frame: np.ndarray) -> Optional[np.ndarray]:

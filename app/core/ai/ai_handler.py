@@ -67,8 +67,9 @@ class AIHandler:
         self._setup_device()
 
         # 初始化 YOLO 检测器(在设置 device 之后) - 使用ai_params中的参数
+        # 从配置对象读取模型类型(默认: yolo11x-watermark)
         self.watermark_detector = YOLOWatermarkDetector(
-            model_path="models/yolo11s.pt",
+            config=self.config,  # 使用配置对象驱动
             conf_threshold=self.conf_threshold,  # 使用参数而非硬编码
             iou_threshold=0.4,
             device=self.device,
@@ -76,7 +77,9 @@ class AIHandler:
 
         inpaint_method = "GPU Deep Learning" if self.use_gpu_inpainting else "OpenCV"
         self.logger.info(f"AIHandler initialized - Inpainting method: {inpaint_method}")
-        self.logger.info(f"AIHandler parameters: conf_threshold={self.conf_threshold}, device={self.device}")
+        self.logger.info(
+            f"AIHandler parameters: conf_threshold={self.conf_threshold}, device={self.device}"
+        )
 
     def _setup_device(self):
         """
@@ -125,7 +128,9 @@ class AIHandler:
                     self.logger.warning("Falling back to OpenCV CPU inpainting")
                     self.use_gpu_inpainting = False  # 自动降级
 
-        self.logger.info(f"AIHandler: Device set to '{self.device}' (preference: '{self.device_preference}')")
+        self.logger.info(
+            f"AIHandler: Device set to '{self.device}' (preference: '{self.device_preference}')"
+        )
 
     def load_models(self) -> bool:
         """
