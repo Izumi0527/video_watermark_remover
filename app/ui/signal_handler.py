@@ -18,6 +18,9 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # 导入视频处理线程
 from ..core.video.video_processor import VideoProcessorThread
 
+# 导入AI参数构建器
+from .utils.ai_params_builder import AIParamsBuilder
+
 
 class SignalHandler(QObject):
     """
@@ -94,22 +97,52 @@ class SignalHandler(QObject):
 
             if file_path:
                 self.input_file_path = file_path
-                # 设置预览图像
-                self.preview_panel.set_image(file_path)
 
-                # 同时为手动选择设置图像
-                self.preview_panel.set_manual_selection_image(file_path)
+                # 获取文件扩展名判断文件类型
+                file_ext = os.path.splitext(file_path)[1].lower()
+                video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
+                image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
+
+                if file_ext in image_exts:
+                    # 图片文件 - 使用原有逻辑
+                    self.preview_panel.set_image(file_path)
+                    self.preview_panel.set_manual_selection_image(file_path)
+                    status_msg = f"✅ 已选择图片: {os.path.basename(file_path)}"
+                    self.log_panel.add_status_message(f"图片文件已加载: {os.path.basename(file_path)}")
+
+                elif file_ext in video_exts:
+                    # 视频文件 - 提取第一帧或显示占位符
+                    first_frame = self._extract_video_first_frame(file_path)
+                    if first_frame is not None:
+                        self.preview_panel.set_image_from_array(first_frame)
+                        self.preview_panel.set_manual_selection_image_from_array(first_frame)
+                        status_msg = f"✅ 已选择视频: {os.path.basename(file_path)} (显示第一帧)"
+                        self.log_panel.add_status_message(
+                            f"视频文件已加载: {os.path.basename(file_path)}"
+                        )
+                    else:
+                        # 无法提取第一帧，显示视频信息占位符
+                        self.preview_panel.show_video_placeholder(file_path)
+                        status_msg = f"✅ 已选择视频: {os.path.basename(file_path)}"
+                        self.log_panel.add_warning_log(
+                            f"视频文件已加载，但无法预览: {os.path.basename(file_path)}"
+                        )
+
+                else:
+                    # 不支持的格式
+                    status_msg = f"⚠️ 不支持的文件格式: {file_ext}"
+                    self.log_panel.add_warning_log(status_msg)
+                    self.logger.warning(f"Unsupported file format: {file_ext}")
+                    return
 
                 self.control_panel.set_start_button_enabled(True)
-                status_msg = f"✅ 已选择文件: {os.path.basename(file_path)}"
                 self.status_updated.emit(status_msg)
-                self.log_panel.add_status_message(f"文件已加载: {os.path.basename(file_path)}")
 
                 # 如果当前是手动模式，自动切换到手动选择标签页
                 if hasattr(self.file_panel, "is_manual_mode") and self.file_panel.is_manual_mode():
                     self.preview_panel.switch_to_manual_tab()
 
-                self.logger.info(f"File imported: {file_path}")
+                self.logger.info(f"File imported: {file_path} ({file_ext})")
 
         except Exception as e:
             error_msg = f"文件导入失败: {str(e)}"
@@ -124,7 +157,7 @@ class SignalHandler(QObject):
             parent_widget: 父窗口组件，用于显示对话框
         """
         if not self.processed_image:
-            self.log_panel.add_warning_log("没有处理后的图像可导出")
+            self.log_panel.add_warning_log("没有处理后的文件可导出")
             return
 
         try:
@@ -243,14 +276,22 @@ class SignalHandler(QObject):
             input_name, input_ext = os.path.splitext(input_filename)
             output_path = os.path.join(input_dir, f"{input_name}_processed{input_ext}")
 
-            # 创建VideoProcessorThread实例
-            ai_params = {
-                "auto_detect": self.preferences.get_preference("processing", "auto_mode"),
-                "detection_sensitivity": self.preferences.get_preference(
-                    "advanced", "detection_sensitivity"
-                ),
-                "user_mask": None,  # TODO: 从手动选择获取
-            }
+            # 获取高级参数
+            advanced_params = {}
+            if hasattr(self.control_panel, 'get_advanced_parameters'):
+                advanced_params = self.control_panel.get_advanced_parameters()
+                self.logger.debug(f"[参数获取] 成功获取 {len(advanced_params)} 个高级参数")
+            else:
+                self.logger.warning("[参数获取] ControlPanel不支持高级参数，使用默认值")
+
+            # 使用AI参数构建器构建完整参数
+            params_builder = AIParamsBuilder()
+            ai_params = params_builder.build_from_ui(
+                preferences=self.preferences,
+                advanced_params=advanced_params,
+                manual_selections=self.manual_selections,
+                input_file_path=self.input_file_path,
+            )
 
             # 使用预加载的AI模型 (如果可用)
             preloaded_ai_handler = None
@@ -295,7 +336,15 @@ class SignalHandler(QObject):
         if output_path:
             self.log_panel.add_success_message(f"处理完成: {output_path}")
             self.status_updated.emit("处理完成")
-            # TODO: 自动加载处理后的结果
+
+            # 保存输出路径
+            self.output_file_path = output_path
+
+            # 启用导出按钮
+            self.file_panel.set_export_enabled(True)
+
+            # 加载处理后的结果到PreviewPanel
+            self._load_processed_result(output_path)
         else:
             self.log_panel.add_warning_log("处理被取消")
             self.status_updated.emit("处理取消")
@@ -333,6 +382,101 @@ class SignalHandler(QObject):
         self.log_panel.add_progress_message(f"处理进度: {value}%")
 
     # ==================== 工具方法 ====================
+
+    def _extract_video_first_frame(self, video_path: str):
+        """
+        提取视频第一帧
+
+        Args:
+            video_path: 视频文件路径
+
+        Returns:
+            numpy.ndarray: RGB格式的第一帧图像，如果提取失败则返回None
+        """
+        try:
+            import cv2
+
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    # OpenCV读取的是BGR格式，需要转换为RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    self.logger.info(f"Successfully extracted first frame from video: {video_path}")
+                    return frame_rgb
+                else:
+                    self.logger.warning(f"Failed to read first frame from video: {video_path}")
+                    return None
+            else:
+                self.logger.error(f"Failed to open video file: {video_path}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error extracting video first frame: {e}")
+            return None
+
+    def _load_processed_result(self, output_path: str):
+        """
+        加载处理后的结果到PreviewPanel
+
+        Args:
+            output_path: 处理后的文件路径
+        """
+        try:
+            from PyQt6.QtGui import QImage, QPixmap
+
+            file_ext = os.path.splitext(output_path)[1].lower()
+            video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
+            image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
+
+            if file_ext in image_exts:
+                # 图片文件：直接加载
+                pixmap = QPixmap(output_path)
+                if not pixmap.isNull():
+                    processing_info = {
+                        "detection_method": "自动检测" if self.file_panel.is_auto_mode() else "手动选择",
+                        "manual_regions_count": len(self.manual_selections) if self.manual_selections else 0,
+                    }
+                    self.preview_panel.set_processed_image(pixmap, processing_info)
+                    self.logger.info(f"Loaded processed image: {output_path}")
+                else:
+                    self.logger.warning(f"Failed to load processed image: {output_path}")
+
+            elif file_ext in video_exts:
+                # 视频文件：提取第一帧作为预览
+                first_frame = self._extract_video_first_frame(output_path)
+                if first_frame is not None:
+                    # 转换numpy数组为QPixmap
+                    import numpy as np
+
+                    # 确保是uint8类型
+                    if first_frame.dtype != np.uint8:
+                        first_frame = (first_frame * 255).astype(np.uint8)
+
+                    h, w, c = first_frame.shape
+                    bytes_per_line = 3 * w
+                    q_image = QImage(
+                        first_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+                    )
+                    pixmap = QPixmap.fromImage(q_image)
+
+                    if not pixmap.isNull():
+                        processing_info = {
+                            "detection_method": "自动检测" if self.file_panel.is_auto_mode() else "手动选择",
+                            "manual_regions_count": len(self.manual_selections) if self.manual_selections else 0,
+                        }
+                        self.preview_panel.set_processed_image(pixmap, processing_info)
+                        self.logger.info(f"Loaded processed video preview: {output_path}")
+                    else:
+                        self.logger.warning(f"Failed to create pixmap from video frame: {output_path}")
+                else:
+                    self.logger.warning(f"Failed to extract first frame from processed video: {output_path}")
+
+            else:
+                self.logger.warning(f"Unsupported file format for preview: {file_ext}")
+
+        except Exception as e:
+            self.logger.error(f"Error loading processed result: {e}")
 
     def _show_file_dialog(self, parent, title: str, filters: str):
         """

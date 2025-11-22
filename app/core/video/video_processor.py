@@ -77,13 +77,22 @@ def process_video_chunk(
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
 
-        # 4. 创建视频写入器
+        # 4. 创建视频写入器 - 使用跨平台兼容的编码器
+        # 注意：不使用输入视频的 fourcc，因为可能是 H.264 需要 OpenH264 库
+        # 使用 mp4v 编码器（跨平台兼容），后续用 FFmpeg 重新编码为 H.264
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
         if not out.isOpened():
-            cap.release()
-            return (None, False, f"无法创建输出文件: {output_path}")
+            # 尝试备用编码器 XVID
+            logger.warning(f"Chunk {chunk_id}: mp4v codec failed, trying XVID")
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+            if not out.isOpened():
+                cap.release()
+                return (None, False, f"无法创建输出文件（尝试了 mp4v 和 XVID 编码器）: {output_path}")
 
         # 5. 定位到起始帧
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -333,17 +342,26 @@ def frame_writer_worker(
     received_count = 0
 
     try:
-        # 创建视频写入器
+        # 创建视频写入器 - 使用跨平台兼容的编码器
         fps = video_params["fps"]
         width = video_params["width"]
         height = video_params["height"]
-        fourcc = video_params["fourcc"]
 
+        # 注意：不使用输入视频的 fourcc，因为可能是 H.264 需要 OpenH264 库
+        # 使用 mp4v 编码器（跨平台兼容），后续用 FFmpeg 重新编码为 H.264
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
         if not out.isOpened():
-            error_msg = f"Failed to create video writer: {output_path}"
-            logger.error(error_msg)
-            return (False, error_msg)
+            # 尝试备用编码器 XVID
+            logger.warning("mp4v codec failed, trying XVID")
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+            if not out.isOpened():
+                error_msg = f"Failed to create video writer (tried mp4v and XVID): {output_path}"
+                logger.error(error_msg)
+                return (False, error_msg)
 
         logger.info(f"Frame writer started: writing to {output_path}")
 
@@ -983,6 +1001,7 @@ class VideoProcessorThread(QThread):
             self.progress.emit(100)
             self.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")
             self.logger.info(f"Multiprocess video processing completed: {self.output_path}")
+            self.finished.emit(self.output_path)
 
         except Exception as e:
             self.logger.error(
@@ -1254,6 +1273,7 @@ class VideoProcessorThread(QThread):
             self.progress.emit(100)
             self.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
             self.logger.info(f"Pipeline video processing completed: {self.output_path}")
+            self.finished.emit(self.output_path)
 
         except Exception as e:
             self.logger.error(f"Pipeline processing failed, falling back to chunk mode: {e}")
