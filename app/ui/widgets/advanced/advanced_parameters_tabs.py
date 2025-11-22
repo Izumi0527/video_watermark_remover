@@ -62,7 +62,11 @@ class DetectionParametersTab:
 
         parent_widget.detection_method_combo = QComboBox()
         parent_widget.detection_method_combo.addItems(
-            ["自动选择", "边缘检测优先", "颜色分析优先", "纹理分析优先", "组合方法"]
+            [
+                "YOLO v11s 深度学习 (推荐)",
+                "YOLO v11s GPU 加速",
+                "YOLO v11s CPU 模式",
+            ]
         )
         method_layout.addRow("检测方法:", parent_widget.detection_method_combo)
 
@@ -111,7 +115,12 @@ class InpaintingParametersTab:
 
         parent_widget.inpainting_method_combo = QComboBox()
         parent_widget.inpainting_method_combo.addItems(
-            ["自动选择", "TELEA (快速进行方法)", "Navier-Stokes (慢速高质量)", "自定义插值方法"]
+            [
+                "GPU 深度学习 U-Net (推荐)",
+                "TELEA 快速修复 (OpenCV)",
+                "Navier-Stokes 高质量 (OpenCV)",
+                "自定义插值方法",
+            ]
         )
         method_layout.addRow("修复算法:", parent_widget.inpainting_method_combo)
 

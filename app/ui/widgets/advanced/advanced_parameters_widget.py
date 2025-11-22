@@ -17,7 +17,7 @@
 
 from typing import Any, Dict
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QScrollArea, QTabWidget, QVBoxLayout, QWidget
 
 # 导入Tab页面实现
@@ -56,7 +56,7 @@ class AdvancedParametersWidget(QWidget):
         # 创建滚动区域
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setVerticalScrollBarPolicy(2)  # Qt.ScrollBarAlwaysOn
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # 创建标签页控件
         self.tab_widget = QTabWidget()
@@ -232,19 +232,19 @@ class AdvancedParametersWidget(QWidget):
         """重置为默认值"""
         default_params = {
             "detection_sensitivity": 0.5,
-            "detection_method": "自动选择",
+            "detection_method": "YOLO v11s 深度学习 (推荐)",
             "min_detection_area": 100,
             "enable_blur_preprocess": True,
             "enable_sharp_preprocess": False,
             "enable_denoise_preprocess": True,
-            "inpainting_method": "自动选择",
+            "inpainting_method": "GPU 深度学习 U-Net (推荐)",
             "inpainting_radius": 3,
             "inpainting_quality": 3,
             "enable_smooth_postprocess": True,
             "enable_blend_postprocess": True,
             "enable_enhance_postprocess": False,
             "thread_count": 4,
-            "enable_gpu": False,
+            "enable_gpu": True,
             "gpu_memory_limit": 2048,
             "cache_size": 512,
             "enable_cache": True,
