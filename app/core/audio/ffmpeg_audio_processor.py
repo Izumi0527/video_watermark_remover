@@ -188,21 +188,78 @@ class FFmpegAudioProcessor:
     def _merge_audio_to_processed_video(
         self, processed_video_path: str, audio_path: str, final_output_path: str
     ) -> bool:
-        """将音频合并到处理后的视频"""
-        self.logger.info("Step 2: Merging audio with processed video")
+        """将音频合并到处理后的视频，并重新编码为 H.264"""
+        self.logger.info("Step 2: Merging audio with processed video and re-encoding to H.264")
+        # 重新编码为 H.264 以确保最佳兼容性
+        # OpenCV 使用 mp4v 编码器写入的视频兼容性较差，需要重新编码
         return self.audio_merger.merge_audio_video(
-            processed_video_path, audio_path, final_output_path
+            processed_video_path,
+            audio_path,
+            final_output_path,
+            video_codec="libx264",  # 使用 H.264 编码器
+            audio_codec="aac",  # AAC 音频编码器
         )
 
     def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:
-        """回退方案：复制处理后的视频"""
-        self.logger.info(reason)
+        """回退方案：重新编码视频为 H.264（即使没有音频也要重新编码以确保兼容性）"""
+        self.logger.info(f"{reason} - Re-encoding video to H.264 for compatibility")
+
+        if not self.detector.is_available():
+            # FFmpeg 不可用，只能直接复制
+            self.logger.warning("FFmpeg not available, copying without re-encoding")
+            try:
+                shutil.copy2(source_path, dest_path)
+                return True
+            except Exception as e:
+                self.logger.error(f"Error copying video: {e}")
+                return False
+
         try:
-            shutil.copy2(source_path, dest_path)
-            return True
-        except Exception as e:
-            self.logger.error(f"Error copying video: {e}")
+            # 使用 FFmpeg 重新编码为 H.264
+            ffmpeg_path = self.detector.get_ffmpeg_path()
+            cmd = [
+                ffmpeg_path,
+                "-i",
+                source_path,
+                "-c:v",
+                "libx264",  # H.264 视频编码器
+                "-preset",
+                "medium",  # 编码速度/质量平衡
+                "-crf",
+                "23",  # 质量参数 (18-28, 越小质量越高)
+                "-c:a",
+                "copy",  # 如果有音频，直接复制（虽然 fallback 通常是无音频的）
+                "-y",  # 覆盖输出文件
+                dest_path,
+            ]
+
+            self.logger.debug(f"Re-encoding command: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300, encoding="utf-8", errors="replace"
+            )
+
+            if result.returncode == 0:
+                self.logger.info("Video re-encoded to H.264 successfully")
+                return True
+            else:
+                self.logger.error(f"Re-encoding failed: {result.stderr}")
+                # 重新编码失败，尝试直接复制
+                self.logger.warning("Falling back to direct copy")
+                shutil.copy2(source_path, dest_path)
+                return True
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("Re-encoding timeout")
             return False
+        except Exception as e:
+            self.logger.error(f"Error re-encoding video: {e}")
+            try:
+                shutil.copy2(source_path, dest_path)
+                return True
+            except Exception as copy_error:
+                self.logger.error(f"Error copying video: {copy_error}")
+                return False
 
     def cleanup_temp_files(self):
         """清理临时文件"""

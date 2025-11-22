@@ -37,16 +37,25 @@ class AIHandler:
 
     def __init__(self, config=None, ai_params=None):
         self.config = config
-        self.ai_params = ai_params  # 选定的模型、置信度阈值等参数
+        self.ai_params = ai_params or {}  # 默认空字典
 
         self.device = None
         self.torch_device = None
 
-        # 检查是否使用 GPU 深度学习修复
-        # ai_params 中的 'use_gpu_inpainting' 参数控制
-        self.use_gpu_inpainting = False
-        if ai_params and isinstance(ai_params, dict):
-            self.use_gpu_inpainting = ai_params.get("use_gpu_inpainting", False)
+        # 从ai_params提取参数（使用默认值）
+        self.use_gpu_inpainting = self.ai_params.get("use_gpu_inpainting", False)
+        self.conf_threshold = self.ai_params.get("conf_threshold", 0.5)
+        self.device_preference = self.ai_params.get("device", "auto")  # "cuda"/"cpu"/"auto"
+        self.inpainting_algorithm = self.ai_params.get("inpainting_algorithm", "gpu_dl")
+        self.inpaint_radius = self.ai_params.get("inpaint_radius", 3)
+
+        # 预处理/后处理开关
+        self.enable_blur_preprocess = self.ai_params.get("enable_blur_preprocess", False)
+        self.enable_denoise_preprocess = self.ai_params.get("enable_denoise_preprocess", False)
+        self.enable_sharp_preprocess = self.ai_params.get("enable_sharp_preprocess", False)
+        self.enable_smooth_postprocess = self.ai_params.get("enable_smooth_postprocess", False)
+        self.enable_blend_postprocess = self.ai_params.get("enable_blend_postprocess", False)
+        self.enable_enhance_postprocess = self.ai_params.get("enable_enhance_postprocess", False)
 
         # 初始化检测器和修复器
         self.watermark_detector = None  # 延迟初始化,需要先设置 device
@@ -57,43 +66,66 @@ class AIHandler:
 
         self._setup_device()
 
-        # 初始化 YOLO 检测器(在设置 device 之后)
+        # 初始化 YOLO 检测器(在设置 device 之后) - 使用ai_params中的参数
         self.watermark_detector = YOLOWatermarkDetector(
             model_path="models/yolo11s.pt",
-            conf_threshold=0.5,
+            conf_threshold=self.conf_threshold,  # 使用参数而非硬编码
             iou_threshold=0.4,
             device=self.device,
         )
 
         inpaint_method = "GPU Deep Learning" if self.use_gpu_inpainting else "OpenCV"
         self.logger.info(f"AIHandler initialized - Inpainting method: {inpaint_method}")
+        self.logger.info(f"AIHandler parameters: conf_threshold={self.conf_threshold}, device={self.device}")
 
     def _setup_device(self):
         """
         设置计算设备(CPU或GPU)
 
         Phase 5: 支持 GPU 加速深度学习推理
+        支持用户指定设备偏好：cuda/cpu/auto
         """
         # 检查 CUDA 是否可用
         cuda_available = torch.cuda.is_available()
 
-        if self.use_gpu_inpainting and cuda_available:
-            # 使用 GPU 深度学习
-            self.device = "cuda"
-            self.torch_device = torch.device("cuda")
-            gpu_name = torch.cuda.get_device_name(0)
-            self.logger.info(f"GPU acceleration enabled: {gpu_name}")
-        else:
-            # 使用 CPU
+        # 根据用户偏好和硬件情况决定设备
+        if self.device_preference == "cuda":
+            # 强制使用GPU
+            if cuda_available:
+                self.device = "cuda"
+                self.torch_device = torch.device("cuda")
+                gpu_name = torch.cuda.get_device_name(0)
+                self.logger.info(f"GPU mode forced by user: {gpu_name}")
+            else:
+                self.logger.warning("GPU requested but CUDA not available, falling back to CPU")
+                self.device = "cpu"
+                self.torch_device = torch.device("cpu")
+                self.use_gpu_inpainting = False  # 自动降级
+        elif self.device_preference == "cpu":
+            # 强制使用CPU
             self.device = "cpu"
             self.torch_device = torch.device("cpu")
+            self.use_gpu_inpainting = False
+            self.logger.info("CPU mode forced by user")
+        else:
+            # 自动模式：根据use_gpu_inpainting和硬件情况决定
+            if self.use_gpu_inpainting and cuda_available:
+                # 使用 GPU 深度学习
+                self.device = "cuda"
+                self.torch_device = torch.device("cuda")
+                gpu_name = torch.cuda.get_device_name(0)
+                self.logger.info(f"GPU acceleration enabled: {gpu_name}")
+            else:
+                # 使用 CPU
+                self.device = "cpu"
+                self.torch_device = torch.device("cpu")
 
-            if self.use_gpu_inpainting and not cuda_available:
-                self.logger.warning("GPU inpainting requested but CUDA not available")
-                self.logger.warning("Falling back to OpenCV CPU inpainting")
-                self.use_gpu_inpainting = False  # 自动降级
+                if self.use_gpu_inpainting and not cuda_available:
+                    self.logger.warning("GPU inpainting requested but CUDA not available")
+                    self.logger.warning("Falling back to OpenCV CPU inpainting")
+                    self.use_gpu_inpainting = False  # 自动降级
 
-        self.logger.info(f"AIHandler: Device set to '{self.device}'")
+        self.logger.info(f"AIHandler: Device set to '{self.device}' (preference: '{self.device_preference}')")
 
     def load_models(self) -> bool:
         """

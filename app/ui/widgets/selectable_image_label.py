@@ -94,7 +94,7 @@ class SelectableImageLabel(QLabel):
 
     def set_default_text(self):
         """设置默认提示文本"""
-        self.setText("图像预览区域\n\n请选择图片文件进行预览\n然后拖拽鼠标选择水印区域")
+        self.setText("文件预览区域\n\n请选择图片或视频文件进行预览\n然后拖拽鼠标选择水印区域")
         font = QFont()
         font.setPointSize(12)
         self.setFont(font)
@@ -113,7 +113,7 @@ class SelectableImageLabel(QLabel):
             # 加载图像
             self.original_pixmap = QPixmap(image_path)
             if self.original_pixmap.isNull():
-                self.setText("❌ 无法加载图像")
+                self.setText("❌ 无法加载文件")
                 return False
 
             # 清空之前的选择
@@ -126,7 +126,7 @@ class SelectableImageLabel(QLabel):
             return True
 
         except Exception as e:
-            self.setText(f"❌ 图像加载失败\n{str(e)}")
+            self.setText(f"❌ 文件加载失败\n{str(e)}")
             return False
 
     def setImageFromArray(self, image_array: "np.ndarray") -> bool:
@@ -184,17 +184,21 @@ class SelectableImageLabel(QLabel):
         # 更新坐标转换器
         self.coordinate_converter.set_scale_factor(self.scale_factor)
 
-        # 缩放图像
-        scaled_size = pixmap_size * self.scale_factor
+        # 缩放图像 - PyQt6 兼容性修复
+        scaled_width = int(pixmap_size.width() * self.scale_factor)
+        scaled_height = int(pixmap_size.height() * self.scale_factor)
         self.scaled_pixmap = self.original_pixmap.scaled(
-            scaled_size.toSize(),
+            scaled_width,
+            scaled_height,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
 
         # 计算图像在控件中的偏移（居中显示）
+        from PyQt6.QtCore import QSize
+        scaled_size = QSize(scaled_width, scaled_height)
         self.image_offset = CoordinateConverter.calculate_image_offset(
-            widget_size, scaled_size.toSize()
+            widget_size, scaled_size
         )
 
         self.setPixmap(self.scaled_pixmap)
