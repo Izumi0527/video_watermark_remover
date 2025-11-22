@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..widgets.advanced.advanced_parameters_widget import AdvancedParametersWidget
 from .detailed_progress_widget import DetailedProgressWidget
 
 
@@ -138,6 +139,7 @@ class ControlPanel(QWidget):
     def _create_advanced_tabs_group(self, main_layout):
         """创建高级功能标签页组"""
         tabs_group = QGroupBox("高级功能")
+        tabs_group.setMinimumHeight(450)  # 确保控制面板有足够高度显示所有内容
         tabs_layout = QVBoxLayout(tabs_group)
 
         # 创建标签页容器
@@ -178,12 +180,9 @@ class ControlPanel(QWidget):
         params_tab = QWidget()
         params_layout = QVBoxLayout(params_tab)
 
-        # 占位符 - 这里将来会集成AdvancedParametersWidget
-        params_info = QWidget()
-        params_info.setMinimumHeight(200)
-        params_layout.addWidget(params_info)
-
-        params_layout.addStretch()
+        # 集成高级参数组件
+        self.advanced_params_widget = AdvancedParametersWidget()
+        params_layout.addWidget(self.advanced_params_widget)
 
         self.advanced_tabs.addTab(params_tab, "⚙️ 参数设置")
 
@@ -232,3 +231,24 @@ class ControlPanel(QWidget):
             progress_data: 详细进度数据字典
         """
         self.detailed_progress.update_progress(progress_data)
+
+    def get_advanced_parameters(self):
+        """
+        获取高级参数配置
+
+        Returns:
+            dict: 包含所有高级参数的字典
+        """
+        if hasattr(self, "advanced_params_widget"):
+            return self.advanced_params_widget.get_parameters()
+        return {}
+
+    def set_advanced_parameters(self, parameters: dict):
+        """
+        设置高级参数配置
+
+        Args:
+            parameters: 参数字典
+        """
+        if hasattr(self, "advanced_params_widget"):
+            self.advanced_params_widget.set_parameters(parameters)

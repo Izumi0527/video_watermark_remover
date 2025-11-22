@@ -52,7 +52,7 @@ class PreviewPanel(QWidget):
         self.simple_preview_tab = QWidget()
         simple_layout = QVBoxLayout(self.simple_preview_tab)
 
-        self.preview_area = QLabel("🖼️ 图片预览区域\n\n请选择图片文件进行预览")
+        self.preview_area = QLabel("🖼️ 文件预览区域\n\n请选择图片或视频文件进行预览")
         self.preview_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_area.setMinimumSize(640, 360)
         self.preview_area.setStyleSheet(
@@ -62,7 +62,7 @@ class PreviewPanel(QWidget):
                 border-radius: 10px;
                 background-color: #f9f9f9;
                 color: #888;
-                font-size: 14px;
+                font-size: 11pt;
             }
         """
         )
@@ -74,11 +74,12 @@ class PreviewPanel(QWidget):
         """创建手动选择标签页"""
         self.manual_select_tab = QWidget()
         manual_layout = QVBoxLayout(self.manual_select_tab)
+        manual_layout.setContentsMargins(0, 0, 0, 0)  # 移除容器边距，确保内容充满
 
         # 使用真正的ImageSelectorWidget替换占位符
         self.image_selector = ImageSelectorWidget()
         self.image_selector.selection_changed.connect(self._on_manual_selection_changed)
-        manual_layout.addWidget(self.image_selector)
+        manual_layout.addWidget(self.image_selector, 1)  # 添加伸缩因子，让内容充满容器
 
         self.preview_tabs.addTab(self.manual_select_tab, "✏️ 手动选择")
 
@@ -86,19 +87,22 @@ class PreviewPanel(QWidget):
         """创建效果对比标签页"""
         self.comparison_tab = QWidget()
         comparison_layout = QVBoxLayout(self.comparison_tab)
+        comparison_layout.setContentsMargins(0, 0, 0, 0)  # 移除容器边距，确保内容充满
 
         # 添加对比信息显示区域
-        self.comparison_info_label = QLabel("📊 对比信息：请先处理图像")
+        self.comparison_info_label = QLabel("📊 对比信息：请先处理文件")
         self.comparison_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.comparison_info_label.setMinimumHeight(28)  # 设置最小高度防止被压缩
         self.comparison_info_label.setStyleSheet(
             """
             QLabel {
                 background-color: #f0f8ff;
                 border: 1px solid #007acc;
                 border-radius: 5px;
-                padding: 10px;
+                padding: 3px 6px;
                 color: #007acc;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 8pt;
             }
         """
         )
@@ -106,6 +110,7 @@ class PreviewPanel(QWidget):
 
         # 创建分割器用于左右对比
         self.comparison_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.comparison_splitter.setMinimumHeight(340)  # 设置分割器最小高度，确保边框闭合
 
         # 原图区域
         original_frame = self._create_image_frame("📷 原图")
@@ -122,26 +127,39 @@ class PreviewPanel(QWidget):
         self.comparison_splitter.setStretchFactor(0, 1)
         self.comparison_splitter.setStretchFactor(1, 1)
 
-        comparison_layout.addWidget(self.comparison_splitter)
+        comparison_layout.addWidget(self.comparison_splitter, 1)  # 添加伸缩因子，让内容充满容器
 
         self.preview_tabs.addTab(self.comparison_tab, "⚖️ 效果对比")
 
     def _create_image_frame(self, title):
         """创建图像框架"""
         frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)  # 改进框架样式，确保边框完整
+        frame.setLineWidth(1)  # 明确设置边框线宽
+        frame.setMinimumHeight(350)  # 设置框架最小高度，确保边框闭合
         layout = QVBoxLayout(frame)
+        layout.setContentsMargins(8, 8, 8, 8)  # 设置合理的内边距
+        layout.setSpacing(8)  # 设置元素间距
 
         # 标题
         title_label = QLabel(title)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setStyleSheet(
+            """
+            QLabel {
+                font-size: 10pt;
+                padding: 3px 0px;
+                font-weight: 500;
+            }
+        """
+        )
         layout.addWidget(title_label)
 
         # 图像显示区域
-        image_label = QLabel("暂无图片")
+        image_label = QLabel("暂无文件")
         image_label.setObjectName("image_label")  # 设置对象名以便查找
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setMinimumSize(300, 200)
+        image_label.setMinimumSize(450, 320)
         image_label.setStyleSheet(
             """
             QLabel {
@@ -151,7 +169,7 @@ class PreviewPanel(QWidget):
             }
         """
         )
-        layout.addWidget(image_label)
+        layout.addWidget(image_label, 1)  # 添加伸缩因子，让图像充满剩余空间
 
         return frame
 
@@ -172,8 +190,8 @@ class PreviewPanel(QWidget):
 
                 # 同时更新对比区域的原图
                 original_scaled = pixmap.scaled(
-                    300,
-                    200,
+                    450,
+                    320,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -187,13 +205,97 @@ class PreviewPanel(QWidget):
         except Exception as e:
             self.logger.error(f"Error setting preview image: {e}")
 
+    def set_image_from_array(self, image_array):
+        """从 numpy 数组设置预览图像（用于视频第一帧）"""
+        try:
+            import numpy as np
+            from PyQt6.QtGui import QImage
+
+            # 确保是 uint8 类型的 RGB 数组
+            if image_array.dtype != np.uint8:
+                image_array = (image_array * 255).astype(np.uint8)
+
+            h, w, c = image_array.shape
+            bytes_per_line = 3 * w
+            q_image = QImage(image_array.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(q_image)
+
+            if not pixmap.isNull():
+                # 缩放图像以适应预览区域
+                scaled_pixmap = pixmap.scaled(
+                    640,
+                    360,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.preview_area.setPixmap(scaled_pixmap)
+                self.preview_area.setText("")
+
+                # 同时更新对比区域的原图
+                original_scaled = pixmap.scaled(
+                    450,
+                    320,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.original_image_label.setPixmap(original_scaled)
+                self.original_image_label.setText("")
+
+                self.logger.info("Video first frame preview set")
+            else:
+                self.logger.error("Failed to create pixmap from array")
+        except Exception as e:
+            self.logger.error(f"Error setting image from array: {e}")
+
+    def show_video_placeholder(self, video_path):
+        """显示视频文件占位符信息"""
+        try:
+            import cv2
+
+            cap = cv2.VideoCapture(video_path)
+
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                duration = frame_count / fps if fps > 0 else 0
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap.release()
+
+                placeholder_text = (
+                    f"🎬 视频文件\n\n"
+                    f"分辨率: {width}x{height}\n"
+                    f"帧率: {fps:.2f} fps\n"
+                    f"总帧数: {frame_count}\n"
+                    f"时长: {duration:.2f} 秒"
+                )
+            else:
+                placeholder_text = "🎬 视频文件\n\n无法读取视频信息"
+
+            self.preview_area.clear()
+            self.preview_area.setText(placeholder_text)
+            self.preview_area.setStyleSheet(
+                """
+                QLabel {
+                    border: 2px dashed #007acc;
+                    border-radius: 10px;
+                    background-color: #e3f2fd;
+                    color: #007acc;
+                    font-size: 11pt;
+                }
+            """
+            )
+            self.logger.info(f"Video placeholder shown for: {video_path}")
+        except Exception as e:
+            self.logger.error(f"Error showing video placeholder: {e}")
+
     def set_processed_image(self, processed_pixmap, processing_info=None):
         """设置处理后的图像"""
         if processed_pixmap and not processed_pixmap.isNull():
             # 更新对比区域的处理后图像
             scaled_pixmap = processed_pixmap.scaled(
-                300,
-                200,
+                450,
+                320,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -211,13 +313,13 @@ class PreviewPanel(QWidget):
     def clear_preview(self):
         """清空预览"""
         self.preview_area.clear()
-        self.preview_area.setText("🖼️ 图片预览区域\n\n请选择图片文件进行预览")
+        self.preview_area.setText("🖼️ 文件预览区域\n\n请选择图片或视频文件进行预览")
 
         self.original_image_label.clear()
-        self.original_image_label.setText("暂无图片")
+        self.original_image_label.setText("暂无文件")
 
         self.processed_image_label.clear()
-        self.processed_image_label.setText("暂无图片")
+        self.processed_image_label.setText("暂无文件")
 
         # 重置对比信息显示
         self.reset_comparison_display()
@@ -315,24 +417,26 @@ class PreviewPanel(QWidget):
                     background-color: #e8f5e8;
                     border: 1px solid #4CAF50;
                     border-radius: 5px;
-                    padding: 10px;
+                    padding: 3px 6px;
                     color: #4CAF50;
-                    font-weight: bold;
+                    font-weight: 600;
+                    font-size: 8pt;
                 }
             """
             )
         else:
             # 基本的完成信息
-            self.comparison_info_label.setText("✅ 图像处理完成 - 对比效果如下")
+            self.comparison_info_label.setText("✅ 文件处理完成 - 对比效果如下")
             self.comparison_info_label.setStyleSheet(
                 """
                 QLabel {
                     background-color: #e8f5e8;
                     border: 1px solid #4CAF50;
                     border-radius: 5px;
-                    padding: 10px;
+                    padding: 3px 6px;
                     color: #4CAF50;
-                    font-weight: bold;
+                    font-weight: 600;
+                    font-size: 8pt;
                 }
             """
             )
@@ -346,32 +450,34 @@ class PreviewPanel(QWidget):
                 background-color: #fff3cd;
                 border: 1px solid #ffc107;
                 border-radius: 5px;
-                padding: 10px;
+                padding: 3px 6px;
                 color: #856404;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 8pt;
             }
         """
         )
 
     def reset_comparison_display(self):
         """重置对比显示状态"""
-        self.comparison_info_label.setText("📊 对比信息：请先处理图像")
+        self.comparison_info_label.setText("📊 对比信息：请先处理文件")
         self.comparison_info_label.setStyleSheet(
             """
             QLabel {
                 background-color: #f0f8ff;
                 border: 1px solid #007acc;
                 border-radius: 5px;
-                padding: 10px;
+                padding: 3px 6px;
                 color: #007acc;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 8pt;
             }
         """
         )
 
         # 清空处理后图像
         self.processed_image_label.clear()
-        self.processed_image_label.setText("暂无图片")
+        self.processed_image_label.setText("暂无文件")
         self._processed_image = None
 
     def switch_to_comparison_tab(self):

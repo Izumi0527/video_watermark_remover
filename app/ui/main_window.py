@@ -178,9 +178,9 @@ class MainWindow(QMainWindow):
         self.control_panel = ControlPanel()
         horizontal_splitter.addWidget(self.control_panel)
 
-        # 设置水平分割器比例 (70% 预览, 30% 控制)
-        horizontal_splitter.setStretchFactor(0, 7)
-        horizontal_splitter.setStretchFactor(1, 3)
+        # 设置水平分割器比例 (60% 预览, 40% 控制)
+        horizontal_splitter.setStretchFactor(0, 6)
+        horizontal_splitter.setStretchFactor(1, 4)
 
         top_layout.addWidget(horizontal_splitter)
 
@@ -246,12 +246,12 @@ class MainWindow(QMainWindow):
             if geometry:
                 self.restoreGeometry(geometry)
             else:
-                self.setMinimumSize(1200, 800)
-                self.resize(1400, 900)
+                self.setMinimumSize(1600, 1000)
+                self.resize(1680, 1050)
         except Exception as e:
             self.logger.warning(f"Failed to restore window geometry: {e}")
-            self.setMinimumSize(1200, 800)
-            self.resize(1400, 900)
+            self.setMinimumSize(1600, 1000)
+            self.resize(1680, 1050)
 
     def _restore_ui_state(self):
         """恢复UI状态"""
