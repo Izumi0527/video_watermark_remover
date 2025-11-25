@@ -3,7 +3,7 @@ import os
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
 # 导入现有模块
 from ..config.config_manager import ConfigManager
@@ -69,6 +69,9 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None):
         super().__init__()
 
+        # 设置日志（需早于依赖logger的调用）
+        self.logger = logging.getLogger(__name__)
+
         # 初始化核心属性
         self.config = config or ConfigManager.load_config()
 
@@ -83,7 +86,7 @@ class MainWindow(QMainWindow):
         self.style_manager = ModernStyleManager(saved_theme)
 
         # 设置窗口属性
-        self.setWindowTitle("智能视频水印去除工具 - v0.3.0 重构版")
+        self.setWindowTitle("智能水印去除工具 - v0.4.0")
         self._restore_window_geometry()
 
         # 初始化UI（必须在创建signal_handler之前）
@@ -106,8 +109,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._restore_ui_state()
 
-        # 设置日志
-        self.logger = logging.getLogger(__name__)
+        # 记录初始化完成
         self.logger.info("MainWindow initialized successfully (refactored version)")
 
         # 🚀 延迟500ms后启动AI模型预加载（不阻塞UI）
@@ -119,72 +121,105 @@ class MainWindow(QMainWindow):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(8)  # 遵循8dp栅格
+        main_layout.setContentsMargins(16, 8, 16, 16)  # 优化top margin
 
         # 添加标题
         self._create_title_section(main_layout)
 
-        # 创建主要内容区域 - 使用分割器
-        content_splitter = QSplitter(Qt.Orientation.Vertical)
+        # 创建主分割器 (水平布局: 左侧控制区 | 右侧预览区)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # 创建顶部控制区域
-        top_section = self._create_top_section()
-        content_splitter.addWidget(top_section)
+        # === 左侧区域容器 ===
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(8, 0, 0, 0)  # 左侧留8px与分割器对齐，确保对称
+        left_layout.setSpacing(8)  # 统一间距为8dp
 
-        # 创建底部日志区域
+        # 1. 文件操作面板
+        self.file_panel = FilePanel()
+        left_layout.addWidget(self.file_panel)
+
+        # 2. 控制面板 (占据所有剩余空间，让高级功能可以扩展)
+        self.control_panel = ControlPanel()
+        left_layout.addWidget(self.control_panel, 1)  # stretch=1，占据剩余空间
+
+        # 3. 日志面板 (固定在底部，高度受限)
         self.log_panel = LogPanel()
-        content_splitter.addWidget(self.log_panel)
+        left_layout.addWidget(self.log_panel)
 
-        # 设置分割器比例 (75% 控制区域, 25% 日志区域)
-        content_splitter.setStretchFactor(0, 3)
-        content_splitter.setStretchFactor(1, 1)
+        # 添加弹簧，确保布局紧凑，日志在底部
+        # left_layout.addStretch()
 
-        main_layout.addWidget(content_splitter)
+        # === 右侧区域容器 (预览面板) ===
+        self.preview_panel = PreviewPanel()
+
+        # 将预览面板放在左侧 (Index 0)
+        main_splitter.addWidget(self.preview_panel)
+
+        # 将控制面板放在右侧 (Index 1)
+        main_splitter.addWidget(left_widget)
+
+        # 设置分割器比例 (70% 预览, 30% 控制)
+        main_splitter.setStretchFactor(0, 7)
+        main_splitter.setStretchFactor(1, 3)
+
+        main_layout.addWidget(main_splitter)
 
     def _create_title_section(self, main_layout):
-        """创建标题区域"""
+        """创建标题区域（紧凑型顶部信息栏）"""
+        header = QWidget()
+        header.setObjectName("header_bar")
+        header.setAutoFillBackground(True)  # 确保样式表背景色生效
+        header.setFixedHeight(88)
+
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 12, 16, 12)
+        header_layout.setSpacing(12)
+
+        # 左侧图标
+        icon_label = QLabel("🎬")
+        icon_font = QFont()
+        icon_font.setPointSize(18)
+        icon_label.setFont(icon_font)
+        header_layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # 中间标题与副标题
+        title_container = QWidget()
+        title_layout = QVBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(4)
+
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(18)
         title_font.setBold(True)
 
-        title_label = QLabel("🎬 智能水印去除工具 - v0.3.0 重构版")
+        subtitle_font = QFont()
+        subtitle_font.setPointSize(14)
+        subtitle_font.setBold(False)
+
+        title_label = QLabel("智能水印去除工具 - v0.4.0")
+        title_label.setObjectName("title_primary")
         title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title_label)
 
-        self.lbl_status = QLabel("📁 请选择图片或视频文件开始处理...")
+        subtitle_label = QLabel("AI驱动的图像/视频水印检测与去除")
+        subtitle_label.setObjectName("title_secondary")
+        subtitle_label.setFont(subtitle_font)
+
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(subtitle_label)
+
+        header_layout.addWidget(title_container, stretch=1, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # 右侧状态标签
+        self.lbl_status = QLabel("✅ AI模型已就绪，可以开始处理")
+        self.lbl_status.setObjectName("status_badge")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("QLabel { color: #666; padding: 10px; }")
-        main_layout.addWidget(self.lbl_status)
+        self.lbl_status.setFixedHeight(28)
+        self.lbl_status.setMinimumWidth(180)
+        header_layout.addWidget(self.lbl_status, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-    def _create_top_section(self):
-        """创建顶部控制区域"""
-        top_widget = QWidget()
-        top_layout = QVBoxLayout(top_widget)
-
-        # 文件操作面板
-        self.file_panel = FilePanel()
-        top_layout.addWidget(self.file_panel)
-
-        # 创建水平分割器用于预览和控制
-        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # 预览面板
-        self.preview_panel = PreviewPanel()
-        horizontal_splitter.addWidget(self.preview_panel)
-
-        # 控制面板
-        self.control_panel = ControlPanel()
-        horizontal_splitter.addWidget(self.control_panel)
-
-        # 设置水平分割器比例 (60% 预览, 40% 控制)
-        horizontal_splitter.setStretchFactor(0, 6)
-        horizontal_splitter.setStretchFactor(1, 4)
-
-        top_layout.addWidget(horizontal_splitter)
-
-        return top_widget
+        main_layout.addWidget(header)
 
     def _connect_signals(self):
         """连接组件信号 - 采用观察者模式，通过 SignalHandler 统一处理"""

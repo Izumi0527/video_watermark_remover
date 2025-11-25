@@ -2,10 +2,12 @@ import logging
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -33,22 +35,47 @@ class ControlPanel(QWidget):
 
     def _init_ui(self):
         """初始化用户界面"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setObjectName("control_scroll_area")
+
+        # 滚动区域的内容容器
+        content_widget = QWidget()
+        content_widget.setObjectName("control_content")
+        self.content_layout = QVBoxLayout(content_widget)
+        self.content_layout.setSpacing(0)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
 
         # 创建处理控制组
-        self._create_processing_control_group(layout)
+        self._create_processing_control_group(self.content_layout)
 
         # 创建进度显示组
-        self._create_progress_group(layout)
+        self._create_progress_group(self.content_layout)
 
         # 创建高级功能标签页
-        self._create_advanced_tabs_group(layout)
+        self._create_advanced_tabs_group(self.content_layout)
+
+        # 移除弹簧，让"高级功能"自然扩展，避免底部过多空白
+        # self.content_layout.addStretch()
+
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
 
     def _create_processing_control_group(self, main_layout):
         """创建处理控制组"""
         control_group = QGroupBox("处理控制")
+        control_group.setObjectName("processing_control_group")
+
         control_layout = QHBoxLayout(control_group)
+        control_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        control_layout.setSpacing(8)
 
         # 开始处理按钮
         self.btn_start_processing = QPushButton("✨ 开始去除水印")
@@ -106,7 +133,11 @@ class ControlPanel(QWidget):
     def _create_progress_group(self, main_layout):
         """创建进度显示组 (Phase 4 Stage 1.4 - 增强版)"""
         progress_group = QGroupBox("处理进度")
+        progress_group.setObjectName("progress_group")
+
         progress_layout = QVBoxLayout(progress_group)
+        progress_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        progress_layout.setSpacing(0)
 
         # 添加详细进度组件 (Phase 4 Stage 1.4)
         self.detailed_progress = DetailedProgressWidget()
@@ -114,23 +145,10 @@ class ControlPanel(QWidget):
 
         # 保留原有的简单进度条 (用于兼容性)
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("simple_progress_bar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """
-        )
         # 隐藏简单进度条,使用详细进度组件代替
         self.progress_bar.hide()
 
@@ -139,8 +157,12 @@ class ControlPanel(QWidget):
     def _create_advanced_tabs_group(self, main_layout):
         """创建高级功能标签页组"""
         tabs_group = QGroupBox("高级功能")
-        tabs_group.setMinimumHeight(450)  # 确保控制面板有足够高度显示所有内容
+        tabs_group.setObjectName("advanced_tabs_group")
+
+        # tabs_group.setMinimumHeight(450) # Removed fixed height to allow layout to adapt
         tabs_layout = QVBoxLayout(tabs_group)
+        tabs_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        tabs_layout.setSpacing(0)
 
         # 创建标签页容器
         self.advanced_tabs = QTabWidget()
@@ -152,7 +174,7 @@ class ControlPanel(QWidget):
         self._create_parameters_tab()
 
         tabs_layout.addWidget(self.advanced_tabs)
-        main_layout.addWidget(tabs_group)
+        main_layout.addWidget(tabs_group, 1)  # stretch=1，让高级功能占据所有剩余空间
 
     def _create_batch_processing_tab(self):
         """创建批处理标签页"""
@@ -171,7 +193,7 @@ class ControlPanel(QWidget):
         batch_info.setMinimumHeight(100)
         batch_layout.addWidget(batch_info)
 
-        batch_layout.addStretch()
+        # batch_layout.addStretch()  # 移除：避免底部过多空白
 
         self.advanced_tabs.addTab(batch_tab, "📦 批处理")
 

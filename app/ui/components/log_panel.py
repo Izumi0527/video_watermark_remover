@@ -32,10 +32,19 @@ class LogPanel(QWidget):
     def _init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)  # 统一顶部边距为0，确保与左侧预览区域对齐
+        layout.setSpacing(0)  # 统一间距设置
+
+        # 限制日志面板的最大高度，让窗口更紧凑
+        self.setMaximumHeight(280)
 
         # 创建日志显示组
         log_group = QGroupBox("处理日志")
+        log_group.setObjectName("log_group")
+
         log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        log_layout.setSpacing(0)
 
         # 日志控制栏
         self._create_log_controls(log_layout)
@@ -68,12 +77,14 @@ class LogPanel(QWidget):
 
         # 清空日志按钮
         self.btn_clear_log = QPushButton("🗑️ 清空")
+        self.btn_clear_log.setObjectName("btn_clear_log")
         self.btn_clear_log.clicked.connect(self._clear_log)
         self.btn_clear_log.setMaximumWidth(80)
         controls_layout.addWidget(self.btn_clear_log)
 
         # 保存日志按钮
         self.btn_save_log = QPushButton("💾 保存")
+        self.btn_save_log.setObjectName("btn_save_log")
         self.btn_save_log.clicked.connect(self._save_log)
         self.btn_save_log.setMaximumWidth(80)
         controls_layout.addWidget(self.btn_save_log)
@@ -93,17 +104,7 @@ class LogPanel(QWidget):
         self.log_text_edit.setFont(font)
 
         # 设置样式
-        self.log_text_edit.setStyleSheet(
-            """
-            QTextEdit {
-                background-color: #1e1e1e;
-                color: #ffffff;
-                border: 1px solid #555;
-                border-radius: 5px;
-                padding: 5px;
-            }
-        """
-        )
+        self.log_text_edit.setObjectName("log_output")
 
         parent_layout.addWidget(self.log_text_edit)
 
@@ -143,19 +144,28 @@ class LogPanel(QWidget):
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # 根据日志级别设置颜色
+        # INFO 使用 None 以跟随主题默认字体颜色，解决亮色模式下不可见的问题
         color_map = {
             "DEBUG": "#888888",
-            "INFO": "#ffffff",
+            "INFO": None,
             "WARNING": "#ffaa00",
             "ERROR": "#ff4444",
         }
 
-        color = color_map.get(level, "#ffffff")
+        color = color_map.get(level)
 
         # 格式化消息
         formatted_message = f'<span style="color: #888888">[{timestamp}]</span> '
-        formatted_message += f'<span style="color: {color}; font-weight: bold">[{level}]</span> '
-        formatted_message += f'<span style="color: {color}">{message}</span>'
+
+        if color:
+            formatted_message += (
+                f'<span style="color: {color}; font-weight: bold">[{level}]</span> '
+            )
+            formatted_message += f'<span style="color: {color}">{message}</span>'
+        else:
+            # 无特定颜色（如 INFO），使用默认字体颜色（亮色模式为黑，暗色模式为白）
+            formatted_message += f'<span style="font-weight: bold">[{level}]</span> '
+            formatted_message += f"<span>{message}</span>"
 
         # 添加到文本区域
         cursor = self.log_text_edit.textCursor()

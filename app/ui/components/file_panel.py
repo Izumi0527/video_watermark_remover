@@ -25,7 +25,8 @@ class FilePanel(QWidget):
     def _init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)  # 统一顶部边距为0，确保与左侧预览区域对齐
+        layout.setSpacing(8)  # 改为8dp，遵循栅格系统
 
         # 文件操作组
         self._create_file_operations_group(layout)
@@ -36,24 +37,29 @@ class FilePanel(QWidget):
     def _create_file_operations_group(self, main_layout):
         """创建文件操作组"""
         file_group = QGroupBox("文件操作")
+        file_group.setObjectName("file_operations_group")
+
         file_layout = QHBoxLayout(file_group)
+        file_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        file_layout.setSpacing(8)
 
         # 选择文件按钮
         self.btn_import = QPushButton("📂 选择文件")
-        self.btn_import.setMinimumHeight(40)
+        self.btn_import.setObjectName("btn_import")
+        self.btn_import.setProperty("class", "primary")
         self.btn_import.clicked.connect(self._on_import_clicked)
         file_layout.addWidget(self.btn_import)
 
         # 导出结果按钮
         self.btn_export = QPushButton("💾 导出结果")
-        self.btn_export.setMinimumHeight(40)
+        self.btn_export.setObjectName("btn_export")
         self.btn_export.clicked.connect(self._on_export_clicked)
         self.btn_export.setEnabled(False)
         file_layout.addWidget(self.btn_export)
 
         # 主题切换按钮
         self.btn_theme_toggle = QPushButton("🌙 切换主题")
-        self.btn_theme_toggle.setMinimumHeight(40)
+        self.btn_theme_toggle.setObjectName("btn_theme_toggle")
         self.btn_theme_toggle.clicked.connect(self._on_theme_toggle_clicked)
         self.btn_theme_toggle.setToolTip("在亮色和暗色主题之间切换")
         file_layout.addWidget(self.btn_theme_toggle)
@@ -64,7 +70,11 @@ class FilePanel(QWidget):
     def _create_processing_mode_group(self, main_layout):
         """创建处理模式组"""
         mode_group = QGroupBox("处理模式")
+        mode_group.setObjectName("processing_mode_group")
+
         mode_layout = QHBoxLayout(mode_group)
+        mode_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        mode_layout.setSpacing(8)
 
         # 自动检测模式
         self.auto_mode_checkbox = QCheckBox("🤖 自动检测水印")
