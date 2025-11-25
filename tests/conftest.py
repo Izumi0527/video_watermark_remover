@@ -4,12 +4,13 @@ pytest 配置和共享 fixtures
 提供测试所需的通用 fixtures 和配置。
 """
 
-import pytest
-import tempfile
-import shutil
 import os
-from pathlib import Path
+import shutil
+import tempfile
 from configparser import ConfigParser
+from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -77,6 +78,7 @@ def mock_image():
         numpy.ndarray: 640x480 的黑色 BGR 图像
     """
     import numpy as np
+
     return np.zeros((480, 640, 3), dtype=np.uint8)
 
 
@@ -89,4 +91,5 @@ def mock_mask():
         numpy.ndarray: 640x480 的全零掩码
     """
     import numpy as np
+
     return np.zeros((480, 640), dtype=np.uint8)

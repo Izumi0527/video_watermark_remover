@@ -2,7 +2,16 @@ import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QFrame, QGroupBox, QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame,
+    QGroupBox,
+    QLabel,
+    QSizePolicy,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 # 导入图像选择器组件
 from ..widgets.image_selector_widget import ImageSelectorWidget
@@ -27,10 +36,16 @@ class PreviewPanel(QWidget):
     def _init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # 创建预览区域组
-        preview_group = QGroupBox("预览区域")
-        preview_layout = QVBoxLayout(preview_group)
+        # 创建外层分组框 - 模拟截图样式
+        self.preview_group = QGroupBox("预览区域")
+        self.preview_group.setObjectName("preview_group")
+
+        group_layout = QVBoxLayout(self.preview_group)
+        group_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        group_layout.setSpacing(0)
 
         # 创建标签页
         self.preview_tabs = QTabWidget()
@@ -44,8 +59,8 @@ class PreviewPanel(QWidget):
         # 效果对比标签页
         self._create_comparison_tab()
 
-        preview_layout.addWidget(self.preview_tabs)
-        layout.addWidget(preview_group)
+        group_layout.addWidget(self.preview_tabs)
+        layout.addWidget(self.preview_group)
 
     def _create_simple_preview_tab(self):
         """创建简单预览标签页"""
@@ -53,20 +68,13 @@ class PreviewPanel(QWidget):
         simple_layout = QVBoxLayout(self.simple_preview_tab)
 
         self.preview_area = QLabel("🖼️ 文件预览区域\n\n请选择图片或视频文件进行预览")
+        self.preview_area.setObjectName("preview_placeholder")
         self.preview_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_area.setMinimumSize(640, 360)
-        self.preview_area.setStyleSheet(
-            """
-            QLabel {
-                border: 2px dashed #ccc;
-                border-radius: 10px;
-                background-color: #f9f9f9;
-                color: #888;
-                font-size: 11pt;
-            }
-        """
-        )
-        simple_layout.addWidget(self.preview_area)
+        # 设置size policy让预览区域充分扩展
+        self.preview_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # 样式将由 style_manager 统一管理
+        simple_layout.addWidget(self.preview_area, 1)  # 添加stretch factor
 
         self.preview_tabs.addTab(self.simple_preview_tab, "📷 简单预览")
 
@@ -91,21 +99,9 @@ class PreviewPanel(QWidget):
 
         # 添加对比信息显示区域
         self.comparison_info_label = QLabel("📊 对比信息：请先处理文件")
+        self.comparison_info_label.setObjectName("comparison_info")
         self.comparison_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.comparison_info_label.setMinimumHeight(28)  # 设置最小高度防止被压缩
-        self.comparison_info_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #f0f8ff;
-                border: 1px solid #007acc;
-                border-radius: 5px;
-                padding: 3px 6px;
-                color: #007acc;
-                font-weight: 600;
-                font-size: 8pt;
-            }
-        """
-        )
         comparison_layout.addWidget(self.comparison_info_label)
 
         # 创建分割器用于左右对比
@@ -134,25 +130,19 @@ class PreviewPanel(QWidget):
     def _create_image_frame(self, title):
         """创建图像框架"""
         frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)  # 改进框架样式，确保边框完整
-        frame.setLineWidth(1)  # 明确设置边框线宽
-        frame.setMinimumHeight(350)  # 设置框架最小高度，确保边框闭合
+        frame.setObjectName("preview_container")
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame.setMinimumHeight(400)  # 增加最小高度
+        # 设置frame的size policy
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 8, 8, 8)  # 设置合理的内边距
-        layout.setSpacing(8)  # 设置元素间距
+        layout.setContentsMargins(8, 8, 8, 8)  # 遵循8dp栅格
+        layout.setSpacing(8)  # 遵循8dp栅格
 
         # 标题
         title_label = QLabel(title)
+        title_label.setObjectName("preview_title")  # Add object name for styling
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet(
-            """
-            QLabel {
-                font-size: 10pt;
-                padding: 3px 0px;
-                font-weight: 500;
-            }
-        """
-        )
         layout.addWidget(title_label)
 
         # 图像显示区域
@@ -160,15 +150,9 @@ class PreviewPanel(QWidget):
         image_label.setObjectName("image_label")  # 设置对象名以便查找
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         image_label.setMinimumSize(450, 320)
-        image_label.setStyleSheet(
-            """
-            QLabel {
-                border: 1px solid #ccc;
-                background-color: #f9f9f9;
-                color: #888;
-            }
-        """
-        )
+        # 设置image_label的size policy
+        image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # 样式将由 style_manager 统一管理
         layout.addWidget(image_label, 1)  # 添加伸缩因子，让图像充满剩余空间
 
         return frame
@@ -176,6 +160,9 @@ class PreviewPanel(QWidget):
     def set_image(self, image_path):
         """设置预览图像"""
         try:
+            # 清除之前的内联样式，让全局样式生效
+            self.preview_area.setStyleSheet("")
+
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 # 缩放图像以适应预览区域
@@ -210,6 +197,9 @@ class PreviewPanel(QWidget):
         try:
             import numpy as np
             from PyQt6.QtGui import QImage
+
+            # 清除之前的内联样式，让全局样式生效
+            self.preview_area.setStyleSheet("")
 
             # 确保是 uint8 类型的 RGB 数组
             if image_array.dtype != np.uint8:
@@ -277,9 +267,9 @@ class PreviewPanel(QWidget):
             self.preview_area.setStyleSheet(
                 """
                 QLabel {
-                    border: 2px dashed #007acc;
-                    border-radius: 10px;
-                    background-color: #e3f2fd;
+                    border: 2px solid #000000;
+                    border-radius: 12px;
+                    background-color: #1a1a1a;
                     color: #007acc;
                     font-size: 11pt;
                 }

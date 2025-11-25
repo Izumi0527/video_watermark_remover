@@ -222,6 +222,12 @@ foreach ($cleanItem in $ItemsToClean) {
 
     foreach ($item in $items) {
         try {
+            # 在删除前检查文件/目录是否存在（避免竞态条件）
+            if (-not (Test-Path $item.FullName)) {
+                # 文件/目录已不存在（可能被之前的操作删除了）
+                continue
+            }
+
             if ($target.Type -eq "Directory") {
                 Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction Stop
             }

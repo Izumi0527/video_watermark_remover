@@ -1,4 +1,8 @@
+"""列表组件样式片段。"""
+
+
 def listwidget_styles(colors: dict) -> str:
+    """列表组件样式."""
     return f"""
     QListWidget {{
         background-color: {colors['surface']};

@@ -12,7 +12,7 @@ import time
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from PyQt5.QtCore import QCoreApplication  # noqa: E402
+from PyQt6.QtCore import QCoreApplication  # noqa: E402
 
 from app.core.video.video_processor import VideoProcessorThread  # noqa: E402
 

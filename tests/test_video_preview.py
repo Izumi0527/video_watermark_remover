@@ -2,10 +2,10 @@
 """
 Test video preview functionality
 """
-import sys
 import os
+import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import cv2
 import numpy as np
@@ -21,7 +21,7 @@ def test_extract_video_first_frame():
     test_video_path = "test_output/test_video.mp4"
     os.makedirs("test_output", exist_ok=True)
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(test_video_path, fourcc, 30.0, (640, 480))
 
     for i in range(30):
@@ -69,9 +69,7 @@ def test_numpy_to_qimage():
 
     h, w, c = test_image.shape
     bytes_per_line = 3 * w
-    q_image = QImage(
-        test_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
-    )
+    q_image = QImage(test_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
 
     if not q_image.isNull():
         print(f"[OK] QImage created: size={q_image.size().width()}x{q_image.size().height()}")
@@ -99,7 +97,7 @@ def test_video_metadata():
     test_video_path = "test_output/test_video_meta.mp4"
     os.makedirs("test_output", exist_ok=True)
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(test_video_path, fourcc, 25.0, (1920, 1080))
 
     for i in range(50):

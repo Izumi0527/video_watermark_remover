@@ -1,6 +1,4 @@
-"""
-样式管理包入口，兼容原有导出。
-"""
+"""样式管理包入口，兼容原有导出."""
 
 from .colors import (
     AVAILABLE_THEMES,

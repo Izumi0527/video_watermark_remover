@@ -59,6 +59,59 @@ class ConfigManager:
     Manages loading and saving application configuration using configparser.
     """
 
+    # 兼容 Phase3 测试所需的默认值（小写 section），同时保留现有大写 section 以兼容现有代码
+    _DEFAULTS = {
+        "Paths": {
+            "ffmpeg_path": "ffmpeg",
+            "default_model_dir": "./models",
+            "last_input_dir": "",
+            "last_output_dir": "",
+        },
+        "paths": {
+            "ffmpeg_path": "ffmpeg",
+            "default_model_dir": "./models",
+            "last_input_dir": "",
+            "last_output_dir": "",
+        },
+        "Processing": {
+            "default_output_suffix": "_processed",
+            "auto_start_processing": "no",
+            "gpu_acceleration": "auto",
+            # Phase3 期望的键
+            "default_detection_sensitivity": "0.5",
+            "default_inpainting_method": "auto",
+            "preserve_audio": "true",
+        },
+        "processing": {
+            "default_output_suffix": "_processed",
+            "auto_start_processing": "no",
+            "gpu_acceleration": "auto",
+            "default_detection_sensitivity": "0.5",
+            "default_inpainting_method": "auto",
+            "preserve_audio": "true",
+        },
+        "Logging": {
+            "log_level": "INFO",
+            "log_file_path": os.path.join(CONFIG_DIR, "app.log"),
+        },
+        "logging": {
+            "log_level": "INFO",
+            "log_file_path": os.path.join(CONFIG_DIR, "app.log"),
+        },
+        "Models": {
+            "detection_model_path": "",
+            "inpainting_model_path": "",
+            "default_confidence_threshold": "0.5",
+        },
+        "models": {
+            "detection_model_path": "",
+            "inpainting_model_path": "",
+            "default_confidence_threshold": "0.5",
+        },
+        "Advanced": {},
+        "advanced": {},
+    }
+
     @staticmethod
     def get_config_path() -> str:
         """Returns the determined config path."""
@@ -92,29 +145,8 @@ class ConfigManager:
     def _get_default_config_parser() -> ConfigParser:
         """Returns a ConfigParser object populated with default settings."""
         config = configparser.ConfigParser()
-        config["Paths"] = {
-            "ffmpeg_path": "ffmpeg",  # Assumes ffmpeg is in PATH
-            "default_model_dir": "./models",  # Relative to project or app root
-            "last_input_dir": "",
-            "last_output_dir": "",
-        }
-        config["Processing"] = {
-            "default_output_suffix": "_processed",
-            "auto_start_processing": "no",  # yes/no
-            "gpu_acceleration": "auto",  # auto/yes/no
-        }
-        config["Logging"] = {
-            "log_level": "INFO",  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-            "log_file_path": os.path.join(
-                CONFIG_DIR, "app.log"
-            ),  # Use the same dir as config for logs
-        }
-        config["Models"] = {
-            "detection_model_path": "",  # Path to detection model
-            "inpainting_model_path": "",  # Path to inpainting model
-            "default_confidence_threshold": "0.5",
-        }
-        # Add more sections and default values as needed
+        for section, options in ConfigManager._DEFAULTS.items():
+            config[section] = options
         return config
 
     @staticmethod
@@ -127,6 +159,64 @@ class ConfigManager:
             for option, value in defaults.items(section):
                 if not config_parser_instance.has_option(section, option):
                     config_parser_instance.set(section, option, value)
+
+    # ===================== Phase3 兼容 API =====================
+
+    @staticmethod
+    def _get_option_with_fallback(
+        config: ConfigParser, sections: list[str], option: str, fallback: Optional[str] = None
+    ) -> Optional[str]:
+        """按优先级依次读取多个 section 的同名配置。"""
+        for section in sections:
+            if config.has_option(section, option):
+                return config.get(section, option)
+        return fallback
+
+    @staticmethod
+    def get_detection_sensitivity(config: ConfigParser, default: float = 0.5) -> float:
+        """
+        获取水印检测敏感度，范围 [0, 1]，无效值回退到默认值。
+        """
+        raw = ConfigManager._get_option_with_fallback(
+            config, ["processing", "Processing"], "default_detection_sensitivity"
+        )
+        try:
+            value = float(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+
+        if 0.0 <= value <= 1.0:
+            return value
+        return default
+
+    @staticmethod
+    def get_inpainting_method(config: ConfigParser, default: str = "auto") -> str:
+        """
+        获取修复方法，限制在允许集合内。
+        """
+        raw = ConfigManager._get_option_with_fallback(
+            config, ["processing", "Processing"], "default_inpainting_method", fallback=default
+        )
+        method = (raw or default).lower()
+        allowed = {"auto", "telea", "ns", "custom"}
+        return method if method in allowed else default
+
+    @staticmethod
+    def preserve_audio(config: ConfigParser, default: bool = True) -> bool:
+        """
+        是否保留音频，兼容大小写/多种真值写法。
+        """
+        raw = ConfigManager._get_option_with_fallback(
+            config, ["processing", "Processing"], "preserve_audio"
+        )
+        if raw is None:
+            return default
+        value = raw.strip().lower()
+        if value in {"true", "yes", "1", "y", "on"}:
+            return True
+        if value in {"false", "no", "0", "n", "off"}:
+            return False
+        return default
 
     @staticmethod
     def _create_default_config(config_path: str) -> None:

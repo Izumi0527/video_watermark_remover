@@ -1,4 +1,8 @@
+"""标签样式片段。"""
+
+
 def label_styles(colors: dict) -> str:
+    """标签样式."""
     return f"""
     QLabel {{
         color: {colors['text_primary']};

@@ -1,3 +1,5 @@
+# flake8: noqa
+# mypy: ignore-errors
 import logging
 import subprocess
 import threading

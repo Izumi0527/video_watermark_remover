@@ -11,11 +11,12 @@ ConfigManager 单元测试
 覆盖率目标: 90%+
 """
 
-import pytest
-import tempfile
-from pathlib import Path
-from configparser import ConfigParser
 import shutil
+import tempfile
+from configparser import ConfigParser
+from pathlib import Path
+
+import pytest
 
 from app.config.config_manager import ConfigManager
 
@@ -77,9 +78,7 @@ class TestConfigManager:
         # Assert
         assert sensitivity == 0.7
 
-    def test_get_detection_sensitivity_invalid_returns_default(
-        self, temp_config_file
-    ):
+    def test_get_detection_sensitivity_invalid_returns_default(self, temp_config_file):
         """测试无效敏感度值返回默认值"""
         # Arrange
         config = ConfigManager.load_config(str(temp_config_file))
@@ -241,6 +240,7 @@ class TestConfigManager:
 
 
 # Fixtures
+
 
 @pytest.fixture
 def temp_dir():

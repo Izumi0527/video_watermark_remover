@@ -1,4 +1,8 @@
+"""标签页样式片段。"""
+
+
 def tab_styles(colors: dict) -> str:
+    """标签页样式."""
     return f"""
     QTabWidget::pane {{
         border: 1px solid {colors['border']};

@@ -1,6 +1,4 @@
-"""
-颜色与主题配置。
-"""
+"""颜色与主题配置."""
 
 from typing import Dict, List
 

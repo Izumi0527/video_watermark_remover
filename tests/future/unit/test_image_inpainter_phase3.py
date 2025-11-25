@@ -14,10 +14,11 @@ ImageInpainter 单元测试
 覆盖率目标: 80%+
 """
 
-import pytest
-import numpy as np
-import cv2
 from unittest.mock import Mock, patch
+
+import cv2
+import numpy as np
+import pytest
 
 from app.core.ai.image_inpainter import ImageInpainter
 
@@ -460,6 +461,7 @@ class TestImageInpainter:
 
 
 # Fixtures
+
 
 @pytest.fixture
 def mock_config():

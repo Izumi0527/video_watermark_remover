@@ -1,4 +1,8 @@
+"""按钮样式片段。"""
+
+
 def button_styles(colors: dict) -> str:
+    """按钮样式."""
     return f"""
     QPushButton {{
         background-color: {colors['surface']};

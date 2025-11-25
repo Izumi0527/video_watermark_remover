@@ -1,4 +1,8 @@
+"""附加样式片段。"""
+
+
 def additional_styles(colors: dict) -> str:
+    """附加组件样式."""
     return f"""
     QSplitter::handle {{
         background-color: transparent;

@@ -1,12 +1,10 @@
-"""
-偏好设置默认值定义。
-"""
+"""偏好设置默认值定义."""
 
 from typing import Any, Dict, cast
 
 
 class PreferencesDefaults:
-    """偏好设置默认值定义类。"""
+    """偏好设置默认值定义类."""
 
     DEFAULT_PREFERENCES = {
         "ui": {
@@ -46,29 +44,34 @@ class PreferencesDefaults:
 
     @classmethod
     def get_default_preferences(cls) -> Dict[str, Any]:
-        """获取默认偏好设置的深拷贝。"""
+        """获取默认偏好设置的深拷贝."""
         import copy
 
         return copy.deepcopy(cls.DEFAULT_PREFERENCES)
 
     @classmethod
     def get_ui_defaults(cls) -> Dict[str, Any]:
+        """获取 UI 默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["ui"]).copy()
 
     @classmethod
     def get_processing_defaults(cls) -> Dict[str, Any]:
+        """获取处理相关默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["processing"]).copy()
 
     @classmethod
     def get_paths_defaults(cls) -> Dict[str, Any]:
+        """获取路径相关默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["paths"]).copy()
 
     @classmethod
     def get_advanced_defaults(cls) -> Dict[str, Any]:
+        """获取高级功能默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["advanced"]).copy()
 
     @classmethod
     def get_batch_defaults(cls) -> Dict[str, Any]:
+        """获取批量处理默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["batch"]).copy()
 
 

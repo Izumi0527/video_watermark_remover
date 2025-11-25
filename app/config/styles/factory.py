@@ -1,6 +1,4 @@
-"""
-样式表工厂，负责组合各组件样式。
-"""
+"""样式表工厂，负责组合各组件样式."""
 
 from typing import Dict
 
@@ -18,9 +16,10 @@ from .sections.textedit import textedit_styles
 
 
 class StyleFactory:
-    """样式工厂类，生成各种UI组件的样式表。"""
+    """样式工厂类，生成各种 UI 组件的样式表."""
 
     def __init__(self, theme_colors: Dict[str, str]):
+        """初始化样式工厂。"""
         self.colors = theme_colors
 
     def get_main_window_stylesheet(self) -> str:

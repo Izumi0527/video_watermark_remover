@@ -1,4 +1,8 @@
+"""下拉框样式片段。"""
+
+
 def combobox_styles(colors: dict) -> str:
+    """下拉框样式."""
     return f"""
     QComboBox {{
         background-color: {colors['surface']};

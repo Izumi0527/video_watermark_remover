@@ -1,4 +1,8 @@
+"""主窗口样式片段。"""
+
+
 def main_window_styles(colors: dict) -> str:
+    """主窗口与标题区域样式."""
     return f"""
     QMainWindow {{
         background-color: {colors['background']};

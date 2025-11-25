@@ -38,7 +38,6 @@
 
 from typing import Optional
 
-
 # ==================== 基础异常类 ====================
 
 
@@ -58,7 +57,7 @@ class VideoWatermarkRemoverError(Exception):
         self,
         message: str,
         details: Optional[str] = None,
-        original_exception: Optional[Exception] = None
+        original_exception: Optional[Exception] = None,
     ):
         self.message = message
         self.details = details
@@ -79,6 +78,7 @@ class VideoWatermarkRemoverError(Exception):
 
 class ConfigError(VideoWatermarkRemoverError):
     """配置相关错误的基类"""
+
     pass
 
 
@@ -94,6 +94,7 @@ class ConfigLoadError(ConfigError):
             details="config.ini 文件不存在"
         )
     """
+
     pass
 
 
@@ -103,6 +104,7 @@ class ConfigSaveError(ConfigError):
 
     当配置无法写入文件时抛出（权限问题、磁盘空间等）。
     """
+
     pass
 
 
@@ -118,6 +120,7 @@ class ConfigValidationError(ConfigError):
             details="灵敏度必须在 0.0-1.0 之间"
         )
     """
+
     pass
 
 
@@ -126,6 +129,7 @@ class ConfigValidationError(ConfigError):
 
 class FileProcessingError(VideoWatermarkRemoverError):
     """文件处理错误的基类"""
+
     pass
 
 
@@ -141,6 +145,7 @@ class UnsupportedFormatError(FileProcessingError):
             details=f"格式 .{file_ext} 不在支持列表中"
         )
     """
+
     pass
 
 
@@ -150,6 +155,7 @@ class FileReadError(FileProcessingError):
 
     当无法读取输入文件时抛出（文件不存在、权限不足、损坏等）。
     """
+
     pass
 
 
@@ -159,6 +165,7 @@ class FileSaveError(FileProcessingError):
 
     当无法保存输出文件时抛出（权限不足、磁盘空间不足等）。
     """
+
     pass
 
 
@@ -167,6 +174,7 @@ class FileSaveError(FileProcessingError):
 
 class AIModelError(VideoWatermarkRemoverError):
     """AI 模型相关错误的基类"""
+
     pass
 
 
@@ -182,6 +190,7 @@ class ModelLoadError(AIModelError):
             details="模型文件 yolov5.pt 不存在"
         )
     """
+
     pass
 
 
@@ -191,6 +200,7 @@ class DetectionError(AIModelError):
 
     当水印检测过程中发生错误时抛出。
     """
+
     pass
 
 
@@ -200,6 +210,7 @@ class InpaintingError(AIModelError):
 
     当图像修复过程中发生错误时抛出。
     """
+
     pass
 
 
@@ -208,6 +219,7 @@ class InpaintingError(AIModelError):
 
 class AudioProcessingError(VideoWatermarkRemoverError):
     """音频处理错误的基类"""
+
     pass
 
 
@@ -217,6 +229,7 @@ class AudioExtractionError(AudioProcessingError):
 
     当从视频中提取音频失败时抛出。
     """
+
     pass
 
 
@@ -226,6 +239,7 @@ class AudioMergingError(AudioProcessingError):
 
     当将音频合并回视频失败时抛出。
     """
+
     pass
 
 
@@ -241,6 +255,7 @@ class FFmpegError(AudioProcessingError):
             details=f"返回码: {returncode}, 错误: {stderr}"
         )
     """
+
     pass
 
 
@@ -249,6 +264,7 @@ class FFmpegError(AudioProcessingError):
 
 class VideoProcessingError(VideoWatermarkRemoverError):
     """视频处理错误的基类"""
+
     pass
 
 
@@ -264,6 +280,7 @@ class VideoReadError(VideoProcessingError):
             details=f"文件路径: {video_path}"
         )
     """
+
     pass
 
 
@@ -273,6 +290,7 @@ class VideoWriteError(VideoProcessingError):
 
     当无法创建或写入视频文件时抛出。
     """
+
     pass
 
 
@@ -282,6 +300,7 @@ class FrameProcessingError(VideoProcessingError):
 
     当处理视频帧时发生错误时抛出。
     """
+
     pass
 
 
@@ -290,6 +309,7 @@ class FrameProcessingError(VideoProcessingError):
 
 class UIError(VideoWatermarkRemoverError):
     """UI 相关错误的基类"""
+
     pass
 
 
@@ -299,6 +319,7 @@ class PreviewError(UIError):
 
     当无法加载或显示预览图像时抛出。
     """
+
     pass
 
 
@@ -308,6 +329,7 @@ class SignalError(UIError):
 
     当 Qt 信号处理发生错误时抛出。
     """
+
     pass
 
 
@@ -315,9 +337,7 @@ class SignalError(UIError):
 
 
 def wrap_exception(
-    exception_class: type[VideoWatermarkRemoverError],
-    message: str,
-    original_exception: Exception
+    exception_class: type[VideoWatermarkRemoverError], message: str, original_exception: Exception
 ) -> VideoWatermarkRemoverError:
     """
     包装原始异常为自定义异常
@@ -343,10 +363,7 @@ def wrap_exception(
                 e
             )
     """
-    return exception_class(
-        message=message,
-        original_exception=original_exception
-    )
+    return exception_class(message=message, original_exception=original_exception)
 
 
 # ==================== 异常类型映射表 ====================
@@ -357,11 +374,9 @@ EXCEPTION_MAPPING = {
     FileNotFoundError: FileReadError,
     PermissionError: FileProcessingError,
     IsADirectoryError: FileReadError,
-
     # 配置相关
     ValueError: ConfigValidationError,
     KeyError: ConfigValidationError,
-
     # 通用映射
     OSError: FileProcessingError,
     IOError: FileProcessingError,
@@ -370,7 +385,7 @@ EXCEPTION_MAPPING = {
 
 def get_custom_exception(
     standard_exception: Exception,
-    default_class: type[VideoWatermarkRemoverError] = VideoWatermarkRemoverError
+    default_class: type[VideoWatermarkRemoverError] = VideoWatermarkRemoverError,
 ) -> type[VideoWatermarkRemoverError]:
     """
     根据标准异常获取对应的自定义异常类
@@ -431,10 +446,7 @@ if __name__ == "__main__":
 
     # 测试异常创建
     try:
-        raise VideoReadError(
-            "无法打开视频文件",
-            details="文件路径: /path/to/video.mp4"
-        )
+        raise VideoReadError("无法打开视频文件", details="文件路径: /path/to/video.mp4")
     except VideoWatermarkRemoverError as e:
         print(f"\n捕获异常: {e}")
         print(f"消息: {e.message}")
@@ -444,10 +456,6 @@ if __name__ == "__main__":
     try:
         raise FileNotFoundError("文件不存在")
     except Exception as e:
-        wrapped = wrap_exception(
-            FileReadError,
-            "文件操作失败",
-            e
-        )
+        wrapped = wrap_exception(FileReadError, "文件操作失败", e)
         print(f"\n包装异常: {wrapped}")
         print(f"原始异常: {wrapped.original_exception}")

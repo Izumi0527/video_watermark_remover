@@ -1,4 +1,8 @@
+"""进度条样式片段。"""
+
+
 def progressbar_styles(colors: dict) -> str:
+    """进度条样式."""
     return f"""
     QProgressBar {{
         border: none;

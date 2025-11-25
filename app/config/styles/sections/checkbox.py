@@ -1,4 +1,8 @@
+"""复选框样式片段。"""
+
+
 def checkbox_styles(colors: dict) -> str:
+    """复选框样式."""
     return f"""
     QCheckBox {{
         color: {colors['text_primary']};

@@ -16,14 +16,7 @@ import sys
 from typing import TYPE_CHECKING, Any, List, Tuple
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from .selectable_image_label import SelectableImageLabel
 
@@ -53,6 +46,7 @@ class ImageSelectorWidget(QWidget):
 
         # 使用滚动区域以支持大图像
         scroll_area = QScrollArea()
+        scroll_area.setObjectName("image_scroll_area")
         scroll_area.setWidget(self.image_label)
         scroll_area.setWidgetResizable(True)
         scroll_area.setMinimumHeight(400)
@@ -62,11 +56,12 @@ class ImageSelectorWidget(QWidget):
         control_layout = QHBoxLayout()
 
         self.clear_button = QPushButton("清空选择")
+        self.clear_button.setObjectName("btn_clear")
         self.clear_button.clicked.connect(self.clearSelections)
         control_layout.addWidget(self.clear_button)
 
         self.info_label = QLabel("拖拽鼠标选择水印区域")
-        self.info_label.setStyleSheet("color: #666; font-style: italic;")
+        self.info_label.setObjectName("info_label")
         control_layout.addWidget(self.info_label)
 
         control_layout.addStretch()

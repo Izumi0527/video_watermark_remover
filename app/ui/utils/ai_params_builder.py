@@ -54,9 +54,7 @@ class AIParamsBuilder:
         ai_params = {}
 
         # 1. 基础设置（从Preferences）
-        ai_params["auto_detect"] = preferences.get_preference(
-            "processing", "auto_mode", True
-        )
+        ai_params["auto_detect"] = preferences.get_preference("processing", "auto_mode", True)
 
         # 2. 检测参数
         detection_params = self._build_detection_params(advanced_params)
@@ -75,9 +73,7 @@ class AIParamsBuilder:
         ai_params.update(output_params)
 
         # 6. 手动选择区域转换
-        user_mask = self._convert_manual_selections(
-            manual_selections, input_file_path
-        )
+        user_mask = self._convert_manual_selections(manual_selections, input_file_path)
         ai_params["user_mask"] = user_mask
 
         self.logger.info(f"[参数构建] 成功构建AI参数，共 {len(ai_params)} 个参数")
@@ -114,7 +110,9 @@ class AIParamsBuilder:
         params["enable_sharp_preprocess"] = advanced_params.get("enable_sharp_preprocess", False)
         params["enable_denoise_preprocess"] = advanced_params.get("enable_denoise_preprocess", True)
 
-        self.logger.debug(f"[检测参数] conf_threshold={params['conf_threshold']}, device={params['device']}")
+        self.logger.debug(
+            f"[检测参数] conf_threshold={params['conf_threshold']}, device={params['device']}"
+        )
 
         return params
 
@@ -149,7 +147,9 @@ class AIParamsBuilder:
         # 后处理选项
         params["enable_smooth_postprocess"] = advanced_params.get("enable_smooth_postprocess", True)
         params["enable_blend_postprocess"] = advanced_params.get("enable_blend_postprocess", True)
-        params["enable_enhance_postprocess"] = advanced_params.get("enable_enhance_postprocess", False)
+        params["enable_enhance_postprocess"] = advanced_params.get(
+            "enable_enhance_postprocess", False
+        )
 
         self.logger.debug(
             f"[修复参数] algorithm={params['inpainting_algorithm']}, "
@@ -214,16 +214,13 @@ class AIParamsBuilder:
         params["add_timestamp"] = advanced_params.get("add_timestamp", False)
 
         self.logger.debug(
-            f"[输出参数] format={params['output_format']}, "
-            f"quality={params['compression_quality']}"
+            f"[输出参数] format={params['output_format']}, " f"quality={params['compression_quality']}"
         )
 
         return params
 
     def _convert_manual_selections(
-        self,
-        manual_selections: Optional[List],
-        input_file_path: Optional[str] = None
+        self, manual_selections: Optional[List], input_file_path: Optional[str] = None
     ) -> Optional[Any]:
         """
         将前端手动选择区域转换为后端可用格式
@@ -293,11 +290,7 @@ class AIParamsBuilder:
 
         return method_mapping.get(inpainting_method, "gpu_dl")
 
-    def create_mask_from_regions(
-        self,
-        regions: List[tuple],
-        image_shape: tuple
-    ) -> np.ndarray:
+    def create_mask_from_regions(self, regions: List[tuple], image_shape: tuple) -> np.ndarray:
         """
         从区域列表创建二值掩码图像（备用方法）
 

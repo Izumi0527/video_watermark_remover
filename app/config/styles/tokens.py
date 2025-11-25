@@ -1,6 +1,4 @@
-"""
-基础尺寸和字体配置。
-"""
+"""基础尺寸和字体配置."""
 
 FONT_FAMILIES = {
     "default": "'Segoe UI', 'Microsoft YaHei', sans-serif",

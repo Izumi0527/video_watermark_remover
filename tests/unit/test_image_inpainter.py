@@ -11,10 +11,11 @@ ImageInpainter 单元测试 (Phase 2 简化版)
 覆盖率目标: 核心功能100%
 """
 
-import pytest
-import numpy as np
-import cv2
 from unittest.mock import Mock
+
+import cv2
+import numpy as np
+import pytest
 
 from app.core.ai.image_inpainter import ImageInpainter
 
@@ -94,6 +95,7 @@ class TestImageInpainter:
 
         # Act & Assert - 应该抛出InpaintingError
         from app.core.exceptions import InpaintingError
+
         with pytest.raises(InpaintingError):
             inpainter.inpaint_frame(None, mock_mask)
 
@@ -234,6 +236,7 @@ class TestImageInpainter:
 
 
 # Fixtures
+
 
 @pytest.fixture
 def mock_config():

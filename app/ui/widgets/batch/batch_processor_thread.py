@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # 导入视频处理线程
-from ...core.video.video_processor import VideoProcessorThread
+from ....core.video.video_processor import VideoProcessorThread
 
 
 class ProcessingStatus(Enum):
@@ -111,8 +111,7 @@ class BatchProcessorThread(QThread):
         self._completed_count = 0
 
         self.status_message.emit(
-            f"[INFO] 开始并发批量处理 {total_files} 个文件 "
-            f"(并发数: {self.max_concurrent_files})"
+            f"[INFO] 开始并发批量处理 {total_files} 个文件 " f"(并发数: {self.max_concurrent_files})"
         )
 
         # 使用 ThreadPoolExecutor 实现并发处理

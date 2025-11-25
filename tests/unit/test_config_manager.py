@@ -10,11 +10,12 @@ ConfigManager 单元测试 (Phase 2 简化版)
 覆盖率目标: 核心功能100%
 """
 
-import pytest
-import tempfile
-from pathlib import Path
-from configparser import ConfigParser
 import shutil
+import tempfile
+from configparser import ConfigParser
+from pathlib import Path
+
+import pytest
 
 from app.config.config_manager import ConfigManager
 
@@ -140,6 +141,7 @@ class TestConfigManager:
 
 
 # Fixtures
+
 
 @pytest.fixture
 def temp_dir():

@@ -98,28 +98,20 @@ class DetailedProgressWidget(QWidget):
     def _create_phase_indicator(self, main_layout):
         """创建阶段指示器"""
         phase_container = QFrame()
+        phase_container.setObjectName("phase_container")
         phase_container.setFrameShape(QFrame.Shape.StyledPanel)
-        phase_container.setStyleSheet(
-            """
-            QFrame {
-                background-color: #f5f5f5;
-                border-radius: 5px;
-                padding: 8px;
-            }
-        """
-        )
 
         phase_layout = QHBoxLayout(phase_container)
         phase_layout.setContentsMargins(10, 5, 10, 5)
 
         # 阶段图标
         self.phase_icon_label = QLabel("⏸️")
-        self.phase_icon_label.setStyleSheet("font-size: 24px;")
+        self.phase_icon_label.setObjectName("phase_icon")
         phase_layout.addWidget(self.phase_icon_label)
 
         # 阶段文本
         self.phase_text_label = QLabel("空闲")
-        self.phase_text_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #666;")
+        self.phase_text_label.setObjectName("phase_text")
         phase_layout.addWidget(self.phase_text_label)
 
         phase_layout.addStretch()
@@ -129,82 +121,56 @@ class DetailedProgressWidget(QWidget):
     def _create_progress_bar(self, main_layout):
         """创建进度条"""
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("detailed_progress_bar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 30px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """
-        )
         main_layout.addWidget(self.progress_bar)
 
     def _create_info_grid(self, main_layout):
         """创建详细信息网格"""
         info_container = QFrame()
+        info_container.setObjectName("info_container")
         info_container.setFrameShape(QFrame.Shape.StyledPanel)
-        info_container.setStyleSheet(
-            """
-            QFrame {
-                background-color: #fafafa;
-                border-radius: 5px;
-                padding: 5px;
-            }
-        """
-        )
 
         grid_layout = QGridLayout(info_container)
         grid_layout.setSpacing(8)
         grid_layout.setContentsMargins(10, 10, 10, 10)
 
-        label_style = "font-size: 11px; color: #666;"
-        value_style = "font-size: 12px; font-weight: bold; color: #333;"
-
         # 第一行: 帧计数器
         frames_label = QLabel("帧进度:")
-        frames_label.setStyleSheet(label_style)
+        frames_label.setProperty("class", "info_label")
         grid_layout.addWidget(frames_label, 0, 0, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.frames_value_label = QLabel("0 / 0")
-        self.frames_value_label.setStyleSheet(value_style)
+        self.frames_value_label.setProperty("class", "info_value")
         grid_layout.addWidget(self.frames_value_label, 0, 1)
 
         # 第一行: 处理速度
         speed_label = QLabel("处理速度:")
-        speed_label.setStyleSheet(label_style)
+        speed_label.setProperty("class", "info_label")
         grid_layout.addWidget(speed_label, 0, 2, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.speed_value_label = QLabel("0.0 fps")
-        self.speed_value_label.setStyleSheet(value_style)
+        self.speed_value_label.setProperty("class", "info_value")
         grid_layout.addWidget(self.speed_value_label, 0, 3)
 
         # 第二行: 已用时间
         elapsed_label = QLabel("已用时间:")
-        elapsed_label.setStyleSheet(label_style)
+        elapsed_label.setProperty("class", "info_label")
         grid_layout.addWidget(elapsed_label, 1, 0, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.elapsed_value_label = QLabel("00:00")
-        self.elapsed_value_label.setStyleSheet(value_style)
+        self.elapsed_value_label.setProperty("class", "info_value")
         grid_layout.addWidget(self.elapsed_value_label, 1, 1)
 
         # 第二行: 预计剩余
         eta_label = QLabel("预计剩余:")
-        eta_label.setStyleSheet(label_style)
+        eta_label.setProperty("class", "info_label")
         grid_layout.addWidget(eta_label, 1, 2, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.eta_value_label = QLabel("--:--")
-        self.eta_value_label.setStyleSheet(value_style)
+        self.eta_value_label.setProperty("class", "info_value")
         grid_layout.addWidget(self.eta_value_label, 1, 3)
 
         main_layout.addWidget(info_container)
@@ -253,23 +219,12 @@ class DetailedProgressWidget(QWidget):
         # 更新进度条
         self.progress_bar.setValue(percentage)
 
-        # 根据阶段更新进度条颜色
-        self.progress_bar.setStyleSheet(
-            f"""
-            QProgressBar {{
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 30px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-            QProgressBar::chunk {{
-                background-color: {phase_config["color"]};
-                border-radius: 3px;
-            }}
-        """
-        )
+        # 根据阶段更新进度条样式属性
+        # Map phase to simpler property values if needed, or use phase name directly
+        self.progress_bar.setProperty("phase", phase)
+        # Force style update
+        self.progress_bar.style().unpolish(self.progress_bar)
+        self.progress_bar.style().polish(self.progress_bar)
 
         # 更新帧计数器
         if total_frames > 0:

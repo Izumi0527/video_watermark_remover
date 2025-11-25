@@ -196,10 +196,9 @@ class SelectableImageLabel(QLabel):
 
         # 计算图像在控件中的偏移（居中显示）
         from PyQt6.QtCore import QSize
+
         scaled_size = QSize(scaled_width, scaled_height)
-        self.image_offset = CoordinateConverter.calculate_image_offset(
-            widget_size, scaled_size
-        )
+        self.image_offset = CoordinateConverter.calculate_image_offset(widget_size, scaled_size)
 
         self.setPixmap(self.scaled_pixmap)
         self.update()  # 触发重绘

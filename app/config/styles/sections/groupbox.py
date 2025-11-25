@@ -1,4 +1,8 @@
+"""分组框样式片段。"""
+
+
 def groupbox_styles(colors: dict) -> str:
+    """分组框样式."""
     return f"""
     QGroupBox {{
         background-color: {colors['card']};

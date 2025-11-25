@@ -1,6 +1,4 @@
-"""
-偏好设置包入口，兼容原有导出接口。
-"""
+"""偏好设置包入口，兼容原有导出接口."""
 
 from .defaults import PreferencesDefaults
 from .manager import UserPreferencesManager, get_preferences_manager

@@ -117,9 +117,7 @@ class SignalHandler(QObject):
                         self.preview_panel.set_image_from_array(first_frame)
                         self.preview_panel.set_manual_selection_image_from_array(first_frame)
                         status_msg = f"✅ 已选择视频: {os.path.basename(file_path)} (显示第一帧)"
-                        self.log_panel.add_status_message(
-                            f"视频文件已加载: {os.path.basename(file_path)}"
-                        )
+                        self.log_panel.add_status_message(f"视频文件已加载: {os.path.basename(file_path)}")
                     else:
                         # 无法提取第一帧，显示视频信息占位符
                         self.preview_panel.show_video_placeholder(file_path)
@@ -278,7 +276,7 @@ class SignalHandler(QObject):
 
             # 获取高级参数
             advanced_params = {}
-            if hasattr(self.control_panel, 'get_advanced_parameters'):
+            if hasattr(self.control_panel, "get_advanced_parameters"):
                 advanced_params = self.control_panel.get_advanced_parameters()
                 self.logger.debug(f"[参数获取] 成功获取 {len(advanced_params)} 个高级参数")
             else:
@@ -435,7 +433,9 @@ class SignalHandler(QObject):
                 if not pixmap.isNull():
                     processing_info = {
                         "detection_method": "自动检测" if self.file_panel.is_auto_mode() else "手动选择",
-                        "manual_regions_count": len(self.manual_selections) if self.manual_selections else 0,
+                        "manual_regions_count": len(self.manual_selections)
+                        if self.manual_selections
+                        else 0,
                     }
                     self.preview_panel.set_processed_image(pixmap, processing_info)
                     self.logger.info(f"Loaded processed image: {output_path}")
@@ -462,15 +462,23 @@ class SignalHandler(QObject):
 
                     if not pixmap.isNull():
                         processing_info = {
-                            "detection_method": "自动检测" if self.file_panel.is_auto_mode() else "手动选择",
-                            "manual_regions_count": len(self.manual_selections) if self.manual_selections else 0,
+                            "detection_method": "自动检测"
+                            if self.file_panel.is_auto_mode()
+                            else "手动选择",
+                            "manual_regions_count": len(self.manual_selections)
+                            if self.manual_selections
+                            else 0,
                         }
                         self.preview_panel.set_processed_image(pixmap, processing_info)
                         self.logger.info(f"Loaded processed video preview: {output_path}")
                     else:
-                        self.logger.warning(f"Failed to create pixmap from video frame: {output_path}")
+                        self.logger.warning(
+                            f"Failed to create pixmap from video frame: {output_path}"
+                        )
                 else:
-                    self.logger.warning(f"Failed to extract first frame from processed video: {output_path}")
+                    self.logger.warning(
+                        f"Failed to extract first frame from processed video: {output_path}"
+                    )
 
             else:
                 self.logger.warning(f"Unsupported file format for preview: {file_ext}")

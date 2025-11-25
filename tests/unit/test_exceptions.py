@@ -12,42 +12,35 @@
 """
 
 import pytest
-from app.core.exceptions import (
-    # 基础异常
-    VideoWatermarkRemoverError,
-    # 配置相关
+
+from app.core.exceptions import (  # 基础异常; 配置相关; 文件处理; AI模型相关; 音频处理; 视频处理; UI相关; 工具函数
+    EXCEPTION_MAPPING,
+    AIModelError,
+    AudioExtractionError,
+    AudioMergingError,
+    AudioProcessingError,
     ConfigError,
     ConfigLoadError,
     ConfigSaveError,
     ConfigValidationError,
-    # 文件处理
+    DetectionError,
+    FFmpegError,
     FileProcessingError,
-    UnsupportedFormatError,
     FileReadError,
     FileSaveError,
-    # AI模型相关
-    AIModelError,
-    ModelLoadError,
-    DetectionError,
-    InpaintingError,
-    # 音频处理
-    AudioProcessingError,
-    AudioExtractionError,
-    AudioMergingError,
-    FFmpegError,
-    # 视频处理
-    VideoProcessingError,
-    VideoReadError,
-    VideoWriteError,
     FrameProcessingError,
-    # UI相关
-    UIError,
+    InpaintingError,
+    ModelLoadError,
     PreviewError,
     SignalError,
-    # 工具函数
-    wrap_exception,
+    UIError,
+    UnsupportedFormatError,
+    VideoProcessingError,
+    VideoReadError,
+    VideoWatermarkRemoverError,
+    VideoWriteError,
     get_custom_exception,
-    EXCEPTION_MAPPING,
+    wrap_exception,
 )
 
 
@@ -204,11 +197,7 @@ class TestExceptionUtils:
     def test_wrap_exception(self):
         """测试wrap_exception函数"""
         original = ValueError("原始错误")
-        wrapped = wrap_exception(
-            FileReadError,
-            "文件操作失败",
-            original
-        )
+        wrapped = wrap_exception(FileReadError, "文件操作失败", original)
 
         assert isinstance(wrapped, FileReadError)
         assert wrapped.message == "文件操作失败"
@@ -243,12 +232,29 @@ class TestExceptionHierarchy:
     def test_all_exceptions_inherit_from_base(self):
         """测试所有自定义异常都继承自基类"""
         exception_classes = [
-            ConfigError, ConfigLoadError, ConfigSaveError, ConfigValidationError,
-            FileProcessingError, UnsupportedFormatError, FileReadError, FileSaveError,
-            AIModelError, ModelLoadError, DetectionError, InpaintingError,
-            AudioProcessingError, AudioExtractionError, AudioMergingError, FFmpegError,
-            VideoProcessingError, VideoReadError, VideoWriteError, FrameProcessingError,
-            UIError, PreviewError, SignalError,
+            ConfigError,
+            ConfigLoadError,
+            ConfigSaveError,
+            ConfigValidationError,
+            FileProcessingError,
+            UnsupportedFormatError,
+            FileReadError,
+            FileSaveError,
+            AIModelError,
+            ModelLoadError,
+            DetectionError,
+            InpaintingError,
+            AudioProcessingError,
+            AudioExtractionError,
+            AudioMergingError,
+            FFmpegError,
+            VideoProcessingError,
+            VideoReadError,
+            VideoWriteError,
+            FrameProcessingError,
+            UIError,
+            PreviewError,
+            SignalError,
         ]
 
         for exc_class in exception_classes:

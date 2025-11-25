@@ -16,6 +16,7 @@ FFmpeg音频处理器 - 重构版
 import logging
 import os
 import shutil
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from .audio_extractor import AudioExtractor

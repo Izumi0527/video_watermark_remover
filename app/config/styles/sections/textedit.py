@@ -1,4 +1,8 @@
+"""文本编辑样式片段。"""
+
+
 def textedit_styles(colors: dict) -> str:
+    """文本编辑样式."""
     return f"""
     QTextEdit {{
         background-color: {colors['surface']};

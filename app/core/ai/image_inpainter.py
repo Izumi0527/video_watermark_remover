@@ -81,22 +81,43 @@ class ImageInpainter:
 
         return True
 
-    def inpaint_frame(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def inpaint_frame(
+        self,
+        frame: Optional[np.ndarray],
+        mask: Optional[np.ndarray],
+        method: Optional[str] = None,
+        radius: int = INPAINT_RADIUS,
+    ) -> Optional[np.ndarray]:
         """
-        基于提供的掩码对帧应用修复，使用OpenCV方法
+        基于提供的掩码对帧应用修复，支持 TELEA / NS / 自定义 / 自动选择。
 
         Args:
             frame: 输入图像，numpy数组(BGR格式)
             mask: 二值掩码，255=需要修复的区域，0=保持原始
+            method: telea | ns | custom | auto；None 表示 Phase2 兼容模式
+            radius: OpenCV inpaint 半径
 
         Returns:
-            修复后的帧
+            修复后的帧；输入缺失或方法无效时返回 None。
         """
+        legacy_mode = method is None  # Phase2 兼容：无 method 参数
+
+        if legacy_mode:
+            if frame is None:
+                raise InpaintingError("输入图像为空")
+            if mask is None:
+                self.logger.warning("Mask is None, return original frame (legacy mode)")
+                return frame
+        else:
+            if frame is None or mask is None:
+                self.logger.warning("Frame or mask is None, skip inpainting")
+                return None
+
         if self.inpainting_model != "opencv_inpaint":
             self.logger.warning("Inpainting model not loaded")
-            return frame
+            return frame if legacy_mode else None
 
-        if mask is None or not np.any(mask):
+        if mask is not None and not np.any(mask):
             self.logger.debug("No mask provided or empty mask, returning original frame")
             return frame
 
@@ -107,42 +128,44 @@ class ImageInpainter:
             if len(mask.shape) == 3:
                 mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
-            # 确保掩码值是二值的(0或255)
-            _, mask = cv2.threshold(mask, MASK_BINARY_THRESHOLD, MASK_BINARY_MAX, cv2.THRESH_BINARY)
-
-            # 方法1: OpenCV内置修复算法
-            # INPAINT_TELEA: 快速行进方法
-            result_telea = cv2.inpaint(frame, mask, INPAINT_RADIUS, cv2.INPAINT_TELEA)
-
-            # 方法2: INPAINT_NS: Navier-Stokes方法(适合大区域)
-            result_ns = cv2.inpaint(frame, mask, INPAINT_RADIUS, cv2.INPAINT_NS)
-
-            # 方法3: 自定义插值修复，适合更好的效果
-            result_custom = self._custom_inpaint(frame, mask)
-
-            # 组合结果：小区域用自定义方法，大区域用NS方法
-            # 计算修复区域的大小
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            total_inpaint_area = sum(cv2.contourArea(c) for c in contours)
-            image_area = frame.shape[0] * frame.shape[1]
-
-            if total_inpaint_area < image_area * SMALL_AREA_THRESHOLD:  # 小区域
-                result = result_custom
-                method_used = "custom interpolation"
-            elif total_inpaint_area < image_area * MEDIUM_AREA_THRESHOLD:  # 中等区域
-                result = result_telea
-                method_used = "TELEA"
-            else:  # 大区域
-                result = result_ns
-                method_used = "Navier-Stokes"
-
-            self.logger.debug(
-                f"Inpainting completed using {method_used} method. "
-                f"Inpainted {total_inpaint_area:.0f} pixels "
-                f"({total_inpaint_area/image_area*100:.1f}% of image)"
+            # 二值化掩码
+            _, bin_mask = cv2.threshold(
+                mask, MASK_BINARY_THRESHOLD, MASK_BINARY_MAX, cv2.THRESH_BINARY
             )
 
-            return result
+            method = (method or "auto").lower()
+
+            # 各算法结果
+            def _telea():
+                return cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_TELEA)
+
+            def _ns():
+                return cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_NS)
+
+            def _custom():
+                return self._custom_inpaint(frame, bin_mask)
+
+            if method == "telea":
+                return _telea()
+            if method == "ns":
+                return _ns()
+            if method == "custom":
+                return _custom()
+            if method not in {"auto", "telea", "ns", "custom"}:
+                self.logger.warning(f"Invalid inpaint method: {method}")
+                return None
+
+            # 自动选择：按掩码面积比挑选算法
+            contours, _ = cv2.findContours(bin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            total_inpaint_area = sum(cv2.contourArea(c) for c in contours)
+            image_area = frame.shape[0] * frame.shape[1]
+            area_ratio = total_inpaint_area / image_area if image_area else 0
+
+            if area_ratio < SMALL_AREA_THRESHOLD:
+                return _custom()
+            if area_ratio < MEDIUM_AREA_THRESHOLD:
+                return _telea()
+            return _ns()
 
         except Exception as e:
             self.logger.error(f"Error in image inpainting: {e}")

@@ -124,31 +124,41 @@ class BatchUIComponents:
 
         # 总文件数
         total_label = QLabel("总计: 0")
-        total_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #E3F2FD; border-radius: 3px;")
+        total_label.setStyleSheet(
+            "font-weight: bold; padding: 5px; background-color: #E3F2FD; border-radius: 3px;"
+        )
         progress_components["total_label"] = total_label
         stats_layout.addWidget(total_label)
 
         # 成功数
         success_label = QLabel("✅ 成功: 0")
-        success_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #E8F5E9; border-radius: 3px;")
+        success_label.setStyleSheet(
+            "font-weight: bold; padding: 5px; background-color: #E8F5E9; border-radius: 3px;"
+        )
         progress_components["success_label"] = success_label
         stats_layout.addWidget(success_label)
 
         # 失败数
         failed_label = QLabel("❌ 失败: 0")
-        failed_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #FFEBEE; border-radius: 3px;")
+        failed_label.setStyleSheet(
+            "font-weight: bold; padding: 5px; background-color: #FFEBEE; border-radius: 3px;"
+        )
         progress_components["failed_label"] = failed_label
         stats_layout.addWidget(failed_label)
 
         # 等待数
         waiting_label = QLabel("⏳ 等待: 0")
-        waiting_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #FFF9C4; border-radius: 3px;")
+        waiting_label.setStyleSheet(
+            "font-weight: bold; padding: 5px; background-color: #FFF9C4; border-radius: 3px;"
+        )
         progress_components["waiting_label"] = waiting_label
         stats_layout.addWidget(waiting_label)
 
         # 并发处理数 (Phase 4 Stage 1.4)
         concurrent_label = QLabel("🔄 处理中: 0")
-        concurrent_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #F3E5F5; border-radius: 3px;")
+        concurrent_label.setStyleSheet(
+            "font-weight: bold; padding: 5px; background-color: #F3E5F5; border-radius: 3px;"
+        )
         progress_components["concurrent_label"] = concurrent_label
         stats_layout.addWidget(concurrent_label)
 
