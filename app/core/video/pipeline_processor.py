@@ -105,7 +105,8 @@ def process_video_pipeline(processor) -> None:
         audio_completion_event = None
         audio_thread = None
         if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
-            audio_temp_path = tempfile.mktemp(suffix=".aac", prefix="audio_temp_")
+            with tempfile.NamedTemporaryFile(suffix=".aac", prefix="audio_temp_", delete=False) as tmp:
+                audio_temp_path = tmp.name
             audio_completion_event = threading.Event()
 
             audio_thread = threading.Thread(

@@ -232,6 +232,6 @@ class FFmpegDetector:
                     return lines[0].strip()
 
         except Exception as e:
-            self.logger.debug(f"Failed to get version info for {path}: {e}")
+            self.logger.debug(f"Failed to get version info for {self.ffmpeg_path}: {e}")
 
         return None

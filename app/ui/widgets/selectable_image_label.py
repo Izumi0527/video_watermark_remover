@@ -9,7 +9,7 @@
 
 """
 
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import (
@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import QLabel
 from .coordinate_converter import CoordinateConverter
 from .selection_handlers import SelectionEventHandler
 
+if TYPE_CHECKING:
+    import numpy as np
 
 class SelectableImageLabel(QLabel):
     """

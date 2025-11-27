@@ -10,8 +10,9 @@
 """
 
 import sys
-from typing import TYPE_CHECKING, Any, List, Tuple
+from typing import List, Tuple
 
+import numpy as np
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
