@@ -4,7 +4,7 @@ ModelDownloader 单元测试
 
 测试YOLO模型自动下载功能，包括下载、验证、列表、删除等操作。
 
-作者: Claude Code Assistant
+作者: 
 创建时间: 2025-11-22
 """
 

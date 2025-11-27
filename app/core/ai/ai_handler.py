@@ -8,9 +8,6 @@ AI处理协调器 - 主模块
 3. 完整的处理流程管理
 4. 检测器和修复器的集成
 
-作者: Claude Code Assistant
-创建时间: 2025-01-31
-版本: v1.0 (重构版)
 """
 
 import logging
@@ -85,7 +82,7 @@ class AIHandler:
         """
         设置计算设备(CPU或GPU)
 
-        Phase 5: 支持 GPU 加速深度学习推理
+        支持 GPU 加速深度学习推理
         支持用户指定设备偏好：cuda/cpu/auto
         """
         # 检查 CUDA 是否可用
@@ -136,7 +133,7 @@ class AIHandler:
         """
         加载 AI 模型
 
-        Phase 5: 支持加载 GPU 加速深度学习模型
+        支持加载 GPU 加速深度学习模型
 
         Returns:
             bool: 加载是否成功
@@ -335,7 +332,7 @@ class AIHandler:
         """
         直接调用图像修复功能
 
-        Phase 5: 支持 GPU 深度学习修复或 OpenCV 修复
+        支持 GPU 深度学习修复或 OpenCV 修复
 
         Args:
             frame: 输入图像，numpy数组(BGR格式)

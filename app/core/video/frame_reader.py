@@ -11,7 +11,7 @@ def frame_reader_worker(
     stop_event: multiprocessing.Event,
 ) -> None:
     """
-    帧读取工作线程 (Phase 4 Stage 2.2)
+    帧读取工作线程
 
     Args:
         video_path: 视频路径

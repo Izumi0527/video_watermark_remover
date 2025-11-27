@@ -8,10 +8,6 @@
 3. 文件状态管理
 4. 队列清理操作
 
-从 batch_processing_widget.py 重构拆分
-作者: Claude Code Assistant
-创建时间: 2025-09-06
-版本: v1.0 (重构版)
 """
 
 import os

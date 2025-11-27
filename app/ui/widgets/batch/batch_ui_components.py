@@ -8,10 +8,6 @@
 3. 文件队列列表创建
 4. 按钮样式和布局管理
 
-从 batch_processing_widget.py 重构拆分
-作者: Claude Code Assistant
-创建时间: 2025-09-06
-版本: v1.0 (重构版)
 """
 
 from typing import Any, Dict, Tuple

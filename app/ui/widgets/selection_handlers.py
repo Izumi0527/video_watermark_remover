@@ -8,10 +8,6 @@
 3. 鼠标释放事件处理
 4. 选择区域管理
 
-从 image_selector_widget.py 重构拆分
-作者: Claude Code Assistant
-创建时间: 2025-09-06
-版本: v1.0 (重构版)
 """
 
 from typing import Callable, List, Optional, Tuple

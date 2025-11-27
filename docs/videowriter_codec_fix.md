@@ -370,7 +370,7 @@ def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:
 
 ---
 
-**修复人员**: Claude Code Assistant
+**修复人员**: 
 **审核状态**: 待用户验收
 **下一步**: 手动测试验证功能是否正常工作
 

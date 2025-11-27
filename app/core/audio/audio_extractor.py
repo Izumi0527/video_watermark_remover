@@ -9,7 +9,7 @@
 4. 提取参数自定义
 
 从 ffmpeg_audio_processor.py 重构拆分
-作者: Claude Code Assistant
+作者: 
 创建时间: 2025-09-06
 版本: v1.0 (重构版)
 """

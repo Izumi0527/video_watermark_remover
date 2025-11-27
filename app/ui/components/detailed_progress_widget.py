@@ -9,10 +9,6 @@
 4. 时间信息 (已用时间、预计剩余时间)
 5. 进度条 (根据阶段动态着色)
 
-Phase 4 Stage 1.4: 进度指示器优化
-作者: Claude Code Assistant
-创建时间: 2025-11-15
-版本: v1.0
 """
 
 from typing import Dict, Optional

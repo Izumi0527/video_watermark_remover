@@ -470,7 +470,7 @@ A: **会，但合理**
 ---
 
 **文档创建时间**: 2025-11-15
-**作者**: Claude Code Assistant
+**作者**: 
 **版本**: v1.0
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

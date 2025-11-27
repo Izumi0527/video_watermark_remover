@@ -10,9 +10,6 @@
 5. GPU加速开关
 6. 缓存设置
 
-作者: Claude Code Assistant
-创建时间: 2025-01-31
-版本: v1.0 (重构版)
 """
 
 from typing import Any, Dict
@@ -78,6 +75,9 @@ class AdvancedParametersWidget(QWidget):
 
     def _connect_signals(self):
         """连接信号"""
+        # 先断开已存在的连接，避免重复绑定导致信号噪音
+        self._disconnect_signals()
+
         # 检测参数信号
         self.sensitivity_slider.valueChanged.connect(self._update_sensitivity_label)
         self.sensitivity_slider.valueChanged.connect(self._on_parameter_changed)
@@ -204,6 +204,14 @@ class AdvancedParametersWidget(QWidget):
             if "inpainting_quality" in parameters:
                 self.quality_slider.setValue(parameters["inpainting_quality"])
 
+            # 设置后处理选项
+            if "enable_smooth_postprocess" in parameters:
+                self.enable_smooth_check.setChecked(parameters["enable_smooth_postprocess"])
+            if "enable_blend_postprocess" in parameters:
+                self.enable_blend_check.setChecked(parameters["enable_blend_postprocess"])
+            if "enable_enhance_postprocess" in parameters:
+                self.enable_enhance_check.setChecked(parameters["enable_enhance_postprocess"])
+
             # 设置性能参数
             if "thread_count" in parameters:
                 self.thread_count_spin.setValue(parameters["thread_count"])
@@ -211,8 +219,29 @@ class AdvancedParametersWidget(QWidget):
             if "enable_gpu" in parameters:
                 self.enable_gpu_check.setChecked(parameters["enable_gpu"])
 
+            if "gpu_memory_limit" in parameters:
+                self.gpu_memory_spin.setValue(parameters["gpu_memory_limit"])
+
+            if "cache_size" in parameters:
+                self.cache_size_spin.setValue(parameters["cache_size"])
+
+            if "enable_cache" in parameters:
+                self.enable_cache_check.setChecked(parameters["enable_cache"])
+
             if "compression_quality" in parameters:
                 self.compression_slider.setValue(parameters["compression_quality"])
+
+            # 设置输出参数
+            if "output_format" in parameters:
+                index = self.output_format_combo.findText(parameters["output_format"])
+                if index >= 0:
+                    self.output_format_combo.setCurrentIndex(index)
+
+            if "add_suffix" in parameters:
+                self.add_suffix_check.setChecked(parameters["add_suffix"])
+
+            if "add_timestamp" in parameters:
+                self.add_timestamp_check.setChecked(parameters["add_timestamp"])
 
         finally:
             # 重新连接信号
@@ -225,8 +254,39 @@ class AdvancedParametersWidget(QWidget):
 
     def _disconnect_signals(self):
         """断开所有信号连接"""
-        # 这里可以添加断开信号的逻辑，如果需要的话
-        pass
+        try:
+            self.sensitivity_slider.valueChanged.disconnect(self._update_sensitivity_label)
+            self.sensitivity_slider.valueChanged.disconnect(self._on_parameter_changed)
+            self.detection_method_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+            self.min_area_spin.valueChanged.disconnect(self._on_parameter_changed)
+
+            self.enable_blur_check.toggled.disconnect(self._on_parameter_changed)
+            self.enable_sharp_check.toggled.disconnect(self._on_parameter_changed)
+            self.enable_denoise_check.toggled.disconnect(self._on_parameter_changed)
+
+            self.inpainting_method_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+            self.inpaint_radius_spin.valueChanged.disconnect(self._on_parameter_changed)
+            self.quality_slider.valueChanged.disconnect(self._update_quality_label)
+            self.quality_slider.valueChanged.disconnect(self._on_parameter_changed)
+
+            self.enable_smooth_check.toggled.disconnect(self._on_parameter_changed)
+            self.enable_blend_check.toggled.disconnect(self._on_parameter_changed)
+            self.enable_enhance_check.toggled.disconnect(self._on_parameter_changed)
+
+            self.thread_count_spin.valueChanged.disconnect(self._on_parameter_changed)
+            self.enable_gpu_check.toggled.disconnect(self._on_parameter_changed)
+            self.gpu_memory_spin.valueChanged.disconnect(self._on_parameter_changed)
+            self.cache_size_spin.valueChanged.disconnect(self._on_parameter_changed)
+            self.enable_cache_check.toggled.disconnect(self._on_parameter_changed)
+
+            self.output_format_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+            self.compression_slider.valueChanged.disconnect(self._update_compression_label)
+            self.compression_slider.valueChanged.disconnect(self._on_parameter_changed)
+            self.add_suffix_check.toggled.disconnect(self._on_parameter_changed)
+            self.add_timestamp_check.toggled.disconnect(self._on_parameter_changed)
+        except Exception:
+            # 若部分信号未连接，不影响整体断开流程
+            pass
 
     def reset_to_defaults(self):
         """重置为默认值"""

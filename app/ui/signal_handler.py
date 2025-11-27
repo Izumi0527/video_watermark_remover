@@ -4,9 +4,6 @@
 
 负责处理 MainWindow 的所有信号响应逻辑，实现业务逻辑与 UI 组装的分离。
 
-作者: Claude Code Assistant
-创建时间: 2025-01-15
-版本: v1.0
 """
 
 import logging

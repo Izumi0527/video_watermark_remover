@@ -1028,7 +1028,7 @@ def test_memory_usage():
 ---
 
 **文档创建时间**: 2025-11-15
-**作者**: Claude Code Assistant
+**作者**: 
 **版本**: v1.0 (设计阶段)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

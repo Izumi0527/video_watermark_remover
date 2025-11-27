@@ -15,7 +15,7 @@ def frame_processor_worker(
     worker_id: int,
 ) -> None:
     """
-    帧处理工作进程 (Phase 4 Stage 2.2)
+    帧处理工作进程
 
     Args:
         frame_queue: 帧队列

@@ -7,10 +7,6 @@
 2. 选择区域可视化
 3. 绘制和渲染管理
 
-从 image_selector_widget.py 重构拆分
-作者: Claude Code Assistant
-创建时间: 2025-09-06
-版本: v1.1 (延迟导入优化)
 """
 
 from typing import List, Optional, Tuple

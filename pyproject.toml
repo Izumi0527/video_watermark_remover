@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Claude Code Assistant", email = "noreply@anthropic.com"}
+    {name = "", email = "noreply@anthropic.com"}
 ]
 maintainers = [
-    {name = "Claude Code Assistant", email = "noreply@anthropic.com"}
+    {name = "", email = "noreply@anthropic.com"}
 ]
 keywords = [
     "watermark", "removal", "video", "image", "ai", "opencv",

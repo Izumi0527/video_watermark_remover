@@ -9,7 +9,7 @@ FFmpeg音频处理器 - 重构版
 - audio_merger: 音频视频合并
 
 重构完成日期: 2025-09-06
-作者: Claude Code Assistant
+作者: 
 版本: v1.0 (重构版)
 """
 

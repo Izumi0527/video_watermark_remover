@@ -7,10 +7,6 @@
 2. 显示坐标系与图像坐标系转换
 3. 矩形区域坐标转换
 
-从 image_selector_widget.py 重构拆分
-作者: Claude Code Assistant
-创建时间: 2025-09-06
-版本: v1.0 (重构版)
 """
 
 from typing import Tuple

@@ -8,9 +8,6 @@
 3. 多方法组合修复策略
 4. 区域大小自适应选择
 
-作者: Claude Code Assistant
-创建时间: 2025-01-31
-版本: v1.2 (使用自定义异常)
 """
 
 import logging
@@ -66,7 +63,7 @@ class ImageInpainter:
 
     def load_model(self) -> bool:
         """
-        加载修复模型（Phase 2使用OpenCV方法）
+        加载修复模型（使用OpenCV方法）
 
         Returns:
             bool: 加载是否成功

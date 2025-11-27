@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-YOLO水印检测器 (Phase 6+)
+YOLO水印检测器
 
 基于 YOLOv11 的深度学习水印检测，支持多模型切换和自动下载。
 
-作者: Claude Code Assistant
-创建时间: 2025-11-16
-更新时间: 2025-11-22
-版本: v2.0 (Phase 6+ 配置化升级)
 """
 
 import logging

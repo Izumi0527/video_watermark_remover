@@ -13,7 +13,7 @@ def async_audio_extractor(
     logger: logging.Logger,
 ) -> bool:
     """
-    异步提取音频到临时文件 (Phase 4 Stage 2.3).
+    异步提取音频到临时文件.
 
     Args:
         video_path: 输入视频路径

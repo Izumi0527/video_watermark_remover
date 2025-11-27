@@ -104,7 +104,7 @@ def _merge_video_chunks(processor, chunk_paths: List[str], output_path: str) -> 
 
 def process_video_multiprocess(processor) -> None:
     """
-    多进程视频处理 (Phase 4 Stage 2.1)
+    多进程视频处理
     使用分块批处理策略,将视频分割成多个块并行处理
     """
     temp_files: List[str] = []

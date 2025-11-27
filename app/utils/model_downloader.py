@@ -4,9 +4,6 @@ YOLO模型自动下载工具
 
 支持从Hugging Face自动下载YOLOv11系列水印检测模型。
 
-作者: Claude Code Assistant
-创建时间: 2025-11-22
-版本: v1.0
 """
 
 import hashlib

@@ -31,9 +31,6 @@
         ├── PreviewError
         └── SignalError
 
-作者: Claude Code Assistant
-创建时间: 2025-01-15
-版本: v1.0
 """
 
 from typing import Optional

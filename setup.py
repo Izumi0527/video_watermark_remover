@@ -48,7 +48,7 @@ extras_require = {
 setup(
     name="video-watermark-remover",
     version="0.3.0",
-    author="Claude Code Assistant",
+    author="",
     author_email="noreply@anthropic.com",
     description="智能视频水印去除工具 - AI驱动的水印检测和去除应用",
     long_description=read_readme(),

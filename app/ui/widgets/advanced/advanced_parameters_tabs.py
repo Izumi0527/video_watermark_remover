@@ -8,9 +8,6 @@
 3. 性能参数Tab
 4. 输出参数Tab
 
-作者: Claude Code Assistant
-创建时间: 2025-01-31
-版本: v1.0 (重构版)
 """
 
 from PyQt6.QtCore import Qt

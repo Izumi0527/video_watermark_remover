@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-深度学习图像修复模块 (Phase 5 Stage 2)
+深度学习图像修复模块
 
 提供基于深度学习的 GPU 加速图像修复功能：
 1. 轻量级 U-Net 架构 inpainting 模型
@@ -8,9 +8,6 @@
 3. 批处理支持
 4. 为未来集成更复杂模型预留接口
 
-作者: Claude Code Assistant
-创建时间: 2025-11-16
-版本: v1.0 (Phase 5 初始版本)
 """
 
 import logging

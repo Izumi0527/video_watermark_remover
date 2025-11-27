@@ -9,14 +9,6 @@
 4. 自动依次处理
 5. 处理状态跟踪
 
-重构版本：将功能拆分为专门模块，提高代码可维护性
-- batch_ui_components.py: UI组件创建和样式
-- batch_file_manager.py: 文件管理和队列操作
-- batch_processor_thread.py: 线程处理逻辑
-
-作者: Claude Code Assistant
-创建时间: 2025-01-31
-版本: v2.0 (重构版)
 """
 
 from typing import Any, Dict

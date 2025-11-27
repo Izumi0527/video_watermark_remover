@@ -67,8 +67,8 @@ def _check_pipeline_progress(
 
 def process_video_pipeline(processor) -> None:
     """
-    流水线视频处理 (Phase 4 Stage 2.2)
-    使用 3 阶段流水线: 读取线程 → 处理进程池 → 写入线程
+    流水线视频处理 
+    使用流水线: 读取线程 → 处理进程池 → 写入线程
     """
     frame_queue = None
     result_queue = None

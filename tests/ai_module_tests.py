@@ -9,7 +9,7 @@ AI模块基础测试模块
 4. 基础配置验证测试
 
 从 test_phase2.py 重构拆分
-作者: Claude Code Assistant
+作者: 
 创建时间: 2025-09-06
 版本: v1.0 (重构版)
 """

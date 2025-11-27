@@ -7,9 +7,6 @@
 - selection_handlers: 事件处理器
 - coordinate_converter: 坐标转换工具
 
-重构完成日期: 2025-09-06
-作者: Claude Code Assistant
-版本: v1.1 (延迟导入优化)
 """
 
 import sys

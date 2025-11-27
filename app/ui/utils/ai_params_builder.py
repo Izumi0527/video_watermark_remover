@@ -11,9 +11,6 @@ AI参数构建器
 4. 映射前端参数名到后端参数名
 5. 构建完整的ai_params字典
 
-作者: Claude Code Assistant
-创建时间: 2025-11-16
-版本: v1.0
 """
 
 import logging

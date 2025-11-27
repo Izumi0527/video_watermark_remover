@@ -2,7 +2,7 @@
 
 **版本**: v0.3.0-refactored
 **更新时间**: 2025-01-15
-**作者**: Claude Code Assistant
+**作者**: 
 
 ## 📋 目录
 
