@@ -227,3 +227,7 @@ results/
 *.cache
 .user_data/
 user_data/
+tests/
+test_output/
+docs/
+discuss/

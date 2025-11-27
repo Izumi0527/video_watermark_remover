@@ -67,7 +67,7 @@ def _check_pipeline_progress(
 
 def process_video_pipeline(processor) -> None:
     """
-    流水线视频处理 
+    流水线视频处理
     使用流水线: 读取线程 → 处理进程池 → 写入线程
     """
     frame_queue = None
