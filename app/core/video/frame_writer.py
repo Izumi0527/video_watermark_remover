@@ -1,19 +1,19 @@
 import gc
 import logging
-import multiprocessing
 import time
-from typing import Optional, Tuple
+from multiprocessing import queues, synchronize
+from typing import Any, Dict, Optional, Tuple
 
 import cv2
 
 
 def frame_writer_worker(
-    result_queue: multiprocessing.Queue,
+    result_queue: queues.Queue,
     output_path: str,
     video_params: dict,
     total_frames: int,
-    stop_event: multiprocessing.Event,
-    progress_queue: multiprocessing.Queue,
+    stop_event: synchronize.Event,
+    progress_queue: queues.Queue,
 ) -> Tuple[bool, Optional[str]]:
     """
     帧写入工作线程 (Phase 4 Stage 2.2, 优化 Phase 4 Stage 2.4)
@@ -33,7 +33,7 @@ def frame_writer_worker(
     MAX_BUFFER_SIZE = 50
 
     out = None
-    frame_buffer = {}
+    frame_buffer: Dict[int, Any] = {}
     next_frame_index = 0
     received_count = 0
 

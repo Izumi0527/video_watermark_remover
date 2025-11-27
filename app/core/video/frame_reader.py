@@ -1,14 +1,14 @@
 import logging
-import multiprocessing
+from multiprocessing import queues, synchronize
 
 import cv2
 
 
 def frame_reader_worker(
     video_path: str,
-    frame_queue: multiprocessing.Queue,
+    frame_queue: queues.Queue,
     total_frames: int,
-    stop_event: multiprocessing.Event,
+    stop_event: synchronize.Event,
 ) -> None:
     """
     帧读取工作线程

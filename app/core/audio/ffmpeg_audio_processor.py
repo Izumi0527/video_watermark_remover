@@ -218,6 +218,11 @@ class FFmpegAudioProcessor:
         try:
             # 使用 FFmpeg 重新编码为 H.264
             ffmpeg_path = self.detector.get_ffmpeg_path()
+            if not ffmpeg_path:
+                self.logger.warning("FFmpeg path unavailable, fallback to direct copy")
+                shutil.copy2(source_path, dest_path)
+                return True
+
             cmd = [
                 ffmpeg_path,
                 "-i",
@@ -281,6 +286,10 @@ class FFmpegAudioProcessor:
     def get_ffmpeg_version(self) -> Optional[str]:
         """获取FFmpeg版本信息"""
         return self.detector.get_version_info()
+
+    def get_version_info(self) -> Optional[str]:
+        """向后兼容的版本信息获取接口"""
+        return self.get_ffmpeg_version()
 
     def get_supported_formats(self) -> Dict[str, List[str]]:
         """获取支持的格式信息"""

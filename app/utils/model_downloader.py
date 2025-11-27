@@ -103,8 +103,8 @@ class ModelDownloader:
             self.logger.info(f"Available models: {list(self.MODELS.keys())}")
             return None
 
-        model_info = self.MODELS[model_key]
-        model_path = self.model_dir / model_info["filename"]
+        model_info: Dict[str, Any] = self.MODELS[model_key]
+        model_path: Path = self.model_dir / str(model_info["filename"])
 
         # 检查是否已存在
         if model_path.exists() and not force:

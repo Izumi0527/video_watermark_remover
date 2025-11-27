@@ -1,4 +1,5 @@
 """样式管理入口，负责主题切换、调色板与样式应用."""
+import logging
 from typing import Any, Dict, List, Optional, cast
 
 from PyQt6.QtGui import QColor, QPalette
@@ -27,6 +28,7 @@ class ModernStyleManager:
         if not validate_theme(theme):
             raise ValueError(f"无效的主题名称: {theme}")
 
+        self.logger = logging.getLogger(__name__)
         self.theme = theme
         self.colors = get_theme_colors(theme)
         self.style_factory = StyleFactory(self.colors)
@@ -92,9 +94,8 @@ class ModernStyleManager:
         try:
             app = QApplication.instance()
             if app and isinstance(app, QApplication):
-                qt_app = cast(QApplication, app)
-                self.apply_palette(qt_app)
-                qt_app.setStyleSheet(self.get_complete_stylesheet())
+                self.apply_palette(app)
+                app.setStyleSheet(self.get_complete_stylesheet())
 
             if window:
                 window.update()

@@ -220,7 +220,10 @@ class VideoInfoExtractor:
             视频时长（秒）
         """
         info = self.get_video_info(video_path)
-        return info.get("duration", 0.0)
+        try:
+            return float(info.get("duration", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
 
     def get_audio_codec(self, video_path: str) -> Optional[str]:
         """

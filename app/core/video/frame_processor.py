@@ -1,17 +1,17 @@
 import logging
-import multiprocessing
+from multiprocessing import queues, synchronize
 from typing import Optional
 
 from ..ai.ai_handler import AIHandler
 
 
 def frame_processor_worker(
-    frame_queue: multiprocessing.Queue,
-    result_queue: multiprocessing.Queue,
+    frame_queue: queues.Queue,
+    result_queue: queues.Queue,
     ai_params: dict,
     config_dict: Optional[dict],
-    stop_event: multiprocessing.Event,
-    progress_queue: multiprocessing.Queue,
+    stop_event: synchronize.Event,
+    progress_queue: queues.Queue,
     worker_id: int,
 ) -> None:
     """

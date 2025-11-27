@@ -39,7 +39,7 @@ class PreferencesValidator:
     def _validate_processing(self, key: str, value: Any) -> bool:
         """验证处理分类的偏好值."""
         if key == "detection_sensitivity":
-            return 0.0 <= value <= 1.0
+            return isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0
         if key == "output_quality":
             return value in ["low", "medium", "high"]
         if key in ["auto_detect", "preserve_audio"]:
