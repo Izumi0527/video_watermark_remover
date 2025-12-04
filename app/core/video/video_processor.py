@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import time
 from configparser import ConfigParser
+from multiprocessing.synchronize import Event as MpEvent
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
@@ -53,7 +54,7 @@ class VideoProcessorThread(QThread):
         self.num_processes = num_processes or min(multiprocessing.cpu_count(), 4)
         self.use_pipeline = use_pipeline
         self._progress_timer: Optional[QTimer] = None
-        self._stop_event: Optional[multiprocessing.Event] = None
+        self._stop_event: Optional[MpEvent] = None
 
         self._reader_thread = None
         self._writer_thread = None

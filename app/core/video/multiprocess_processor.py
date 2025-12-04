@@ -3,7 +3,9 @@ import os
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, Optional, Tuple
+from multiprocessing import queues as mp_queues
+from multiprocessing import synchronize
+from typing import Any, List, Optional, Tuple, cast
 
 import cv2
 from PyQt6.QtCore import QTimer
@@ -30,7 +32,7 @@ def _calculate_chunks(
 
 
 def _check_progress_queue(
-    processor, progress_queue: multiprocessing.Queue, total_frames: int
+    processor, progress_queue: mp_queues.Queue[Any], total_frames: int
 ) -> None:
     try:
         while not progress_queue.empty():
@@ -102,16 +104,17 @@ def _merge_video_chunks(processor, chunk_paths: List[str], output_path: str) -> 
                 processor.logger.warning(f"Failed to remove concat list: {e}")
 
 
-def process_video_multiprocess(processor) -> None:
+def process_video_multiprocess(processor) -> None:  # noqa: C901
     """
     多进程视频处理
     使用分块批处理策略,将视频分割成多个块并行处理
     """
     temp_files: List[str] = []
+    progress_queue: Optional[mp_queues.Queue[Any]] = None
 
     try:
         processor.status.emit("📊 分析视频信息...")
-        cap = cv2.VideoCapture(processor.input_path)
+        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
         if not cap.isOpened():
             from ..exceptions import VideoReadError
 
@@ -130,8 +133,8 @@ def process_video_multiprocess(processor) -> None:
         temp_files = [chunk[2] for chunk in chunks]
 
         manager = multiprocessing.Manager()
-        progress_queue: multiprocessing.Queue = manager.Queue()
-        processor._stop_event = manager.Event()
+        progress_queue = cast(mp_queues.Queue[Any], manager.Queue())
+        processor._stop_event = cast(synchronize.Event, manager.Event())
 
         processor._progress_timer = QTimer()
         processor._progress_timer.timeout.connect(

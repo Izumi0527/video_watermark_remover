@@ -2,17 +2,20 @@
 
 from typing import Dict
 
-from .sections.additional import additional_styles
-from .sections.buttons import button_styles
-from .sections.checkbox import checkbox_styles
-from .sections.combobox import combobox_styles
-from .sections.groupbox import groupbox_styles
-from .sections.label import label_styles
-from .sections.listwidget import listwidget_styles
-from .sections.main_window import main_window_styles
-from .sections.progress import progressbar_styles
-from .sections.tab import tab_styles
-from .sections.textedit import textedit_styles
+# Phase 6: 从重构后的 sections 包统一导入
+from .sections import (
+    additional_styles,
+    button_styles,
+    checkbox_styles,
+    combobox_styles,
+    groupbox_styles,
+    label_styles,
+    listwidget_styles,
+    main_window_styles,
+    progressbar_styles,
+    tab_styles,
+    textedit_styles,
+)
 
 
 class StyleFactory:

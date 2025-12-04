@@ -10,7 +10,7 @@
 
 """
 
-from typing import Any, Dict, Tuple
+from typing import Dict, Tuple
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSplitter,
     QVBoxLayout,
+    QWidget,
 )
 
 
@@ -104,7 +105,7 @@ class BatchUIComponents:
         return queue_group, file_list, queue_info_label
 
     @staticmethod
-    def create_progress_group() -> Tuple[QGroupBox, Dict[str, Any]]:
+    def create_progress_group() -> Tuple[QGroupBox, Dict[str, QWidget]]:
         """
         创建进度显示组 (Phase 4 Stage 1.4 - 增强版)
 
@@ -113,7 +114,7 @@ class BatchUIComponents:
         """
         progress_group = QGroupBox("处理进度")
         progress_layout = QVBoxLayout(progress_group)
-        progress_components = {}
+        progress_components: Dict[str, QWidget] = {}
 
         # 统计信息区域 (Phase 4 Stage 1.4)
         stats_layout = QHBoxLayout()

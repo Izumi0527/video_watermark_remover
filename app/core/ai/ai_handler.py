@@ -12,7 +12,7 @@ AI处理协调器 - 主模块
 
 import logging
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import cv2
 import numpy as np
@@ -55,7 +55,7 @@ class AIHandler:
         self.enable_enhance_postprocess = self.ai_params.get("enable_enhance_postprocess", False)
 
         # 初始化检测器和修复器
-        self.watermark_detector = None  # 延迟初始化,需要先设置 device
+        self.watermark_detector: Optional[YOLOWatermarkDetector] = None  # 延迟初始化,需要先设置 device
         self.image_inpainter = ImageInpainter(config)
         self.dl_inpainter = None  # 深度学习 inpainter (GPU 加速)
 
@@ -141,6 +141,10 @@ class AIHandler:
         self.logger.info("Loading AI models...")
 
         # 1. 加载水印检测器
+        if self.watermark_detector is None:
+            self.logger.error("Watermark detector not initialized")
+            return False
+
         detector_loaded = self.watermark_detector.load_model()
 
         # 2. 加载图像修复器
@@ -183,7 +187,7 @@ class AIHandler:
 
         return False
 
-    def process_frame(
+    def process_frame(  # noqa: C901
         self, frame: np.ndarray, watermark_selection_params: dict
     ) -> Tuple[np.ndarray, dict]:
         """
@@ -252,6 +256,10 @@ class AIHandler:
 
             elif watermark_selection_params.get("auto_detect", False):
                 # 使用水印检测器进行自动检测
+                if self.watermark_detector is None:
+                    self.logger.error("Watermark detector not initialized")
+                    return frame, {"error": "Watermark detector not initialized"}
+
                 _ = watermark_selection_params.get("detection_sensitivity", 0.5)
                 mask = self.watermark_detector.detect_watermark(frame)
                 processing_info["detection_method"] = "automatic_yolo"
@@ -323,7 +331,8 @@ class AIHandler:
 
         try:
             self.logger.debug("Direct watermark detection called")
-            return self.watermark_detector.detect_watermark(frame)
+            detector = self.watermark_detector
+            return detector.detect_watermark(frame)
         except Exception as e:
             self.logger.error(f"Error in direct watermark detection: {e}")
             return None
@@ -346,11 +355,17 @@ class AIHandler:
 
             # 优先使用深度学习 inpainter (如果已启用)
             if self.use_gpu_inpainting and self.dl_inpainter is not None:
-                return self.dl_inpainter.inpaint_frame(frame, mask)  # type: ignore[no-any-return]
+                dl_result = cast(np.ndarray, self.dl_inpainter.inpaint_frame(frame, mask))
+                typed_result = np.asarray(dl_result)
+                return cast(np.ndarray, typed_result)
 
             # 降级使用 OpenCV inpainter
             if hasattr(self, "image_inpainter") and self.image_inpainter is not None:
-                return self.image_inpainter.inpaint_frame(frame, mask)
+                result = self.image_inpainter.inpaint_frame(frame, mask)
+                if result is None:
+                    self.logger.warning("Inpainting returned None, using original frame")
+                    return frame
+                return cast(np.ndarray, result)
 
             self.logger.error("No inpainter available")
             return frame

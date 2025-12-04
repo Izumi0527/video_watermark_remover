@@ -9,7 +9,7 @@
 4. 灵活的编码参数设置
 
 从 ffmpeg_audio_processor.py 重构拆分
-作者: 
+作者:
 创建时间: 2025-09-06
 版本: v1.0 (重构版)
 """
@@ -17,7 +17,7 @@
 import logging
 import os
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .ffmpeg_detector import FFmpegDetector
 
@@ -257,7 +257,7 @@ class AudioMerger:
 
         # 映射所有音频流
         for i in range(len(audio_paths)):
-            cmd.extend(["-map", f"{i+1}:a:0"])
+            cmd.extend(["-map", f"{i + 1}:a:0"])
 
         # 添加输出选项
         if merge_params.get("sync_mode") == "shortest":

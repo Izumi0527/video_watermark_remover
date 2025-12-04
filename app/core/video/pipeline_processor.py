@@ -3,7 +3,9 @@ import os
 import tempfile
 import threading
 from concurrent.futures import ProcessPoolExecutor
-from typing import Tuple
+from multiprocessing import queues as mp_queues
+from multiprocessing import synchronize
+from typing import Any, Optional, Tuple, cast
 
 import cv2
 from PyQt6.QtCore import QTimer
@@ -14,9 +16,14 @@ from .frame_reader import frame_reader_worker
 from .frame_writer import frame_writer_worker
 
 
+def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_queues.Queue[Any]:
+    queue_obj = manager.Queue(maxsize=maxsize) if maxsize is not None else manager.Queue()
+    return cast(mp_queues.Queue[Any], queue_obj)
+
+
 def _calculate_queue_sizes(processor) -> Tuple[int, int]:
     try:
-        import psutil
+        import psutil  # type: ignore[import-untyped]
 
         available_mb = psutil.virtual_memory().available / (1024 * 1024)
 
@@ -46,7 +53,7 @@ def _calculate_queue_sizes(processor) -> Tuple[int, int]:
 
 
 def _check_pipeline_progress(
-    processor, progress_queue: multiprocessing.Queue, total_frames: int
+    processor, progress_queue: mp_queues.Queue[Any], total_frames: int
 ) -> None:
     try:
         while not progress_queue.empty():
@@ -65,19 +72,19 @@ def _check_pipeline_progress(
         processor.logger.warning(f"Pipeline progress polling error: {e}")
 
 
-def process_video_pipeline(processor) -> None:
+def process_video_pipeline(processor) -> None:  # noqa: C901
     """
     流水线视频处理
     使用流水线: 读取线程 → 处理进程池 → 写入线程
     """
-    frame_queue = None
-    result_queue = None
-    progress_queue = None
+    frame_queue: Optional[mp_queues.Queue[Any]] = None
+    result_queue: Optional[mp_queues.Queue[Any]] = None
+    progress_queue: Optional[mp_queues.Queue[Any]] = None
     audio_temp_path = None
 
     try:
         processor.status.emit("📊 分析视频信息...")
-        cap = cv2.VideoCapture(processor.input_path)
+        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
         if not cap.isOpened():
             from ..exceptions import VideoReadError
 
@@ -95,17 +102,19 @@ def process_video_pipeline(processor) -> None:
 
         manager = multiprocessing.Manager()
         frame_queue_size, result_queue_size = _calculate_queue_sizes(processor)
-        frame_queue = manager.Queue(maxsize=frame_queue_size)
-        result_queue = manager.Queue(maxsize=result_queue_size)
-        progress_queue = manager.Queue()
-        processor._stop_event = manager.Event()
+        frame_queue = _create_manager_queue(manager, frame_queue_size)
+        result_queue = _create_manager_queue(manager, result_queue_size)
+        progress_queue = _create_manager_queue(manager)
+        processor._stop_event = cast(synchronize.Event, manager.Event())
 
         temp_output_path = processor.output_path.replace(".", "_temp_pipeline.")
 
         audio_completion_event = None
         audio_thread = None
         if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
-            with tempfile.NamedTemporaryFile(suffix=".aac", prefix="audio_temp_", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                suffix=".aac", prefix="audio_temp_", delete=False
+            ) as tmp:
                 audio_temp_path = tmp.name
             audio_completion_event = threading.Event()
 

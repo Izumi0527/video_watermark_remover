@@ -242,7 +242,7 @@ class PreviewPanel(QWidget):
         try:
             import cv2
 
-            cap = cv2.VideoCapture(video_path)
+            cap = cv2.VideoCapture(video_path)  # type: ignore[call-arg]
 
             if cap.isOpened():
                 fps = cap.get(cv2.CAP_PROP_FPS)

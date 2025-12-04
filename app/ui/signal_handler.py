@@ -391,7 +391,7 @@ class SignalHandler(QObject):
         try:
             import cv2
 
-            cap = cv2.VideoCapture(video_path)
+            cap = cv2.VideoCapture(video_path)  # type: ignore[call-arg]
             if cap.isOpened():
                 ret, frame = cap.read()
                 cap.release()

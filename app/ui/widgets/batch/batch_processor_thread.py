@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: disable-error-code=unreachable
 """
 批量处理线程组件
 
@@ -50,9 +51,9 @@ class BatchProcessorThread(QThread):
 
     def __init__(
         self,
-        file_queue,
-        ai_params,
-        config,
+        queue: Optional[List[Dict[str, Any]]] = None,
+        ai_params: Optional[Dict[str, Any]] = None,
+        config=None,
         preloaded_ai_handler=None,
         max_concurrent_files: int = 4,
         parent=None,
@@ -69,8 +70,8 @@ class BatchProcessorThread(QThread):
             parent: 父对象
         """
         super().__init__(parent)
-        self.file_queue = file_queue or []
-        self.ai_params = ai_params or {}
+        self.file_queue: List[Dict[str, Any]] = queue or []
+        self.ai_params: Dict[str, Any] = ai_params or {}
         self.config = config
         self.preloaded_ai_handler = preloaded_ai_handler
         self.max_concurrent_files = max_concurrent_files
@@ -276,9 +277,9 @@ class FileQueueManager:
     """文件队列管理器"""
 
     def __init__(self):
-        self.queue = []
+        self.queue: List[Dict[str, Any]] = []
 
-    def add_file(self, input_path: str, output_path: str = None) -> Dict[str, Any]:
+    def add_file(self, input_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """添加文件到队列"""
         if not output_path:
             # 自动生成输出路径
@@ -320,10 +321,11 @@ class FileQueueManager:
             self.queue[index]["progress"] = progress
             self.queue[index]["error_message"] = error_message
 
-    def get_file_info(self, index: int) -> Dict[str, Any]:
+    def get_file_info(self, index: int) -> Optional[Dict[str, Any]]:
         """获取文件信息"""
-        if 0 <= index < len(self.queue):
-            return self.queue[index].copy()
+        if index < 0 or index >= len(self.queue):
+            return None
+        return self.queue[index].copy()
         return {}
 
     def get_queue_size(self) -> int:

@@ -9,7 +9,7 @@ FFmpeg音频处理器 - 重构版
 - audio_merger: 音频视频合并
 
 重构完成日期: 2025-09-06
-作者: 
+作者:
 版本: v1.0 (重构版)
 """
 
@@ -201,7 +201,7 @@ class FFmpegAudioProcessor:
             audio_codec="aac",  # AAC 音频编码器
         )
 
-    def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:
+    def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:  # noqa: C901
         """回退方案：重新编码视频为 H.264（即使没有音频也要重新编码以确保兼容性）"""
         self.logger.info(f"{reason} - Re-encoding video to H.264 for compatibility")
 

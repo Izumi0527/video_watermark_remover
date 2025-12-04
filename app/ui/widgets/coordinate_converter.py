@@ -12,7 +12,6 @@
 from typing import Tuple
 
 from PyQt6.QtCore import QPoint, QRect, QSize
-from PyQt6.QtGui import QPixmap
 
 
 class CoordinateConverter:

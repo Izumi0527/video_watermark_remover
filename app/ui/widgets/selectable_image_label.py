@@ -9,20 +9,12 @@
 
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import (
-    QBrush,
-    QColor,
-    QFont,
-    QImage,
-    QMouseEvent,
-    QPainter,
-    QPaintEvent,
-    QPen,
-    QPixmap,
-)
+from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QMouseEvent, QPainter, QPaintEvent, QPen, QPixmap
 from PyQt6.QtWidgets import QLabel
 
 from .coordinate_converter import CoordinateConverter
@@ -30,6 +22,8 @@ from .selection_handlers import SelectionEventHandler
 
 if TYPE_CHECKING:
     import numpy as np
+    from numpy.typing import NDArray
+
 
 class SelectableImageLabel(QLabel):
     """
@@ -127,7 +121,7 @@ class SelectableImageLabel(QLabel):
             self.setText(f"❌ 文件加载失败\n{str(e)}")
             return False
 
-    def setImageFromArray(self, image_array: "np.ndarray") -> bool:
+    def setImageFromArray(self, image_array: "NDArray[np.uint8]") -> bool:
         """
         从numpy数组设置图像
 
@@ -140,7 +134,6 @@ class SelectableImageLabel(QLabel):
         try:
             # 延迟导入：只在实际使用时才导入OpenCV和NumPy
             import cv2
-            import numpy as np
 
             # 转换BGR到RGB
             rgb_image = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
@@ -203,19 +196,19 @@ class SelectableImageLabel(QLabel):
 
     def mousePressEvent(self, event: Optional[QMouseEvent]):
         """鼠标按下事件"""
-        if event:
+        if event and self.scaled_pixmap is not None:
             self.event_handler.handle_mouse_press(event, self.scaled_pixmap, self.image_offset)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: Optional[QMouseEvent]):
         """鼠标移动事件"""
-        if event:
+        if event and self.scaled_pixmap is not None:
             self.event_handler.handle_mouse_move(event, self.scaled_pixmap, self.image_offset)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Optional[QMouseEvent]):
         """鼠标释放事件"""
-        if event:
+        if event and self.scaled_pixmap is not None:
             self.event_handler.handle_mouse_release(event, self.scale_factor)
         super().mouseReleaseEvent(event)
 

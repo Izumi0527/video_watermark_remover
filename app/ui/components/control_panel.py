@@ -21,6 +21,8 @@ class ControlPanel(QWidget):
     """
     控制面板组件
     处理水印去除、批处理和高级参数控制
+
+    采用信号驱动模式，组件间通过信号解耦
     """
 
     # 信号定义
@@ -28,10 +30,15 @@ class ControlPanel(QWidget):
     stop_processing_requested = pyqtSignal()
     batch_processing_requested = pyqtSignal()
 
+    # Phase 6: 进度更新信号（组件解耦）
+    progress_update_requested = pyqtSignal(dict)
+    progress_reset_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._init_ui()
+        self._connect_internal_signals()
 
     def _init_ui(self):
         """初始化用户界面"""
@@ -68,6 +75,17 @@ class ControlPanel(QWidget):
         scroll_area.setWidget(content_widget)
         main_layout.addWidget(scroll_area)
 
+    def _connect_internal_signals(self):
+        """
+        连接内部信号（Phase 6: 组件解耦）
+
+        通过信号连接子组件，而非直接调用，提高可测试性和松耦合
+        """
+        # 进度更新信号 → DetailedProgressWidget
+        self.progress_update_requested.connect(self.detailed_progress.update_progress)
+        # 进度重置信号 → DetailedProgressWidget
+        self.progress_reset_requested.connect(self.detailed_progress.reset)
+
     def _create_processing_control_group(self, main_layout):
         """创建处理控制组"""
         control_group = QGroupBox("处理控制")
@@ -79,53 +97,17 @@ class ControlPanel(QWidget):
 
         # 开始处理按钮
         self.btn_start_processing = QPushButton("✨ 开始去除水印")
+        self.btn_start_processing.setObjectName("btn_success")
         self.btn_start_processing.setMinimumHeight(50)
         self.btn_start_processing.clicked.connect(self._on_start_processing)
-        self.btn_start_processing.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """
-        )
         control_layout.addWidget(self.btn_start_processing)
 
         # 停止处理按钮
         self.btn_stop_processing = QPushButton("⏹️ 停止处理")
+        self.btn_stop_processing.setObjectName("btn_danger")
         self.btn_stop_processing.setMinimumHeight(50)
         self.btn_stop_processing.clicked.connect(self._on_stop_processing)
         self.btn_stop_processing.setEnabled(False)
-        self.btn_stop_processing.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """
-        )
         control_layout.addWidget(self.btn_stop_processing)
 
         main_layout.addWidget(control_group)
@@ -243,16 +225,18 @@ class ControlPanel(QWidget):
     def reset_progress(self):
         """重置进度条"""
         self.progress_bar.setValue(0)
-        self.detailed_progress.reset()
+        # Phase 6: 通过信号解耦
+        self.progress_reset_requested.emit()
 
     def update_detailed_progress(self, progress_data: dict):
         """
-        更新详细进度信息 (Phase 4 Stage 1.4)
+        更新详细进度信息 (Phase 4 Stage 1.4, Phase 6 信号解耦)
 
         Args:
             progress_data: 详细进度数据字典
         """
-        self.detailed_progress.update_progress(progress_data)
+        # Phase 6: 通过信号发射，而非直接调用子组件方法
+        self.progress_update_requested.emit(progress_data)
 
     def get_advanced_parameters(self):
         """

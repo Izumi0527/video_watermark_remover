@@ -6,18 +6,25 @@ YOLO水印检测器
 
 """
 
+from __future__ import annotations
+
 import logging
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence
 
 import cv2
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from ...config.config_manager import ConfigManager
 from ...utils.model_downloader import ModelDownloader
 from ..exceptions import DetectionError
+
+if TYPE_CHECKING:
+    from ultralytics import YOLO
+    from ultralytics.engine.results import Results
 
 
 class YOLOWatermarkDetector:
@@ -52,7 +59,7 @@ class YOLOWatermarkDetector:
             device: 设备 ('cuda' or 'cpu', None=自动检测)
         """
         self.logger = logging.getLogger(__name__)
-        self.model = None
+        self.model: Optional["YOLO"] = None
 
         # 加载配置（如果未提供则加载默认配置）
         config = config or ConfigManager.load_config()
@@ -165,10 +172,11 @@ class YOLOWatermarkDetector:
             self.logger.info(f"Loading YOLO model from: {self.model_path}")
 
             # 加载模型
-            self.model = YOLO(self.model_path)
+            model = YOLO(self.model_path)
 
             # 移动到设备
-            self.model.to(self.device)
+            model.to(self.device)
+            self.model = model
 
             self.logger.info("✅ YOLO model loaded successfully")
             self.logger.info(f"  - Model Type: {self.model_type}")
@@ -206,7 +214,7 @@ class YOLOWatermarkDetector:
             self.logger.error(f"❌ Failed to load YOLO model: {e}")
             return False
 
-    def detect_watermark(self, frame: np.ndarray) -> Optional[np.ndarray]:
+    def detect_watermark(self, frame: NDArray[np.uint8]) -> Optional[NDArray[np.uint8]]:
         """
         检测水印区域（纯 GPU pipeline）
 
@@ -217,7 +225,8 @@ class YOLOWatermarkDetector:
             二值掩码 (H, W) uint8, 255=水印, 0=干净
             None if detection fails
         """
-        if self.model is None:
+        model = self.model
+        if model is None:
             self.logger.warning("YOLO model not loaded")
             return None
 
@@ -227,7 +236,7 @@ class YOLOWatermarkDetector:
 
         try:
             # YOLO 推理（纯 GPU）
-            results = self.model(
+            results: Sequence["Results"] = model(
                 frame,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
@@ -244,7 +253,7 @@ class YOLOWatermarkDetector:
             self.logger.error(f"YOLO detection failed: {e}")
             raise DetectionError(f"YOLO 检测失败: {e}")
 
-    def detect_batch(self, frames: list) -> list:
+    def detect_batch(self, frames: List[NDArray[np.uint8]]) -> List[Optional[NDArray[np.uint8]]]:
         """
         批量检测水印（GPU 优势）
 
@@ -254,7 +263,8 @@ class YOLOWatermarkDetector:
         Returns:
             掩码列表 [(H, W) uint8]
         """
-        if self.model is None:
+        model = self.model
+        if model is None:
             self.logger.warning("YOLO model not loaded")
             return [None] * len(frames)
 
@@ -263,7 +273,7 @@ class YOLOWatermarkDetector:
 
         try:
             # 批量推理（GPU 并行）
-            results = self.model(
+            results: Sequence["Results"] = model(
                 frames,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
@@ -283,7 +293,7 @@ class YOLOWatermarkDetector:
             self.logger.error(f"Batch detection failed: {e}")
             raise DetectionError(f"批量检测失败: {e}")
 
-    def _boxes_to_mask(self, boxes, frame_shape) -> np.ndarray:
+    def _boxes_to_mask(self, boxes: Any, frame_shape: Sequence[int]) -> NDArray[np.uint8]:
         """
         将 YOLO bounding boxes 转换为二值 mask
 
@@ -295,7 +305,7 @@ class YOLOWatermarkDetector:
             二值 mask (H, W) uint8
         """
         h, w = frame_shape[:2]
-        mask = np.zeros((h, w), dtype=np.uint8)
+        mask: NDArray[np.uint8] = np.zeros((h, w), dtype=np.uint8)
 
         if boxes is None or len(boxes) == 0:
             return mask
@@ -303,7 +313,8 @@ class YOLOWatermarkDetector:
         # 遍历所有检测框
         for box in boxes:
             # 获取坐标 (xyxy 格式)
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            coords = box.xyxy[0].cpu().numpy().astype(int)
+            x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
 
             # 扩展边界框（确保完全覆盖水印）
             padding = 10
@@ -318,7 +329,7 @@ class YOLOWatermarkDetector:
         # 形态学操作平滑边缘
         if np.any(mask):
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            mask = np.asarray(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel))
 
         return mask
 
@@ -356,8 +367,11 @@ if __name__ == "__main__":
         elapsed = time.time() - start
 
         print(f"✅ 单帧推理完成: {elapsed * 1000:.2f} ms")
-        print(f"   Mask shape: {mask.shape}")
-        print(f"   Detected pixels: {np.sum(mask > 0)}")
+        if mask is not None:
+            print(f"   Mask shape: {mask.shape}")
+            print(f"   Detected pixels: {np.sum(mask > 0)}")
+        else:
+            print("   未生成掩码，检测返回 None")
 
         # 批处理测试
         batch_frames = [test_frame] * 4
@@ -367,6 +381,11 @@ if __name__ == "__main__":
         elapsed = time.time() - start
 
         print(f"✅ 批处理推理完成 (4 帧): {elapsed * 1000:.2f} ms " f"({elapsed * 1000 / 4:.2f} ms/帧)")
+        detected_counts = [int(np.sum(mask > 0)) for mask in batch_masks if mask is not None]
+        if detected_counts:
+            print(f"   掩码像素统计: {detected_counts}")
+        else:
+            print("   批处理未返回有效掩码")
 
         # 清理
         detector.cleanup()

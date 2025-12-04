@@ -1,6 +1,6 @@
 """样式管理入口，负责主题切换、调色板与样式应用."""
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional
 
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication

@@ -109,7 +109,7 @@ class AdvancedParametersWidget(QWidget):
         scroll_area.setWidget(self.tab_widget)
         layout.addWidget(scroll_area)
 
-    def _connect_signals(self):
+    def _connect_signals(self):  # noqa: C901
         """连接信号"""
         # 先断开已存在的连接，避免重复绑定导致信号噪音
         self._disconnect_signals()
@@ -174,7 +174,7 @@ class AdvancedParametersWidget(QWidget):
     def _update_sensitivity_label(self, value):
         """更新敏感度标签"""
         if self.sensitivity_label:
-            self.sensitivity_label.setText(f"{value/100:.2f}")
+            self.sensitivity_label.setText(f"{value / 100:.2f}")
 
     def _update_quality_label(self, value):
         """更新质量标签"""
@@ -220,7 +220,9 @@ class AdvancedParametersWidget(QWidget):
             "inpainting_method": self.inpainting_method_combo.currentText()
             if self.inpainting_method_combo
             else "",
-            "inpainting_radius": self.inpaint_radius_spin.value() if self.inpaint_radius_spin else 0,
+            "inpainting_radius": self.inpaint_radius_spin.value()
+            if self.inpaint_radius_spin
+            else 0,
             "inpainting_quality": self.quality_slider.value() if self.quality_slider else 0,
             "enable_smooth_postprocess": self.enable_smooth_check.isChecked()
             if self.enable_smooth_check
@@ -236,19 +238,23 @@ class AdvancedParametersWidget(QWidget):
             "enable_gpu": self.enable_gpu_check.isChecked() if self.enable_gpu_check else False,
             "gpu_memory_limit": self.gpu_memory_spin.value() if self.gpu_memory_spin else 0,
             "cache_size": self.cache_size_spin.value() if self.cache_size_spin else 0,
-            "enable_cache": self.enable_cache_check.isChecked() if self.enable_cache_check else False,
+            "enable_cache": self.enable_cache_check.isChecked()
+            if self.enable_cache_check
+            else False,
             # 输出参数
             "output_format": self.output_format_combo.currentText()
             if self.output_format_combo
             else "",
-            "compression_quality": self.compression_slider.value() if self.compression_slider else 0,
+            "compression_quality": self.compression_slider.value()
+            if self.compression_slider
+            else 0,
             "add_suffix": self.add_suffix_check.isChecked() if self.add_suffix_check else False,
             "add_timestamp": self.add_timestamp_check.isChecked()
             if self.add_timestamp_check
             else False,
         }
 
-    def set_parameters(self, parameters: Dict[str, Any]):
+    def set_parameters(self, parameters: Dict[str, Any]):  # noqa: C901
         """设置参数"""
         # 暂时断开信号连接，避免循环触发
         self._disconnect_signals()
@@ -337,14 +343,16 @@ class AdvancedParametersWidget(QWidget):
         if self.compression_slider:
             self._update_compression_label(self.compression_slider.value())
 
-    def _disconnect_signals(self):
+    def _disconnect_signals(self):  # noqa: C901
         """断开所有信号连接"""
         try:
             if self.sensitivity_slider:
                 self.sensitivity_slider.valueChanged.disconnect(self._update_sensitivity_label)
                 self.sensitivity_slider.valueChanged.disconnect(self._on_parameter_changed)
             if self.detection_method_combo:
-                self.detection_method_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+                self.detection_method_combo.currentTextChanged.disconnect(
+                    self._on_parameter_changed
+                )
             if self.min_area_spin:
                 self.min_area_spin.valueChanged.disconnect(self._on_parameter_changed)
 
@@ -356,7 +364,9 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_denoise_check.toggled.disconnect(self._on_parameter_changed)
 
             if self.inpainting_method_combo:
-                self.inpainting_method_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+                self.inpainting_method_combo.currentTextChanged.disconnect(
+                    self._on_parameter_changed
+                )
             if self.inpaint_radius_spin:
                 self.inpaint_radius_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.quality_slider:

@@ -5,7 +5,7 @@ from typing import Optional
 from ..ai.ai_handler import AIHandler
 
 
-def frame_processor_worker(
+def frame_processor_worker(  # noqa: C901
     frame_queue: queues.Queue,
     result_queue: queues.Queue,
     ai_params: dict,

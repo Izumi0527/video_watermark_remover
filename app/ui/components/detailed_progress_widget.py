@@ -11,7 +11,7 @@
 
 """
 
-from typing import Dict, Optional
+from typing import Any, Dict
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -185,7 +185,7 @@ class DetailedProgressWidget(QWidget):
             }
         )
 
-    def update_progress(self, progress_data: Dict[str, any]):
+    def update_progress(self, progress_data: Dict[str, Any]):
         """
         更新进度显示
 
@@ -218,9 +218,11 @@ class DetailedProgressWidget(QWidget):
         # 根据阶段更新进度条样式属性
         # Map phase to simpler property values if needed, or use phase name directly
         self.progress_bar.setProperty("phase", phase)
-        # Force style update
-        self.progress_bar.style().unpolish(self.progress_bar)
-        self.progress_bar.style().polish(self.progress_bar)
+        # Force style update（风格对象可能为空，需判空）
+        style = self.progress_bar.style()
+        if style is not None:
+            style.unpolish(self.progress_bar)
+            style.polish(self.progress_bar)
 
         # 更新帧计数器
         if total_frames > 0:
@@ -297,8 +299,6 @@ if __name__ == "__main__":
     widget.show()
 
     # 模拟进度更新
-    import time
-
     from PyQt6.QtCore import QTimer
 
     test_data = [

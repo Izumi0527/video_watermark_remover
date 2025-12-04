@@ -11,7 +11,7 @@
 """
 
 import os
-from typing import List, Optional
+from typing import List
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QLabel, QListWidget, QListWidgetItem, QMessageBox, QWidget
@@ -131,11 +131,11 @@ class BatchFileManager:
 
             # 设置状态颜色
             if status == ProcessingStatus.COMPLETED:
-                list_item.setBackground(Qt.GlobalColor.lightGreen)
+                list_item.setBackground(Qt.GlobalColor.green)
             elif status == ProcessingStatus.FAILED:
                 list_item.setBackground(Qt.GlobalColor.lightGray)
             elif status == ProcessingStatus.PROCESSING:
-                list_item.setBackground(Qt.GlobalColor.lightBlue)
+                list_item.setBackground(Qt.GlobalColor.cyan)
 
             file_list.addItem(list_item)
 

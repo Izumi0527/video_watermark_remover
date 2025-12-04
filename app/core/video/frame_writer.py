@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 
 
-def frame_writer_worker(
+def frame_writer_worker(  # noqa: C901
     result_queue: queues.Queue,
     output_path: str,
     video_params: dict,

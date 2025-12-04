@@ -22,7 +22,7 @@ def frame_reader_worker(
     logger = logging.getLogger(__name__)
 
     try:
-        cap = cv2.VideoCapture(video_path)
+        cap = cv2.VideoCapture(video_path)  # type: ignore[call-arg]
         if not cap.isOpened():
             logger.error(f"Failed to open video: {video_path}")
             frame_queue.put(None)

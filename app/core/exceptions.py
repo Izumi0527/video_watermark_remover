@@ -33,7 +33,8 @@
 
 """
 
-from typing import Optional
+from typing import Any, Callable, Optional
+import logging
 
 # ==================== 基础异常类 ====================
 
@@ -407,6 +408,248 @@ def get_custom_exception(
     """
     exc_type = type(standard_exception)
     return EXCEPTION_MAPPING.get(exc_type, default_class)
+
+
+# ==================== 全局异常处理器 ====================
+
+
+class GlobalExceptionHandler:
+    """
+    全局异常处理器
+
+    提供应用程序级别的异常捕获、日志记录和用户通知功能。
+    支持 Qt 应用程序的异常钩子集成。
+
+    Phase 6 新增: 统一的异常处理入口点
+
+    Usage:
+        handler = GlobalExceptionHandler()
+        handler.install()  # 安装为全局处理器
+
+        # 或者手动处理
+        try:
+            risky_operation()
+        except Exception as e:
+            handler.handle(e, context="视频处理")
+    """
+
+    def __init__(self, logger: Optional[logging.Logger] = None):
+        """
+        初始化全局异常处理器
+
+        Args:
+            logger: 可选的日志记录器，默认使用模块级别日志
+        """
+        self.logger = logger or logging.getLogger("GlobalExceptionHandler")
+        self._original_excepthook: Optional[Callable[..., Any]] = None
+        self._error_callbacks: list[Callable[..., Any]] = []
+
+    def install(self) -> None:
+        """
+        安装为全局异常处理器
+
+        替换 sys.excepthook 以捕获所有未处理的异常。
+        """
+        import sys
+
+        self._original_excepthook = sys.excepthook
+        sys.excepthook = self._excepthook
+
+    def uninstall(self) -> None:
+        """
+        卸载全局异常处理器
+
+        恢复原始的 sys.excepthook。
+        """
+        import sys
+
+        if self._original_excepthook:
+            sys.excepthook = self._original_excepthook
+            self._original_excepthook = None
+
+    def register_callback(self, callback: Callable[..., Any]) -> None:
+        """
+        注册错误回调
+
+        当异常发生时，所有注册的回调都会被调用。
+
+        Args:
+            callback: 回调函数，签名为 (exc_type, exc_value, exc_tb, context)
+        """
+        self._error_callbacks.append(callback)
+
+    def unregister_callback(self, callback: Callable[..., Any]) -> None:
+        """移除已注册的回调"""
+        if callback in self._error_callbacks:
+            self._error_callbacks.remove(callback)
+
+    def _excepthook(self, exc_type: type, exc_value: Exception, exc_tb) -> None:
+        """
+        sys.excepthook 替代函数
+
+        处理所有未捕获的异常。
+        """
+        self.handle(exc_value, exc_type=exc_type, exc_tb=exc_tb)
+
+        # 调用原始钩子（如果存在）
+        if self._original_excepthook:
+            self._original_excepthook(exc_type, exc_value, exc_tb)
+
+    def handle(
+        self,
+        exception: Exception,
+        context: Optional[str] = None,
+        exc_type: Optional[type] = None,
+        exc_tb=None,
+    ) -> dict:
+        """
+        处理异常
+
+        记录日志、通知回调、返回结构化错误信息。
+
+        Args:
+            exception: 异常实例
+            context: 异常发生的上下文描述
+            exc_type: 异常类型（可选，默认从 exception 推断）
+            exc_tb: 异常回溯（可选）
+
+        Returns:
+            包含错误信息的字典
+        """
+        import traceback
+
+        exc_type = exc_type or type(exception)
+        context = context or "未知上下文"
+
+        # 构建错误信息
+        error_info = {
+            "type": exc_type.__name__,
+            "message": str(exception),
+            "context": context,
+            "is_custom": isinstance(exception, VideoWatermarkRemoverError),
+            "traceback": None,
+        }
+
+        # 提取详细信息（如果是自定义异常）
+        if isinstance(exception, VideoWatermarkRemoverError):
+            error_info["details"] = exception.details
+            error_info["original_exception"] = (
+                str(exception.original_exception)
+                if exception.original_exception
+                else None
+            )
+
+        # 获取堆栈跟踪
+        if exc_tb:
+            error_info["traceback"] = "".join(
+                traceback.format_exception(exc_type, exception, exc_tb)
+            )
+        else:
+            error_info["traceback"] = traceback.format_exc()
+
+        # 记录日志
+        self._log_exception(error_info)
+
+        # 通知所有回调
+        for callback in self._error_callbacks:
+            try:
+                callback(exc_type, exception, exc_tb, context)
+            except Exception as callback_error:
+                self.logger.warning(f"异常回调执行失败: {callback_error}")
+
+        return error_info
+
+    def _log_exception(self, error_info: dict) -> None:
+        """记录异常到日志"""
+        log_message = (
+            f"[{error_info['context']}] {error_info['type']}: {error_info['message']}"
+        )
+
+        if error_info.get("details"):
+            log_message += f" | 详情: {error_info['details']}"
+
+        self.logger.error(log_message)
+
+        if error_info.get("traceback"):
+            self.logger.debug(f"堆栈跟踪:\n{error_info['traceback']}")
+
+    def get_user_friendly_message(self, exception: Exception) -> str:
+        """
+        获取用户友好的错误消息
+
+        将技术性错误转换为用户可理解的消息。
+
+        Args:
+            exception: 异常实例
+
+        Returns:
+            用户友好的错误消息字符串
+        """
+        # 自定义异常直接使用其消息
+        if isinstance(exception, VideoWatermarkRemoverError):
+            return exception.message
+
+        # 标准异常映射
+        user_messages = {
+            FileNotFoundError: "找不到指定的文件",
+            PermissionError: "没有足够的权限执行此操作",
+            MemoryError: "内存不足，请关闭其他程序后重试",
+            TimeoutError: "操作超时，请检查网络连接或稍后重试",
+            ConnectionError: "网络连接失败，请检查网络设置",
+            ValueError: "输入的值无效，请检查后重试",
+            TypeError: "操作类型不匹配",
+            KeyboardInterrupt: "操作已被用户取消",
+        }
+
+        exc_type = type(exception)
+        if exc_type in user_messages:
+            return user_messages[exc_type]
+
+        # 默认消息
+        return f"发生错误: {str(exception)}"
+
+    def __enter__(self) -> "GlobalExceptionHandler":
+        """上下文管理器入口"""
+        self.install()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """上下文管理器退出"""
+        self.uninstall()
+        if exc_val:
+            self.handle(exc_val, exc_type=exc_type, exc_tb=exc_tb)
+        # 返回 None 表示不抑制异常
+
+
+# 全局单例实例
+_global_handler: Optional[GlobalExceptionHandler] = None
+
+
+def get_global_exception_handler() -> GlobalExceptionHandler:
+    """
+    获取全局异常处理器单例
+
+    Returns:
+        GlobalExceptionHandler 实例
+    """
+    global _global_handler
+    if _global_handler is None:
+        _global_handler = GlobalExceptionHandler()
+    return _global_handler
+
+
+def install_global_exception_handler() -> GlobalExceptionHandler:
+    """
+    安装全局异常处理器
+
+    便捷函数，用于快速安装全局处理器。
+
+    Returns:
+        已安装的 GlobalExceptionHandler 实例
+    """
+    handler = get_global_exception_handler()
+    handler.install()
+    return handler
 
 
 # ==================== 测试代码 ====================

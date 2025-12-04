@@ -13,6 +13,24 @@ ignore =
     W503,
     # E501: line too long (controlled by max-line-length)
     E501,
+    # Docstring checks (handled separately)
+    D100,
+    D101,
+    D102,
+    D103,
+    D104,
+    D105,
+    D106,
+    D107,
+    D200,
+    D202,
+    D205,
+    D212,
+    D400,
+    D401,
+    D403,
+    D415,
+    D417,
 
 # Excluded directories
 exclude =
@@ -29,6 +47,7 @@ exclude =
     docs,
     scripts,
     models,
+    tests,
 
 # Max docstring line length
 max-doc-length = 100

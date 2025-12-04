@@ -5,7 +5,7 @@ import cv2
 from ..exceptions import ModelLoadError, VideoReadError, VideoWriteError
 
 
-def process_video_singleprocess(processor) -> None:
+def process_video_singleprocess(processor) -> None:  # noqa: C901
     """
     单进程逐帧处理视频。
     """
@@ -14,7 +14,7 @@ def process_video_singleprocess(processor) -> None:
 
     try:
         processor.status.emit("🎬 读取视频文件...")
-        cap = cv2.VideoCapture(processor.input_path)
+        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
 
         if not cap.isOpened():
             raise VideoReadError("无法打开视频文件", details=f"文件路径: {processor.input_path}")

@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 class AIParamsBuilder:
@@ -287,7 +288,9 @@ class AIParamsBuilder:
 
         return method_mapping.get(inpainting_method, "gpu_dl")
 
-    def create_mask_from_regions(self, regions: List[tuple], image_shape: tuple) -> np.ndarray:
+    def create_mask_from_regions(
+        self, regions: List[tuple], image_shape: tuple
+    ) -> NDArray[np.uint8]:
         """
         从区域列表创建二值掩码图像（备用方法）
 
@@ -300,7 +303,7 @@ class AIParamsBuilder:
         """
         import cv2
 
-        mask = np.zeros((image_shape[0], image_shape[1]), dtype=np.uint8)
+        mask: NDArray[np.uint8] = np.zeros((image_shape[0], image_shape[1]), dtype=np.uint8)
 
         for x, y, w, h in regions:
             cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)

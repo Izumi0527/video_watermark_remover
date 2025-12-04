@@ -10,11 +10,14 @@
 
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Optional
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from ..exceptions import InpaintingError
 
@@ -78,13 +81,13 @@ class ImageInpainter:
 
         return True
 
-    def inpaint_frame(
+    def inpaint_frame(  # noqa: C901
         self,
-        frame: Optional[np.ndarray],
-        mask: Optional[np.ndarray],
+        frame: Optional[NDArray[np.uint8]],
+        mask: Optional[NDArray[np.uint8]],
         method: Optional[str] = None,
         radius: int = INPAINT_RADIUS,
-    ) -> Optional[np.ndarray]:
+    ) -> Optional[NDArray[np.uint8]]:
         """
         基于提供的掩码对帧应用修复，支持 TELEA / NS / 自定义 / 自动选择。
 
@@ -133,13 +136,13 @@ class ImageInpainter:
             method = (method or "auto").lower()
 
             # 各算法结果
-            def _telea():
-                return cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_TELEA)
+            def _telea() -> NDArray[np.uint8]:
+                return np.asarray(cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_TELEA))
 
-            def _ns():
-                return cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_NS)
+            def _ns() -> NDArray[np.uint8]:
+                return np.asarray(cv2.inpaint(frame, bin_mask, radius, cv2.INPAINT_NS))
 
-            def _custom():
+            def _custom() -> NDArray[np.uint8]:
                 return self._custom_inpaint(frame, bin_mask)
 
             if method == "telea":
@@ -168,7 +171,9 @@ class ImageInpainter:
             self.logger.error(f"Error in image inpainting: {e}")
             raise InpaintingError("图像修复失败", details=str(e), original_exception=e)
 
-    def _custom_inpaint(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def _custom_inpaint(
+        self, frame: NDArray[np.uint8], mask: NDArray[np.uint8]
+    ) -> NDArray[np.uint8]:
         """
         使用插值和纹理合成的自定义修复方法
         适用于小的水印区域
@@ -291,4 +296,7 @@ if __name__ == "__main__":
 
     # 执行修复
     result = inpainter.inpaint_frame(test_frame, test_mask)
-    print(f"Inpainting completed. Result shape: {result.shape}")
+    if result is not None:
+        print(f"Inpainting completed. Result shape: {result.shape}")
+    else:
+        print("Inpainting returned None")
