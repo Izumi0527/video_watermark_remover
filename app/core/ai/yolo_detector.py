@@ -21,10 +21,11 @@ from numpy.typing import NDArray
 from ...config.config_manager import ConfigManager
 from ...utils.model_downloader import ModelDownloader
 from ..exceptions import DetectionError
+from .gpu_monitor import ensure_gpu_memory, get_gpu_monitor, get_safe_batch_size
 
 if TYPE_CHECKING:
-    from ultralytics import YOLO
-    from ultralytics.engine.results import Results
+    from ultralytics import YOLO  # type: ignore[import-not-found]
+    from ultralytics.engine.results import Results  # type: ignore[import-not-found]
 
 
 class YOLOWatermarkDetector:
@@ -167,7 +168,7 @@ class YOLOWatermarkDetector:
             bool: 加载是否成功
         """
         try:
-            from ultralytics import YOLO
+            from ultralytics import YOLO  # type: ignore[import-not-found]
 
             self.logger.info(f"Loading YOLO model from: {self.model_path}")
 
@@ -235,6 +236,12 @@ class YOLOWatermarkDetector:
             return None
 
         try:
+            # GPU 显存检查（仅在 GPU 模式下）
+            if self.device == "cuda":
+                if not ensure_gpu_memory(min_free_mb=300):
+                    self.logger.warning("Insufficient GPU memory for detection")
+                    # 不抛出异常，让检测继续（可能会触发 CUDA OOM）
+
             # YOLO 推理（纯 GPU）
             results: Sequence["Results"] = model(
                 frame,
@@ -257,6 +264,8 @@ class YOLOWatermarkDetector:
         """
         批量检测水印（GPU 优势）
 
+        使用 GPU 显存监控自动调整批大小，防止 OOM
+
         Args:
             frames: 帧列表 [(H, W, 3) BGR uint8]
 
@@ -272,8 +281,42 @@ class YOLOWatermarkDetector:
             return []
 
         try:
-            # 批量推理（GPU 并行）
-            results: Sequence["Results"] = model(
+            # GPU 显存自适应批大小
+            if self.device == "cuda" and len(frames) > 0:
+                frame_size = frames[0].shape[:2]  # (H, W)
+                safe_batch_size = get_safe_batch_size(self.batch_size, frame_size)
+
+                if safe_batch_size < len(frames):
+                    self.logger.info(
+                        f"Adaptive batch size: processing {len(frames)} frames "
+                        f"in batches of {safe_batch_size}"
+                    )
+                    # 分批处理
+                    all_masks = []
+                    for i in range(0, len(frames), safe_batch_size):
+                        batch = frames[i:i + safe_batch_size]
+
+                        # 确保有足够显存
+                        ensure_gpu_memory(min_free_mb=300)
+
+                        # 批量推理
+                        results: Sequence["Results"] = model(
+                            batch,
+                            conf=self.conf_threshold,
+                            iou=self.iou_threshold,
+                            verbose=False,
+                            device=self.device,
+                        )
+
+                        # 转换掩码
+                        for j, result in enumerate(results):
+                            mask = self._boxes_to_mask(result.boxes, batch[j].shape)
+                            all_masks.append(mask)
+
+                    return all_masks
+
+            # 标准批量推理（GPU 并行）
+            results = model(
                 frames,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,

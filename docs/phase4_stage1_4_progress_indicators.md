@@ -878,7 +878,7 @@ def _format_time(self, seconds: float) -> str:
 ---
 
 **文档创建时间**: 2025-11-15
-**作者**: 
+**作者**:
 **版本**: v1.0
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

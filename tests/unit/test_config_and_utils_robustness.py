@@ -37,7 +37,9 @@ def test_update_config_value_creates_missing_section(tmp_path):
     config_path = tmp_path / "config.ini"
     ConfigManager.load_config(str(config_path))
 
-    assert ConfigManager.update_config_value("NewSection", "new_key", "123", str(config_path)) is True
+    assert (
+        ConfigManager.update_config_value("NewSection", "new_key", "123", str(config_path)) is True
+    )
 
     reloaded = ConfigManager.load_config(str(config_path))
     assert reloaded.get("NewSection", "new_key") == "123"

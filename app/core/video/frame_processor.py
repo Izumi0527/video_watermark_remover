@@ -4,6 +4,47 @@ from typing import Optional
 
 from ..ai.ai_handler import AIHandler
 
+# ============================================================================
+# 进程池级别的模型缓存
+# 使用 initializer 模式：每个进程只加载一次模型，后续复用
+# ============================================================================
+_worker_ai_handler: Optional[AIHandler] = None
+_worker_ai_params: Optional[dict] = None
+
+
+def init_worker_ai_handler(ai_params: dict) -> None:
+    """
+    进程池初始化函数 - 每个工作进程只调用一次
+
+    在 ProcessPoolExecutor 创建时通过 initializer 参数调用，
+    避免每次处理任务都重新加载模型（节省约 500MB×N 内存）
+
+    Args:
+        ai_params: AI 参数字典
+    """
+    global _worker_ai_handler, _worker_ai_params
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info(f"Initializing AI handler for worker process (PID: {__import__('os').getpid()})")
+        _worker_ai_params = ai_params
+        _worker_ai_handler = AIHandler(None, ai_params)
+
+        if not _worker_ai_handler.load_models():
+            logger.error("Worker process failed to load AI models during initialization")
+            _worker_ai_handler = None
+        else:
+            logger.info("Worker process AI handler initialized successfully")
+
+    except Exception as e:
+        logger.error(f"Worker process initialization error: {e}")
+        _worker_ai_handler = None
+
+
+def get_worker_ai_handler() -> Optional[AIHandler]:
+    """获取当前进程的 AI 处理器实例"""
+    return _worker_ai_handler
+
 
 def frame_processor_worker(  # noqa: C901
     frame_queue: queues.Queue,
@@ -20,22 +61,29 @@ def frame_processor_worker(  # noqa: C901
     Args:
         frame_queue: 帧队列
         result_queue: 结果队列
-        ai_params: AI 参数
+        ai_params: AI 参数（备用，优先使用初始化时的模型）
         config_dict: 配置字典
         stop_event: 停止事件
         progress_queue: 进度队列
         worker_id: 工作进程ID
     """
+    global _worker_ai_handler
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info(f"Worker {worker_id} loading AI models...")
-        ai_handler = AIHandler(None, ai_params)
-        if not ai_handler.load_models():
-            logger.error(f"Worker {worker_id} failed to load AI models")
-            return
+        # 优先使用进程池初始化时加载的模型
+        ai_handler = _worker_ai_handler
 
-        logger.info(f"Worker {worker_id} started")
+        # 降级处理：如果初始化时未加载模型，则在此处加载（兼容旧调用方式）
+        if ai_handler is None:
+            logger.warning(f"Worker {worker_id}: AI handler not pre-initialized, loading now...")
+            ai_handler = AIHandler(None, ai_params)
+            if not ai_handler.load_models():
+                logger.error(f"Worker {worker_id} failed to load AI models")
+                return
+            _worker_ai_handler = ai_handler  # 缓存供后续使用
+
+        logger.info(f"Worker {worker_id} started (using {'pre-initialized' if _worker_ai_handler else 'newly loaded'} AI handler)")
         processed_count = 0
 
         while not stop_event.is_set():

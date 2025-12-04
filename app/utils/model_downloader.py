@@ -3,11 +3,15 @@
 YOLO模型自动下载工具
 
 支持从Hugging Face自动下载YOLOv11系列水印检测模型。
+包含自动重试和指数退避机制。
 
 """
 
 import hashlib
 import logging
+import socket
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -53,6 +57,7 @@ class ModelDownloader:
     YOLO模型自动下载器
 
     支持从Hugging Face下载预训练的YOLO水印检测模型。
+    包含自动重试、指数退避和超时控制。
     """
 
     # 可用模型配置
@@ -73,22 +78,58 @@ class ModelDownloader:
         },
     }
 
-    def __init__(self, model_dir: str = "./models"):
+    # 重试配置
+    DEFAULT_MAX_RETRIES = 3  # 最大重试次数
+    DEFAULT_TIMEOUT_SECONDS = 60  # 单次下载超时（秒）
+    DEFAULT_BASE_DELAY = 2.0  # 基础退避延迟（秒）
+    DEFAULT_MAX_DELAY = 30.0  # 最大退避延迟（秒）
+
+    def __init__(
+        self,
+        model_dir: str = "./models",
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        timeout: int = DEFAULT_TIMEOUT_SECONDS,
+        base_delay: float = DEFAULT_BASE_DELAY,
+        max_delay: float = DEFAULT_MAX_DELAY,
+    ):
         """
         初始化下载器
 
         Args:
             model_dir: 模型保存目录
+            max_retries: 最大重试次数
+            timeout: 单次下载超时（秒）
+            base_delay: 基础退避延迟（秒）
+            max_delay: 最大退避延迟（秒）
         """
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
 
+        # 重试配置
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """
+        计算指数退避延迟时间
+
+        Args:
+            attempt: 当前尝试次数 (0-based)
+
+        Returns:
+            延迟秒数
+        """
+        delay = self.base_delay * (2**attempt)
+        return min(delay, self.max_delay)
+
     def download_model(
         self, model_key: str, force: bool = False, progress_callback: Optional[Callable] = None
     ) -> Optional[Path]:
         """
-        下载指定模型
+        下载指定模型（带自动重试）
 
         Args:
             model_key: 模型标识 (yolo11x-watermark/yolo11s)
@@ -115,35 +156,98 @@ class ModelDownloader:
             else:
                 self.logger.warning("Model file corrupted, re-downloading...")
 
-        # 开始下载
+        # 开始下载（带重试）
         self.logger.info(f"Downloading {model_info['description']}...")
         self.logger.info(f"  URL: {model_info['url']}")
         self.logger.info(f"  Size: ~{model_info['size_mb']}MB")
         self.logger.info(f"  Target: {model_path}")
+        self.logger.info(f"  Max retries: {self.max_retries}, Timeout: {self.timeout}s")
+
+        last_error: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                if attempt > 0:
+                    delay = self._calculate_backoff_delay(attempt - 1)
+                    self.logger.info(f"  Retry {attempt}/{self.max_retries} after {delay:.1f}s delay...")
+                    time.sleep(delay)
+
+                # 执行单次下载尝试
+                result = self._download_with_timeout(
+                    model_info["url"],
+                    model_path,
+                    model_info["size_mb"],
+                    progress_callback,
+                )
+
+                if result:
+                    return model_path
+
+            except (urllib.error.URLError, socket.timeout, OSError) as e:
+                last_error = e
+                self.logger.warning(f"  Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+
+                # 清理不完整文件
+                if model_path.exists():
+                    try:
+                        model_path.unlink()
+                    except OSError:
+                        pass
+
+            except Exception as e:  # noqa: BLE001
+                # 其他异常不重试
+                last_error = e
+                self.logger.error(f"  Unexpected error: {type(e).__name__}: {e}")
+                break
+
+        # 所有重试都失败
+        self.logger.error(f"❌ Download failed after {self.max_retries + 1} attempts")
+        if last_error:
+            self.logger.error(f"  Last error: {last_error}")
+        return None
+
+    def _download_with_timeout(
+        self,
+        url: str,
+        target_path: Path,
+        expected_size_mb: int,
+        progress_callback: Optional[Callable] = None,
+    ) -> bool:
+        """
+        带超时控制的单次下载
+
+        Args:
+            url: 下载URL
+            target_path: 目标路径
+            expected_size_mb: 预期文件大小MB
+            progress_callback: 进度回调
+
+        Returns:
+            是否下载成功
+        """
+        # 设置全局超时
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(self.timeout)
 
         try:
             # 创建进度条
-            progress_bar = DownloadProgressBar(model_info["size_mb"] * 1024 * 1024)
+            progress_bar = DownloadProgressBar(expected_size_mb * 1024 * 1024)
 
             # 下载文件
-            urllib.request.urlretrieve(
-                model_info["url"], model_path, reporthook=progress_bar.update
-            )
+            urllib.request.urlretrieve(url, target_path, reporthook=progress_bar.update)
 
             print()  # 换行
-            self.logger.info(f"✅ Downloaded successfully: {model_path}")
+            self.logger.info(f"✅ Downloaded successfully: {target_path}")
 
             # 验证下载的文件
-            if not model_path.exists() or model_path.stat().st_size == 0:
-                raise Exception("Downloaded file is empty or missing")
+            if not target_path.exists() or target_path.stat().st_size == 0:
+                raise OSError("Downloaded file is empty or missing")
 
-            return model_path
+            return True
 
-        except Exception as e:
-            self.logger.error(f"❌ Download failed: {e}")
-            if model_path.exists():
-                model_path.unlink()  # 删除不完整文件
-            return None
+        finally:
+            # 恢复原超时设置
+            socket.setdefaulttimeout(old_timeout)
 
     def _verify_model(self, model_path: Path, expected_sha256: Optional[str]) -> bool:
         """

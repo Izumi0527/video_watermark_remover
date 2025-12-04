@@ -10,7 +10,7 @@ from typing import Any, List, Optional, Tuple, cast
 import cv2
 from PyQt6.QtCore import QTimer
 
-from .chunk_worker import process_video_chunk
+from .chunk_worker import init_chunk_worker_ai_handler, process_video_chunk
 
 
 def _calculate_chunks(
@@ -114,7 +114,7 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
 
     try:
         processor.status.emit("📊 分析视频信息...")
-        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
+        cap = cv2.VideoCapture(processor.input_path)
         if not cap.isOpened():
             from ..exceptions import VideoReadError
 
@@ -151,7 +151,13 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         processor.status.emit("🎨 开始并行处理视频块...")
         results: List[Tuple[Optional[str], bool, Optional[str]]] = []
 
-        with ProcessPoolExecutor(max_workers=processor.num_processes) as executor:
+        # 使用 initializer 模式：进程池创建时预加载 AI 模型
+        # 这样每个进程只加载一次模型，而不是每次处理块都加载
+        with ProcessPoolExecutor(
+            max_workers=processor.num_processes,
+            initializer=init_chunk_worker_ai_handler,
+            initargs=(processor.ai_params,),
+        ) as executor:
             futures = []
             for i, (start, end, temp_path) in enumerate(chunks):
                 future = executor.submit(

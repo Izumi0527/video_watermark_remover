@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING, Dict, Optional
 
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtGui import QFont, QTextCursor
@@ -15,6 +16,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+if TYPE_CHECKING:
+    from ...config.styles.manager import ModernStyleManager
+
 
 class LogPanel(QWidget):
     """
@@ -22,12 +26,48 @@ class LogPanel(QWidget):
     显示实时处理日志和状态信息
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, style_manager: Optional["ModernStyleManager"] = None):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._max_lines = 1000  # 最大显示行数
+        self._style_manager = style_manager
         self._init_ui()
         self._setup_log_handler()
+
+    def set_style_manager(self, style_manager: "ModernStyleManager") -> None:
+        """
+        设置样式管理器引用
+
+        Args:
+            style_manager: ModernStyleManager 实例
+        """
+        self._style_manager = style_manager
+
+    def _get_log_colors(self) -> Dict[str, str]:
+        """
+        获取当前主题的日志颜色
+
+        Returns:
+            日志颜色映射字典
+        """
+        if self._style_manager is not None:
+            colors = self._style_manager.colors
+            return {
+                "DEBUG": colors.get("log_debug", "#888888"),
+                "INFO": colors.get("log_info", colors.get("text_primary", "#FFFFFF")),
+                "WARNING": colors.get("log_warning", "#FFAA00"),
+                "ERROR": colors.get("log_error", "#FF4444"),
+                "TIMESTAMP": colors.get("log_timestamp", "#888888"),
+            }
+        else:
+            # 默认颜色（深色主题）
+            return {
+                "DEBUG": "#888888",
+                "INFO": "#FFFFFF",
+                "WARNING": "#FFAA00",
+                "ERROR": "#FF4444",
+                "TIMESTAMP": "#888888",
+            }
 
     def _init_ui(self):
         """初始化用户界面"""
@@ -143,29 +183,17 @@ class LogPanel(QWidget):
         """添加日志消息"""
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # 根据日志级别设置颜色
-        # INFO 使用 None 以跟随主题默认字体颜色，解决亮色模式下不可见的问题
-        color_map = {
-            "DEBUG": "#888888",
-            "INFO": None,
-            "WARNING": "#ffaa00",
-            "ERROR": "#ff4444",
-        }
-
-        color = color_map.get(level)
+        # 获取当前主题的日志颜色
+        log_colors = self._get_log_colors()
+        timestamp_color = log_colors.get("TIMESTAMP", "#888888")
+        level_color = log_colors.get(level, log_colors.get("INFO"))
 
         # 格式化消息
-        formatted_message = f'<span style="color: #888888">[{timestamp}]</span> '
-
-        if color:
-            formatted_message += (
-                f'<span style="color: {color}; font-weight: bold">[{level}]</span> '
-            )
-            formatted_message += f'<span style="color: {color}">{message}</span>'
-        else:
-            # 无特定颜色（如 INFO），使用默认字体颜色（亮色模式为黑，暗色模式为白）
-            formatted_message += f'<span style="font-weight: bold">[{level}]</span> '
-            formatted_message += f"<span>{message}</span>"
+        formatted_message = f'<span style="color: {timestamp_color}">[{timestamp}]</span> '
+        formatted_message += (
+            f'<span style="color: {level_color}; font-weight: bold">[{level}]</span> '
+        )
+        formatted_message += f'<span style="color: {level_color}">{message}</span>'
 
         # 添加到文本区域
         cursor = self.log_text_edit.textCursor()

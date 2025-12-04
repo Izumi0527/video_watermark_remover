@@ -66,16 +66,15 @@ class BatchUIComponents:
         buttons["clear_queue"] = clear_queue_btn
         control_layout.addWidget(clear_queue_btn)
 
-        # 开始处理按钮（带样式）
+        # 开始处理按钮（使用全局样式）
         start_batch_btn = QPushButton("开始批量处理")
-        start_batch_btn.setObjectName("success")
-        start_batch_btn.setStyleSheet(BatchUIComponents.get_success_button_style())
+        start_batch_btn.setObjectName("btn_success")
         buttons["start_batch"] = start_batch_btn
         control_layout.addWidget(start_batch_btn)
 
         # 停止处理按钮
         stop_batch_btn = QPushButton("停止处理")
-        stop_batch_btn.setObjectName("danger")
+        stop_batch_btn.setObjectName("btn_danger")
         stop_batch_btn.setEnabled(False)
         buttons["stop_batch"] = stop_batch_btn
         control_layout.addWidget(stop_batch_btn)
@@ -99,7 +98,7 @@ class BatchUIComponents:
         queue_layout.addWidget(file_list)
 
         queue_info_label = QLabel("队列为空")
-        queue_info_label.setStyleSheet("color: #666; font-style: italic;")
+        queue_info_label.setObjectName("queue_info_label")
         queue_layout.addWidget(queue_info_label)
 
         return queue_group, file_list, queue_info_label
@@ -121,41 +120,31 @@ class BatchUIComponents:
 
         # 总文件数
         total_label = QLabel("总计: 0")
-        total_label.setStyleSheet(
-            "font-weight: bold; padding: 5px; background-color: #E3F2FD; border-radius: 3px;"
-        )
+        total_label.setObjectName("batch_stat_total")
         progress_components["total_label"] = total_label
         stats_layout.addWidget(total_label)
 
         # 成功数
         success_label = QLabel("✅ 成功: 0")
-        success_label.setStyleSheet(
-            "font-weight: bold; padding: 5px; background-color: #E8F5E9; border-radius: 3px;"
-        )
+        success_label.setObjectName("batch_stat_success")
         progress_components["success_label"] = success_label
         stats_layout.addWidget(success_label)
 
         # 失败数
         failed_label = QLabel("❌ 失败: 0")
-        failed_label.setStyleSheet(
-            "font-weight: bold; padding: 5px; background-color: #FFEBEE; border-radius: 3px;"
-        )
+        failed_label.setObjectName("batch_stat_failed")
         progress_components["failed_label"] = failed_label
         stats_layout.addWidget(failed_label)
 
         # 等待数
         waiting_label = QLabel("⏳ 等待: 0")
-        waiting_label.setStyleSheet(
-            "font-weight: bold; padding: 5px; background-color: #FFF9C4; border-radius: 3px;"
-        )
+        waiting_label.setObjectName("batch_stat_waiting")
         progress_components["waiting_label"] = waiting_label
         stats_layout.addWidget(waiting_label)
 
         # 并发处理数 (Phase 4 Stage 1.4)
         concurrent_label = QLabel("🔄 处理中: 0")
-        concurrent_label.setStyleSheet(
-            "font-weight: bold; padding: 5px; background-color: #F3E5F5; border-radius: 3px;"
-        )
+        concurrent_label.setObjectName("batch_stat_concurrent")
         progress_components["concurrent_label"] = concurrent_label
         stats_layout.addWidget(concurrent_label)
 
@@ -164,28 +153,15 @@ class BatchUIComponents:
 
         # 当前文件信息
         current_file_label = QLabel("等待开始处理...")
-        current_file_label.setStyleSheet("font-size: 12px; color: #666; margin-top: 10px;")
+        current_file_label.setObjectName("current_file_label")
         progress_components["current_file_label"] = current_file_label
         progress_layout.addWidget(current_file_label)
 
         # 当前文件进度条
         current_progress_bar = QProgressBar()
+        current_progress_bar.setObjectName("current_progress_bar")
         current_progress_bar.setRange(0, 100)
         current_progress_bar.setValue(0)
-        current_progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #2196F3;
-                border-radius: 3px;
-            }
-        """
-        )
         progress_components["current_progress_bar"] = current_progress_bar
         progress_layout.addWidget(current_progress_bar)
 
@@ -193,31 +169,16 @@ class BatchUIComponents:
         overall_layout = QHBoxLayout()
         overall_layout.addWidget(QLabel("总体进度:"))
         overall_progress_bar = QProgressBar()
+        overall_progress_bar.setObjectName("overall_progress_bar")
         overall_progress_bar.setRange(0, 100)
         overall_progress_bar.setValue(0)
-        overall_progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """
-        )
         progress_components["overall_progress_bar"] = overall_progress_bar
         overall_layout.addWidget(overall_progress_bar)
         progress_layout.addLayout(overall_layout)
 
         # 状态标签
         status_label = QLabel("准备就绪")
-        status_label.setStyleSheet(
-            "padding: 8px; background-color: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; font-size: 11px;"
-        )
+        status_label.setObjectName("batch_status_label")
         progress_components["status_label"] = status_label
         progress_layout.addWidget(status_label)
 
@@ -237,53 +198,3 @@ class BatchUIComponents:
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         return layout, splitter
-
-    @staticmethod
-    def get_success_button_style() -> str:
-        """
-        获取成功按钮样式
-
-        Returns:
-            CSS样式字符串
-        """
-        return """
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """
-
-    @staticmethod
-    def get_danger_button_style() -> str:
-        """
-        获取危险按钮样式
-
-        Returns:
-            CSS样式字符串
-        """
-        return """
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """

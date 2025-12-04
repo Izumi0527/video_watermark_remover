@@ -288,7 +288,7 @@ ERROR - 处理启动失败: 'PreviewPanel' object has no attribute 'update_previ
 ---
 
 **测试报告创建时间**: 2025-11-15
-**测试者**: 
+**测试者**:
 **版本**: v1.0
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

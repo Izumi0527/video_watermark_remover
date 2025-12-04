@@ -10,10 +10,13 @@
 
 """
 
-from typing import Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
 from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtGui import QMouseEvent, QPixmap
+
+if TYPE_CHECKING:
+    from .coordinate_converter import CoordinateConverter
 
 
 class SelectionEventHandler:
@@ -31,6 +34,18 @@ class SelectionEventHandler:
         self.on_selection_changed: Optional[Callable] = None
         self.on_cursor_change: Optional[Callable] = None
         self.on_update_display: Optional[Callable] = None
+
+        # 坐标转换器引用（由外部设置）
+        self._coordinate_converter: Optional["CoordinateConverter"] = None
+
+    def set_coordinate_converter(self, converter: "CoordinateConverter") -> None:
+        """
+        设置坐标转换器引用
+
+        Args:
+            converter: CoordinateConverter 实例
+        """
+        self._coordinate_converter = converter
 
     def set_callbacks(
         self,
@@ -119,7 +134,7 @@ class SelectionEventHandler:
 
         Args:
             event: 鼠标事件
-            scale_factor: 缩放因子
+            scale_factor: 缩放因子（仅在未设置 coordinate_converter 时使用）
 
         Returns:
             是否处理了事件
@@ -135,10 +150,18 @@ class SelectionEventHandler:
         # 如果选择区域足够大，添加到选择列表
         if self.current_selection.width() > 5 and self.current_selection.height() > 5:
             # 转换到原图坐标系
-            from .coordinate_converter import CoordinateConverter
+            if self._coordinate_converter is not None:
+                # 使用已设置的坐标转换器（推荐）
+                original_rect = self._coordinate_converter.scaled_to_original_rect(
+                    self.current_selection
+                )
+            else:
+                # 兼容旧代码：创建临时转换器
+                from .coordinate_converter import CoordinateConverter
 
-            converter = CoordinateConverter(scale_factor)
-            original_rect = converter.scaled_to_original_rect(self.current_selection)
+                converter = CoordinateConverter(scale_factor)
+                original_rect = converter.scaled_to_original_rect(self.current_selection)
+
             self.selection_areas.append(original_rect)
 
             # 发送选择变化信号

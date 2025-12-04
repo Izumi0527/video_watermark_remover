@@ -8,10 +8,11 @@ from multiprocessing import synchronize
 from typing import Any, Optional, Tuple, cast
 
 import cv2
+import psutil  # type: ignore[import-untyped]
 from PyQt6.QtCore import QTimer
 
 from .audio_tasks import async_audio_extractor
-from .frame_processor import frame_processor_worker
+from .frame_processor import frame_processor_worker, init_worker_ai_handler
 from .frame_reader import frame_reader_worker
 from .frame_writer import frame_writer_worker
 
@@ -23,7 +24,7 @@ def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_que
 
 def _calculate_queue_sizes(processor) -> Tuple[int, int]:
     try:
-        import psutil  # type: ignore[import-untyped]
+        import psutil
 
         available_mb = psutil.virtual_memory().available / (1024 * 1024)
 
@@ -84,7 +85,7 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
 
     try:
         processor.status.emit("📊 分析视频信息...")
-        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
+        cap = cv2.VideoCapture(processor.input_path)
         if not cap.isOpened():
             from ..exceptions import VideoReadError
 
@@ -154,7 +155,13 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
                 section: dict(processor.config[section]) for section in processor.config.sections()
             }
 
-        processor._processor_pool = ProcessPoolExecutor(max_workers=processor.num_processes)
+        # 使用 initializer 模式：进程池创建时预加载 AI 模型
+        # 这样每个进程只加载一次模型，而不是每次处理任务都加载
+        processor._processor_pool = ProcessPoolExecutor(
+            max_workers=processor.num_processes,
+            initializer=init_worker_ai_handler,
+            initargs=(processor.ai_params,),
+        )
         processor_futures = []
 
         for i in range(processor.num_processes):

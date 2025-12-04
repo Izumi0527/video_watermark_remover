@@ -7,6 +7,7 @@ AI处理协调器 - 主模块
 2. 模型加载协调
 3. 完整的处理流程管理
 4. 检测器和修复器的集成
+5. 预处理和后处理管道
 
 """
 
@@ -20,6 +21,7 @@ import torch
 
 from .dl_inpainter import DeepLearningInpainter
 from .image_inpainter import ImageInpainter
+from .image_processor import apply_postprocessing, apply_preprocessing
 
 # 导入拆分出的检测和修复模块
 from .yolo_detector import YOLOWatermarkDetector
@@ -214,12 +216,41 @@ class AIHandler:
                 "inpainting_method": None,
                 "watermark_areas_found": 0,
                 "processing_time": 0,
+                "preprocessing_applied": [],
+                "postprocessing_applied": [],
             }
 
             start_time = time.time()
             mask = None
 
+            # 保存原始帧（用于后处理混合）
+            original_frame = frame.copy()
+
+            # ====================================================================
+            # 步骤0: 预处理（在检测前应用）
+            # ====================================================================
+            if any([
+                self.enable_blur_preprocess,
+                self.enable_denoise_preprocess,
+                self.enable_sharp_preprocess,
+            ]):
+                frame = apply_preprocessing(
+                    frame,
+                    enable_blur=self.enable_blur_preprocess,
+                    enable_denoise=self.enable_denoise_preprocess,
+                    enable_sharpen=self.enable_sharp_preprocess,
+                )
+                if self.enable_blur_preprocess:
+                    processing_info["preprocessing_applied"].append("blur")
+                if self.enable_denoise_preprocess:
+                    processing_info["preprocessing_applied"].append("denoise")
+                if self.enable_sharp_preprocess:
+                    processing_info["preprocessing_applied"].append("sharpen")
+                self.logger.debug(f"Applied preprocessing: {processing_info['preprocessing_applied']}")
+
+            # ====================================================================
             # 步骤1: 确定水印区域
+            # ====================================================================
             if watermark_selection_params.get("user_mask") is not None:
                 # 处理用户提供的掩码（可能是区域列表或实际掩码）
                 user_mask_data = watermark_selection_params["user_mask"]
@@ -300,6 +331,30 @@ class AIHandler:
                     f"Processed frame with {len(contours)} watermark areas "
                     f"({sum(cv2.contourArea(c) for c in contours) / (frame.shape[0] * frame.shape[1]) * 100:.1f}% of image)"
                 )
+
+                # ================================================================
+                # 步骤3: 后处理（在修复后应用）
+                # ================================================================
+                if any([
+                    self.enable_smooth_postprocess,
+                    self.enable_blend_postprocess,
+                    self.enable_enhance_postprocess,
+                ]):
+                    processed_frame = apply_postprocessing(
+                        original_frame,
+                        processed_frame,
+                        mask,
+                        enable_smooth=self.enable_smooth_postprocess,
+                        enable_blend=self.enable_blend_postprocess,
+                        enable_enhance=self.enable_enhance_postprocess,
+                    )
+                    if self.enable_smooth_postprocess:
+                        processing_info["postprocessing_applied"].append("smooth")
+                    if self.enable_blend_postprocess:
+                        processing_info["postprocessing_applied"].append("blend")
+                    if self.enable_enhance_postprocess:
+                        processing_info["postprocessing_applied"].append("enhance")
+                    self.logger.debug(f"Applied postprocessing: {processing_info['postprocessing_applied']}")
 
             else:
                 # 未检测到水印或掩码为空

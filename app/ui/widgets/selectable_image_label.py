@@ -14,7 +14,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QMouseEvent, QPainter, QPaintEvent, QPen, QPixmap
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
+)
 from PyQt6.QtWidgets import QLabel
 
 from .coordinate_converter import CoordinateConverter
@@ -49,15 +59,7 @@ class SelectableImageLabel(QLabel):
         # 基本设置
         self.setMinimumSize(400, 300)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet(
-            """
-            QLabel {
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                background-color: #f9f9f9;
-            }
-        """
-        )
+        self.setObjectName("selectable_image_label")
 
         # 图像和缩放相关
         self.original_pixmap = None
@@ -76,6 +78,9 @@ class SelectableImageLabel(QLabel):
         """初始化事件处理器"""
         self.event_handler = SelectionEventHandler()
         self.coordinate_converter = CoordinateConverter()
+
+        # 设置坐标转换器引用，避免每次鼠标释放时创建新实例
+        self.event_handler.set_coordinate_converter(self.coordinate_converter)
 
         # 设置回调函数
         self.event_handler.set_callbacks(

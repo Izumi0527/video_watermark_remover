@@ -48,7 +48,8 @@ class BatchFileManager:
         )
 
         if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
-            return file_dialog.selectedFiles()
+            selected_files = list(file_dialog.selectedFiles())
+            return selected_files
         return []
 
     def add_file_to_queue(self, input_path: str) -> bool:

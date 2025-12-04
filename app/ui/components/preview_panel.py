@@ -242,7 +242,7 @@ class PreviewPanel(QWidget):
         try:
             import cv2
 
-            cap = cv2.VideoCapture(video_path)  # type: ignore[call-arg]
+            cap = cv2.VideoCapture(video_path)
 
             if cap.isOpened():
                 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -264,17 +264,10 @@ class PreviewPanel(QWidget):
 
             self.preview_area.clear()
             self.preview_area.setText(placeholder_text)
-            self.preview_area.setStyleSheet(
-                """
-                QLabel {
-                    border: 2px solid #000000;
-                    border-radius: 12px;
-                    background-color: #1a1a1a;
-                    color: #007acc;
-                    font-size: 11pt;
-                }
-            """
-            )
+            # 使用属性选择器而不是内联样式
+            self.preview_area.setProperty("state", "video")
+            self.preview_area.style().unpolish(self.preview_area)
+            self.preview_area.style().polish(self.preview_area)
             self.logger.info(f"Video placeholder shown for: {video_path}")
         except Exception as e:
             self.logger.error(f"Error showing video placeholder: {e}")
@@ -401,74 +394,36 @@ class PreviewPanel(QWidget):
                 info_text += f" | 耗时: {process_time:.2f}秒"
 
             self.comparison_info_label.setText(info_text)
-            self.comparison_info_label.setStyleSheet(
-                """
-                QLabel {
-                    background-color: #e8f5e8;
-                    border: 1px solid #4CAF50;
-                    border-radius: 5px;
-                    padding: 3px 6px;
-                    color: #4CAF50;
-                    font-weight: 600;
-                    font-size: 8pt;
-                }
-            """
-            )
         else:
             # 基本的完成信息
             self.comparison_info_label.setText("✅ 文件处理完成 - 对比效果如下")
-            self.comparison_info_label.setStyleSheet(
-                """
-                QLabel {
-                    background-color: #e8f5e8;
-                    border: 1px solid #4CAF50;
-                    border-radius: 5px;
-                    padding: 3px 6px;
-                    color: #4CAF50;
-                    font-weight: 600;
-                    font-size: 8pt;
-                }
-            """
-            )
+
+        # 使用属性选择器设置成功状态
+        self._set_comparison_state("success")
 
     def show_processing_progress(self):
         """显示处理中的进度状态"""
         self.comparison_info_label.setText("⏳ 正在处理图像，请稍候...")
-        self.comparison_info_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #fff3cd;
-                border: 1px solid #ffc107;
-                border-radius: 5px;
-                padding: 3px 6px;
-                color: #856404;
-                font-weight: 600;
-                font-size: 8pt;
-            }
-        """
-        )
+        # 使用属性选择器设置处理中状态
+        self._set_comparison_state("processing")
 
     def reset_comparison_display(self):
         """重置对比显示状态"""
         self.comparison_info_label.setText("📊 对比信息：请先处理文件")
-        self.comparison_info_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: #f0f8ff;
-                border: 1px solid #007acc;
-                border-radius: 5px;
-                padding: 3px 6px;
-                color: #007acc;
-                font-weight: 600;
-                font-size: 8pt;
-            }
-        """
-        )
+        # 使用属性选择器重置为默认状态
+        self._set_comparison_state("")
 
         # 清空处理后图像
         self.processed_image_label.clear()
         self.processed_image_label.setText("暂无文件")
         self._processed_image = None
+
+    def _set_comparison_state(self, state: str):
+        """设置对比信息标签的状态（用于样式切换）"""
+        self.comparison_info_label.setProperty("state", state)
+        # 强制刷新样式
+        self.comparison_info_label.style().unpolish(self.comparison_info_label)
+        self.comparison_info_label.style().polish(self.comparison_info_label)
 
     def switch_to_comparison_tab(self):
         """切换到对比标签页"""

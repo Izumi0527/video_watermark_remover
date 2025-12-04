@@ -10,6 +10,7 @@ AI参数构建器
 3. 转换手动选择区域为后端格式
 4. 映射前端参数名到后端参数名
 5. 构建完整的ai_params字典
+6. 参数验证与范围检查
 
 """
 
@@ -18,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from numpy.typing import NDArray
+
+from ...config.validators import get_validator
 
 
 class AIParamsBuilder:
@@ -29,6 +32,7 @@ class AIParamsBuilder:
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self._validator = get_validator()
 
     def build_from_ui(
         self,
@@ -81,7 +85,7 @@ class AIParamsBuilder:
 
     def _build_detection_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        构建检测参数
+        构建检测参数（带验证）
 
         前端参数映射：
         - detection_sensitivity (0.1-1.0) → conf_threshold
@@ -93,17 +97,20 @@ class AIParamsBuilder:
         """
         params = {}
 
-        # 检测敏感度 → YOLO置信度阈值
-        params["conf_threshold"] = advanced_params.get("detection_sensitivity", 0.5)
+        # 检测敏感度 → YOLO置信度阈值（带验证）
+        raw_sensitivity = advanced_params.get("detection_sensitivity", 0.5)
+        params["conf_threshold"] = self._validator.validate("conf_threshold", raw_sensitivity)
 
-        # 检测方法 → 设备选择
+        # 检测方法 → 设备选择（带验证）
         detection_method = advanced_params.get("detection_method", "YOLO v11s 深度学习 (推荐)")
-        params["device"] = self._map_detection_method_to_device(detection_method)
+        raw_device = self._map_detection_method_to_device(detection_method)
+        params["device"] = self._validator.validate("device", raw_device)
 
-        # 最小检测区域
-        params["min_area_pixels"] = advanced_params.get("min_detection_area", 100)
+        # 最小检测区域（带验证）
+        raw_min_area = advanced_params.get("min_detection_area", 100)
+        params["min_area_pixels"] = self._validator.validate("min_area_pixels", raw_min_area)
 
-        # 预处理选项
+        # 预处理选项（布尔值，无需验证）
         params["enable_blur_preprocess"] = advanced_params.get("enable_blur_preprocess", True)
         params["enable_sharp_preprocess"] = advanced_params.get("enable_sharp_preprocess", False)
         params["enable_denoise_preprocess"] = advanced_params.get("enable_denoise_preprocess", True)
@@ -116,7 +123,7 @@ class AIParamsBuilder:
 
     def _build_inpainting_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        构建修复参数
+        构建修复参数（带验证）
 
         前端参数映射：
         - inpainting_method (下拉框) → inpainting_algorithm
@@ -129,20 +136,25 @@ class AIParamsBuilder:
         """
         params = {}
 
-        # 修复方法
+        # 修复方法（带验证）
         inpainting_method = advanced_params.get("inpainting_method", "GPU 深度学习 U-Net (推荐)")
-        params["inpainting_algorithm"] = self._map_inpainting_method(inpainting_method)
+        raw_algorithm = self._map_inpainting_method(inpainting_method)
+        params["inpainting_algorithm"] = self._validator.validate(
+            "inpainting_algorithm", raw_algorithm
+        )
 
-        # 修复半径
-        params["inpaint_radius"] = advanced_params.get("inpainting_radius", 3)
+        # 修复半径（带验证）
+        raw_radius = advanced_params.get("inpainting_radius", 3)
+        params["inpaint_radius"] = self._validator.validate("inpaint_radius", raw_radius)
 
-        # 修复质量等级
-        params["quality_level"] = advanced_params.get("inpainting_quality", 3)
+        # 修复质量等级（带验证）
+        raw_quality = advanced_params.get("inpainting_quality", 3)
+        params["quality_level"] = self._validator.validate("quality_level", raw_quality)
 
-        # GPU加速开关
+        # GPU加速开关（布尔值，无需验证）
         params["use_gpu_inpainting"] = advanced_params.get("enable_gpu", True)
 
-        # 后处理选项
+        # 后处理选项（布尔值，无需验证）
         params["enable_smooth_postprocess"] = advanced_params.get("enable_smooth_postprocess", True)
         params["enable_blend_postprocess"] = advanced_params.get("enable_blend_postprocess", True)
         params["enable_enhance_postprocess"] = advanced_params.get(
@@ -158,7 +170,7 @@ class AIParamsBuilder:
 
     def _build_performance_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        构建性能参数
+        构建性能参数（带验证）
 
         前端参数映射：
         - thread_count (1-16) → num_processes
@@ -168,16 +180,19 @@ class AIParamsBuilder:
         """
         params = {}
 
-        # 线程/进程数量
-        params["num_processes"] = advanced_params.get("thread_count", 4)
+        # 线程/进程数量（带验证）
+        raw_processes = advanced_params.get("thread_count", 4)
+        params["num_processes"] = self._validator.validate("num_processes", raw_processes)
 
-        # GPU内存限制
-        params["gpu_memory_mb"] = advanced_params.get("gpu_memory_limit", 2048)
+        # GPU内存限制（带验证）
+        raw_gpu_memory = advanced_params.get("gpu_memory_limit", 2048)
+        params["gpu_memory_mb"] = self._validator.validate("gpu_memory_mb", raw_gpu_memory)
 
-        # 缓存大小
-        params["cache_size_mb"] = advanced_params.get("cache_size", 512)
+        # 缓存大小（带验证）
+        raw_cache = advanced_params.get("cache_size", 512)
+        params["cache_size_mb"] = self._validator.validate("cache_size_mb", raw_cache)
 
-        # 缓存开关
+        # 缓存开关（布尔值，无需验证）
         params["enable_cache"] = advanced_params.get("enable_cache", True)
 
         self.logger.debug(
@@ -189,7 +204,7 @@ class AIParamsBuilder:
 
     def _build_output_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        构建输出参数
+        构建输出参数（带验证）
 
         前端参数映射：
         - output_format → output_format
@@ -199,16 +214,19 @@ class AIParamsBuilder:
         """
         params = {}
 
-        # 输出格式
+        # 输出格式（字符串，无需范围验证）
         params["output_format"] = advanced_params.get("output_format", "保持原格式")
 
-        # 压缩质量
-        params["compression_quality"] = advanced_params.get("compression_quality", 85)
+        # 压缩质量（带验证）
+        raw_quality = advanced_params.get("compression_quality", 85)
+        params["compression_quality"] = self._validator.validate(
+            "compression_quality", raw_quality
+        )
 
-        # 文件名后缀
+        # 文件名后缀（布尔值，无需验证）
         params["add_processed_suffix"] = advanced_params.get("add_suffix", True)
 
-        # 时间戳
+        # 时间戳（布尔值，无需验证）
         params["add_timestamp"] = advanced_params.get("add_timestamp", False)
 
         self.logger.debug(

@@ -27,4 +27,4 @@ pwsh -NoProfile -Command "pytest tests -v"
 ## 说明与注意事项
 - 新增烟囱测试使用 `py_compile`，仅校验语法，不会真正导入 PyQt6/torch/cv2，适合在依赖未完全安装时提前发现编辑器可见的语法错误。
 - 健壮性测试使用 `tmp_path` 与 `monkeypatch`，不会写入真实用户目录；日志测试会在临时目录生成 `logs/watermark_remover_*.log`，pytest 结束后自动清理。
-- 若需结合 GPU/重型依赖测试，请先完整安装生产依赖并使用已有的集成/性能测试脚本（参考项目 README 与 `scripts/`）。 
+- 若需结合 GPU/重型依赖测试，请先完整安装生产依赖并使用已有的集成/性能测试脚本（参考项目 README 与 `scripts/`）。

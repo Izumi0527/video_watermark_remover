@@ -1,4 +1,5 @@
 import logging
+
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
@@ -143,7 +144,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.control_panel, 1)  # stretch=1，占据剩余空间
 
         # 3. 日志面板 (固定在底部，高度受限)
-        self.log_panel = LogPanel()
+        self.log_panel = LogPanel(style_manager=self.style_manager)
         left_layout.addWidget(self.log_panel)
 
         # 添加弹簧，确保布局紧凑，日志在底部

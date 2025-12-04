@@ -2,7 +2,7 @@ import configparser
 import logging
 import os
 from configparser import ConfigParser
-from typing import Any, Optional
+from typing import Any, Dict, MutableMapping, Optional, cast
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class ConfigManager:
     """
 
     # 兼容 Phase3 测试所需的默认值（小写 section），同时保留现有大写 section 以兼容现有代码
-    _DEFAULTS = {
+    _DEFAULTS: Dict[str, Dict[str, str]] = {
         "Paths": {
             "ffmpeg_path": "ffmpeg",
             "default_model_dir": "./models",
@@ -146,7 +146,7 @@ class ConfigManager:
         """Returns a ConfigParser object populated with default settings."""
         config = configparser.ConfigParser()
         for section, options in ConfigManager._DEFAULTS.items():
-            config[section] = options
+            config[section] = cast(MutableMapping[str, str], options)
         return config
 
     @staticmethod

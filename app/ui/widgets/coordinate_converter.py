@@ -94,7 +94,7 @@ class CoordinateConverter:
         # 计算缩放比例（保持宽高比）
         scale_x = widget_size.width() / pixmap_size.width()
         scale_y = widget_size.height() / pixmap_size.height()
-        scale_factor = min(scale_x, scale_y) * (1.0 - margin_ratio)  # 留出边距
+        scale_factor: float = float(min(scale_x, scale_y) * (1.0 - margin_ratio))  # 留出边距
 
         return max(scale_factor, 0.1)  # 最小缩放因子为0.1
 

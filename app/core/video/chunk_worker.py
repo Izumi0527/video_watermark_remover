@@ -2,11 +2,53 @@
 # mypy: ignore-errors
 import logging
 import multiprocessing
+import os
 from typing import Optional, Tuple
 
 import cv2
 
 from ..ai.ai_handler import AIHandler
+
+# ============================================================================
+# 进程池级别的模型缓存
+# 使用 initializer 模式：每个进程只加载一次模型，后续复用
+# ============================================================================
+_chunk_worker_ai_handler: Optional[AIHandler] = None
+_chunk_worker_ai_params: Optional[dict] = None
+
+
+def init_chunk_worker_ai_handler(ai_params: dict) -> None:
+    """
+    进程池初始化函数 - 每个工作进程只调用一次
+
+    在 ProcessPoolExecutor 创建时通过 initializer 参数调用，
+    避免每次处理块都重新加载模型（节省约 500MB×N 内存）
+
+    Args:
+        ai_params: AI 参数字典
+    """
+    global _chunk_worker_ai_handler, _chunk_worker_ai_params
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info(f"Initializing AI handler for chunk worker process (PID: {os.getpid()})")
+        _chunk_worker_ai_params = ai_params
+        _chunk_worker_ai_handler = AIHandler(None, ai_params)
+
+        if not _chunk_worker_ai_handler.load_models():
+            logger.error("Chunk worker process failed to load AI models during initialization")
+            _chunk_worker_ai_handler = None
+        else:
+            logger.info("Chunk worker process AI handler initialized successfully")
+
+    except Exception as e:
+        logger.error(f"Chunk worker process initialization error: {e}")
+        _chunk_worker_ai_handler = None
+
+
+def get_chunk_worker_ai_handler() -> Optional[AIHandler]:
+    """获取当前进程的 AI 处理器实例"""
+    return _chunk_worker_ai_handler
 
 
 def process_video_chunk(
@@ -37,12 +79,22 @@ def process_video_chunk(
     Returns:
         (输出路径, 成功标志, 错误信息)
     """
+    global _chunk_worker_ai_handler
     logger = logging.getLogger(__name__)
 
     try:
-        ai_handler = AIHandler(None, ai_params)
-        if not ai_handler.load_models():
-            return (None, False, "AI 模型加载失败")
+        # 优先使用进程池初始化时加载的模型
+        ai_handler = _chunk_worker_ai_handler
+
+        # 降级处理：如果初始化时未加载模型，则在此处加载（兼容旧调用方式）
+        if ai_handler is None:
+            logger.warning(f"Chunk {chunk_id}: AI handler not pre-initialized, loading now...")
+            ai_handler = AIHandler(None, ai_params)
+            if not ai_handler.load_models():
+                return (None, False, "AI 模型加载失败")
+            _chunk_worker_ai_handler = ai_handler  # 缓存供后续使用
+        else:
+            logger.info(f"Chunk {chunk_id}: Using pre-initialized AI handler")
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():

@@ -14,7 +14,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
 
     try:
         processor.status.emit("🎬 读取视频文件...")
-        cap = cv2.VideoCapture(processor.input_path)  # type: ignore[call-arg]
+        cap = cv2.VideoCapture(processor.input_path)
 
         if not cap.isOpened():
             raise VideoReadError("无法打开视频文件", details=f"文件路径: {processor.input_path}")

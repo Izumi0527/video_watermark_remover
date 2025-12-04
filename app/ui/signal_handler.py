@@ -15,6 +15,9 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # 导入视频处理线程
 from ..core.video.video_processor import VideoProcessorThread
 
+# 导入帧提取工具
+from ..core.video.frame_reader import extract_video_first_frame
+
 # 导入AI参数构建器
 from .utils.ai_params_builder import AIParamsBuilder
 
@@ -380,7 +383,7 @@ class SignalHandler(QObject):
 
     def _extract_video_first_frame(self, video_path: str):
         """
-        提取视频第一帧
+        提取视频第一帧 (委托给core层实现)
 
         Args:
             video_path: 视频文件路径
@@ -388,27 +391,7 @@ class SignalHandler(QObject):
         Returns:
             numpy.ndarray: RGB格式的第一帧图像，如果提取失败则返回None
         """
-        try:
-            import cv2
-
-            cap = cv2.VideoCapture(video_path)  # type: ignore[call-arg]
-            if cap.isOpened():
-                ret, frame = cap.read()
-                cap.release()
-                if ret:
-                    # OpenCV读取的是BGR格式，需要转换为RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    self.logger.info(f"Successfully extracted first frame from video: {video_path}")
-                    return frame_rgb
-                else:
-                    self.logger.warning(f"Failed to read first frame from video: {video_path}")
-                    return None
-            else:
-                self.logger.error(f"Failed to open video file: {video_path}")
-                return None
-        except Exception as e:
-            self.logger.error(f"Error extracting video first frame: {e}")
-            return None
+        return extract_video_first_frame(video_path)
 
     def _load_processed_result(self, output_path: str):
         """

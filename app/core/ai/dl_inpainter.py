@@ -12,7 +12,7 @@
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, cast
 
 import cv2
 import numpy as np
@@ -240,7 +240,7 @@ class DeepLearningInpainter:
             result_rgb = self._postprocess(output_tensor, frame_rgb, mask)
             result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
 
-            return result_bgr  # type: ignore[no-any-return]
+            return cast(np.ndarray, np.asarray(result_bgr))
 
         except Exception as e:
             self.logger.error(f"Error in deep learning inpainting: {e}")
