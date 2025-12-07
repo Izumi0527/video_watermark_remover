@@ -14,7 +14,7 @@
 运行方式:
 python tests/phase3_test_runner.py
 
-作者:
+作者: Izumi0527
 创建时间: 2025-09-06
 版本: v2.0 (重构版)
 """

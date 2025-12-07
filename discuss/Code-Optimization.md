@@ -849,7 +849,7 @@ class ProcessingMetrics:
 
 ---
 
-**文档作者**: Claude Code Analysis Agent
+**文档作者**: Izumi0527
 **审核状态**: 待审核
 
 ---

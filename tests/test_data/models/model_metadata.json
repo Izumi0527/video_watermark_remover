@@ -3,7 +3,7 @@
     "name": "WatermarkRemovalNet",
     "version": "2.1.0",
     "description": "深度学习水印去除模型，基于UNet架构",
-    "author": "AI Research Team",
+    "author": "Izumi0527",
     "created_date": "2024-01-15",
     "updated_date": "2024-06-20",
     "license": "MIT"
