@@ -1,6 +1,6 @@
 import logging
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
@@ -159,9 +159,11 @@ class MainWindow(QMainWindow):
         # 将控制面板放在右侧 (Index 1)
         main_splitter.addWidget(left_widget)
 
-        # 设置分割器比例 (70% 预览, 30% 控制)
-        main_splitter.setStretchFactor(0, 7)
-        main_splitter.setStretchFactor(1, 3)
+        # 保存分割器引用，用于动态调整比例
+        self.main_splitter = main_splitter
+
+        # 设置默认分割器比例 (73:27, 即 73% 预览, 27% 控制) - 普通窗口状态
+        self._apply_splitter_ratio(is_maximized=False)
 
         main_layout.addWidget(main_splitter)
 
@@ -280,12 +282,14 @@ class MainWindow(QMainWindow):
             if geometry:
                 self.restoreGeometry(geometry)
             else:
-                self.setMinimumSize(1600, 1000)
-                self.resize(1680, 1050)
+                # 放宽最小尺寸限制，支持更多屏幕分辨率
+                self.setMinimumSize(1400, 900)
+                # 增大默认窗口尺寸，适合高分辨率显示器
+                self.resize(1920, 1080)
         except Exception as e:
             self.logger.warning(f"Failed to restore window geometry: {e}")
-            self.setMinimumSize(1600, 1000)
-            self.resize(1680, 1050)
+            self.setMinimumSize(1400, 900)
+            self.resize(1920, 1080)
 
     def _restore_ui_state(self):
         """恢复UI状态"""
@@ -346,3 +350,51 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"Error closing window: {e}")
             event.accept()
+
+    def changeEvent(self, event):
+        """
+        监听窗口状态变化事件
+        根据最大化/还原状态动态调整分割器比例
+        """
+        if event.type() == QEvent.Type.WindowStateChange:
+            # 检查窗口是否最大化
+            is_maximized = self.windowState() == Qt.WindowState.WindowMaximized
+            # 延迟 50ms 执行，确保窗口尺寸已更新完成
+            QTimer.singleShot(50, lambda: self._apply_splitter_ratio(is_maximized))
+            self.logger.debug(f"Window state changed: maximized={is_maximized}")
+
+        super().changeEvent(event)
+
+    def _apply_splitter_ratio(self, is_maximized: bool) -> None:
+        """
+        根据窗口状态应用分割器比例
+
+        使用 setSizes() 直接设置像素尺寸，而不是 setStretchFactor()
+        因为 setStretchFactor() 只影响新增空间的分配，不会主动重新分配现有空间
+
+        Args:
+            is_maximized: 窗口是否最大化
+                - True: 最大化状态，使用 8:2 比例（80% 预览, 20% 控制）
+                - False: 普通状态，使用 73:27 比例（73% 预览, 27% 控制）
+        """
+        if not hasattr(self, "main_splitter") or self.main_splitter is None:
+            return
+
+        # 获取分割器的总宽度
+        total_width = self.main_splitter.width()
+        if total_width <= 0:
+            return
+
+        if is_maximized:
+            # 最大化窗口：80% 预览, 20% 控制（大屏幕预览更重要）
+            preview_width = int(total_width * 0.8)
+            control_width = total_width - preview_width
+            self.logger.debug(f"Applied maximized ratio 80:20: {preview_width}px + {control_width}px")
+        else:
+            # 普通窗口：73% 预览, 27% 控制（小窗口控制面板需要更多空间）
+            preview_width = int(total_width * 0.73)
+            control_width = total_width - preview_width
+            self.logger.debug(f"Applied normal ratio 73:27: {preview_width}px + {control_width}px")
+
+        # 使用 setSizes() 直接设置像素尺寸
+        self.main_splitter.setSizes([preview_width, control_width])

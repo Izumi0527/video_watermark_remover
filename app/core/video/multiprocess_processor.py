@@ -34,7 +34,11 @@ def _calculate_chunks(
 def _check_progress_queue(
     processor, progress_queue: mp_queues.Queue[Any], total_frames: int
 ) -> None:
+    """检查进度队列并发射详细进度信息"""
     try:
+        aggregated_current = 0  # 聚合当前已处理帧数
+        chunk_size = total_frames // processor.num_processes if processor.num_processes > 0 else 0
+
         while not progress_queue.empty():
             progress_data = progress_queue.get_nowait()
 
@@ -51,9 +55,24 @@ def _check_progress_queue(
                 + 10
             )
 
+            # 计算聚合的当前帧数（基于块ID和块内进度）
+            aggregated_current = (chunk_id * chunk_size) + current
+
             processor.progress.emit(overall_progress)
             processor.status.emit(
                 f"🎨 处理块 {chunk_id + 1}/{processor.num_processes}: {current}/{total} 帧"
+            )
+
+        # 发射详细进度信息（帧进度、处理速度、ETA等）
+        if aggregated_current > 0:
+            processor._emit_detailed_progress(
+                phase="processing_frames",
+                current_frame=aggregated_current,
+                total_frames=total_frames,
+                additional_info={
+                    "mode": "multiprocess",
+                    "num_processes": processor.num_processes,
+                },
             )
 
     except Exception as e:  # noqa: BLE001
@@ -129,6 +148,9 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         processor.logger.info(f"Video info: {width}x{height}, {fps} fps, {total_frames} frames")
         processor.status.emit(f"🚀 使用 {processor.num_processes} 个进程并行处理 {total_frames} 帧")
 
+        # 发射初始详细进度（处理开始）
+        processor._emit_detailed_progress("processing_frames", 0, total_frames)
+
         chunks = _calculate_chunks(processor, total_frames, processor.num_processes)
         temp_files = [chunk[2] for chunk in chunks]
 
@@ -190,12 +212,22 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         processor.status.emit("🔗 正在合并视频块...")
         processor.progress.emit(95)
 
+        # 发射合并视频块阶段进度
+        processor._emit_detailed_progress(
+            "merging_audio", 0, 1, {"sub_phase": "merging_chunks"}
+        )
+
         temp_merged_path = processor.output_path.replace(".", "_temp_merged.")
         _merge_video_chunks(processor, chunk_paths, temp_merged_path)
 
         if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
             processor.status.emit("🎵 正在合并原始音频...")
             processor.progress.emit(97)
+
+            # 发射音频合并阶段进度
+            processor._emit_detailed_progress(
+                "merging_audio", 0, 1, {"sub_phase": "merging_audio"}
+            )
 
             audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
                 original_video_path=processor.input_path,
@@ -220,6 +252,10 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
 
         processor.progress.emit(100)
         processor.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")
+
+        # 发射完成阶段进度
+        processor._emit_detailed_progress("completed", total_frames, total_frames)
+
         processor.logger.info(f"Multiprocess video processing completed: {processor.output_path}")
         processor.finished.emit(processor.output_path)
 

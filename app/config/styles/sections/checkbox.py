@@ -1,8 +1,22 @@
 """复选框样式片段。"""
 
+import os
+from pathlib import Path
+
+
+def _get_checkbox_icon_path() -> str:
+    """获取勾选图标的绝对路径（Qt样式表格式）."""
+    # 从当前文件位置计算图标路径
+    current_dir = Path(__file__).parent
+    icon_path = current_dir.parent.parent.parent / "assets" / "icons" / "checkbox_checked.svg"
+    # Qt 样式表需要使用正斜杠路径格式
+    return icon_path.as_posix()
+
 
 def checkbox_styles(colors: dict) -> str:
     """复选框样式."""
+    icon_path = _get_checkbox_icon_path()
+
     return f"""
     QCheckBox {{
         color: {colors['text_primary']};
@@ -21,7 +35,7 @@ def checkbox_styles(colors: dict) -> str:
     QCheckBox::indicator:checked {{
         background-color: {colors['primary']};
         border-color: {colors['primary']};
-        image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEzLjUgNEw2IDExLjUgMi41IDgiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Rya2UtLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
+        image: url({icon_path});
     }}
 
     QCheckBox::indicator:hover {{ border-color: {colors['primary']}; }}

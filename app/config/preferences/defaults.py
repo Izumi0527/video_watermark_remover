@@ -9,9 +9,9 @@ class PreferencesDefaults:
     DEFAULT_PREFERENCES = {
         "ui": {
             "theme": "dark",
-            "window_geometry": [100, 100, 1200, 800],
+            "window_geometry": [100, 100, 1920, 1080],  # 同步更新为更大的默认窗口
             "window_maximized": False,
-            "splitter_sizes": [400, 400],
+            "splitter_sizes": [550, 450],  # 55:45 比例（普通窗口默认）
             "active_tab": 0,
         },
         "processing": {

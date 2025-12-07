@@ -56,18 +56,34 @@ def _calculate_queue_sizes(processor) -> Tuple[int, int]:
 def _check_pipeline_progress(
     processor, progress_queue: mp_queues.Queue[Any], total_frames: int
 ) -> None:
+    """检查流水线进度并发射详细进度信息"""
     try:
+        latest_written = 0  # 跟踪最新写入帧数
+
         while not progress_queue.empty():
             progress_data = progress_queue.get_nowait()
 
             if "written_frames" in progress_data:
                 written = progress_data["written_frames"]
+                latest_written = max(latest_written, written)  # 更新最新写入帧数
                 progress_pct = int((written / total_frames) * 95) + 5
                 processor.progress.emit(progress_pct)
                 processor.status.emit(f"💾 写入进度: {written}/{total_frames} 帧")
 
             elif "worker_id" in progress_data:
                 pass
+
+        # 发射详细进度信息（帧进度、处理速度、ETA等）
+        if latest_written > 0:
+            processor._emit_detailed_progress(
+                phase="processing_frames",
+                current_frame=latest_written,
+                total_frames=total_frames,
+                additional_info={
+                    "mode": "pipeline",
+                    "num_processes": processor.num_processes,
+                },
+            )
 
     except Exception as e:  # noqa: BLE001
         processor.logger.warning(f"Pipeline progress polling error: {e}")
@@ -100,6 +116,9 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
 
         processor.logger.info(f"Video info: {width}x{height}, {fps} fps, {total_frames} frames")
         processor.status.emit(f"🚀 使用流水线模式处理 (读取 → {processor.num_processes}进程 → 写入)")
+
+        # 发射初始详细进度（处理开始）
+        processor._emit_detailed_progress("processing_frames", 0, total_frames)
 
         manager = multiprocessing.Manager()
         frame_queue_size, result_queue_size = _calculate_queue_sizes(processor)
@@ -238,6 +257,9 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
             processor.status.emit("🎵 正在合并原始音频...")
             processor.progress.emit(95)
 
+            # 发射音频合并阶段进度
+            processor._emit_detailed_progress("merging_audio", 0, 1)
+
             audio_timeout = max(10, total_frames / 100)
             audio_source = processor.input_path
 
@@ -280,6 +302,10 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
 
         processor.progress.emit(100)
         processor.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
+
+        # 发射完成阶段进度
+        processor._emit_detailed_progress("completed", total_frames, total_frames)
+
         processor.logger.info(f"Pipeline video processing completed: {processor.output_path}")
         processor.finished.emit(processor.output_path)
 
