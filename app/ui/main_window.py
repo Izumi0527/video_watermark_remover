@@ -1,6 +1,6 @@
 import logging
 
-from PyQt6.QtCore import Qt, QEvent, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
@@ -238,6 +238,10 @@ class MainWindow(QMainWindow):
         self.file_panel.auto_mode_changed.connect(self.signal_handler.handle_auto_mode_changed)
         self.file_panel.manual_mode_changed.connect(self.signal_handler.handle_manual_mode_changed)
 
+        # 文件队列操作信号 -> SignalHandler
+        self.file_panel.queue_clear_requested.connect(self.signal_handler.handle_queue_clear)
+        self.file_panel.file_remove_requested.connect(self.signal_handler.handle_file_remove)
+
         # 预览面板信号 -> SignalHandler
         self.preview_panel.manual_selection_changed.connect(
             self.signal_handler.handle_manual_selection_changed
@@ -249,9 +253,6 @@ class MainWindow(QMainWindow):
         )
         self.control_panel.stop_processing_requested.connect(
             self.signal_handler.handle_stop_processing
-        )
-        self.control_panel.batch_processing_requested.connect(
-            self.signal_handler.handle_batch_processing
         )
 
         # SignalHandler 内部信号 -> UI 组件
@@ -389,7 +390,9 @@ class MainWindow(QMainWindow):
             # 最大化窗口：80% 预览, 20% 控制（大屏幕预览更重要）
             preview_width = int(total_width * 0.8)
             control_width = total_width - preview_width
-            self.logger.debug(f"Applied maximized ratio 80:20: {preview_width}px + {control_width}px")
+            self.logger.debug(
+                f"Applied maximized ratio 80:20: {preview_width}px + {control_width}px"
+            )
         else:
             # 普通窗口：73% 预览, 27% 控制（小窗口控制面板需要更多空间）
             preview_width = int(total_width * 0.73)

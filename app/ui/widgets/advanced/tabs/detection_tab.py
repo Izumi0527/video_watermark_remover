@@ -50,9 +50,9 @@ class DetectionParametersTab:
         parent_widget.detection_method_combo = QComboBox()
         parent_widget.detection_method_combo.addItems(
             [
-                "YOLO v11s 深度学习 (推荐)",
-                "YOLO v11s GPU 加速",
-                "YOLO v11s CPU 模式",
+                "YOLO v11x 深度学习auto (推荐)",
+                "YOLO v11x GPU 加速",
+                "YOLO v11x CPU 模式",
             ]
         )
         method_layout.addRow("检测方法:", parent_widget.detection_method_combo)

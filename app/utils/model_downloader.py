@@ -122,10 +122,10 @@ class ModelDownloader:
         Returns:
             延迟秒数
         """
-        delay = self.base_delay * (2**attempt)
+        delay: float = self.base_delay * (2**attempt)
         return min(delay, self.max_delay)
 
-    def download_model(
+    def download_model(  # noqa: C901
         self, model_key: str, force: bool = False, progress_callback: Optional[Callable] = None
     ) -> Optional[Path]:
         """
@@ -169,7 +169,9 @@ class ModelDownloader:
             try:
                 if attempt > 0:
                     delay = self._calculate_backoff_delay(attempt - 1)
-                    self.logger.info(f"  Retry {attempt}/{self.max_retries} after {delay:.1f}s delay...")
+                    self.logger.info(
+                        f"  Retry {attempt}/{self.max_retries} after {delay:.1f}s delay..."
+                    )
                     time.sleep(delay)
 
                 # 执行单次下载尝试
@@ -234,7 +236,9 @@ class ModelDownloader:
             progress_bar = DownloadProgressBar(expected_size_mb * 1024 * 1024)
 
             # 下载文件
-            urllib.request.urlretrieve(url, target_path, reporthook=progress_bar.update)
+            urllib.request.urlretrieve(
+                url, target_path, reporthook=progress_bar.update
+            )  # nosec B310
 
             print()  # 换行
             self.logger.info(f"✅ Downloaded successfully: {target_path}")

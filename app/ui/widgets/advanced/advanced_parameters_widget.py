@@ -12,6 +12,7 @@
 
 """
 
+import logging
 from typing import Any, Dict, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -48,6 +49,7 @@ class AdvancedParametersWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
         self.parameters = {}
         self.preferences = None
 
@@ -84,7 +86,7 @@ class AdvancedParametersWidget(QWidget):
     def _init_ui(self):
         """初始化界面"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(0, 0, 0, 0)  # 统一间距，与其他面板保持一致
 
         # 创建滚动区域
         scroll_area = QScrollArea()
@@ -400,15 +402,15 @@ class AdvancedParametersWidget(QWidget):
                 self.add_suffix_check.toggled.disconnect(self._on_parameter_changed)
             if self.add_timestamp_check:
                 self.add_timestamp_check.toggled.disconnect(self._on_parameter_changed)
-        except Exception:
+        except Exception as e:
             # 若部分信号未连接，不影响整体断开流程
-            pass
+            self.logger.debug(f"Signal disconnect warning: {e}")
 
     def reset_to_defaults(self):
         """重置为默认值"""
         default_params = {
             "detection_sensitivity": 0.5,
-            "detection_method": "YOLO v11s 深度学习 (推荐)",
+            "detection_method": "YOLO v11x 深度学习auto (推荐)",
             "min_detection_area": 100,
             "enable_blur_preprocess": True,
             "enable_sharp_preprocess": False,

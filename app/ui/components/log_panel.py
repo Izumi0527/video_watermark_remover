@@ -105,6 +105,7 @@ class LogPanel(QWidget):
         self.log_level_combo = QComboBox()
         self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
         self.log_level_combo.setCurrentText("INFO")
+        self.log_level_combo.setFixedWidth(70)  # 固定宽度为70px，匹配按钮实际宽度
         self.log_level_combo.currentTextChanged.connect(self._on_log_level_changed)
         controls_layout.addWidget(self.log_level_combo)
 

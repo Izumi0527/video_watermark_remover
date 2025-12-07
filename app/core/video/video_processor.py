@@ -129,6 +129,13 @@ class VideoProcessorThread(QThread):
                 self._emit_detailed_progress("loading_models", 1, 1)
                 self.status.emit("🤖 AI 模型加载完成")
             else:
+                # 🔧 检查并更新设备设置（支持GPU/CPU动态切换）
+                new_device = self.ai_params.get("device", "auto")
+                if new_device != self.ai_handler.device_preference:
+                    self.logger.info(
+                        f"Updating device from '{self.ai_handler.device_preference}' to '{new_device}'"
+                    )
+                    self.ai_handler.update_device(new_device)
                 self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
 
             file_ext = os.path.splitext(self.input_path)[1].lower()

@@ -38,7 +38,7 @@ class AIHandler:
         self.config = config
         self.ai_params = ai_params or {}  # 默认空字典
 
-        self.device = None
+        self.device: str = "cpu"  # 设备类型：'cuda'或'cpu'，初始化为cpu
         self.torch_device = None
 
         # 从ai_params提取参数（使用默认值）
@@ -110,26 +110,71 @@ class AIHandler:
             self.use_gpu_inpainting = False
             self.logger.info("CPU mode forced by user")
         else:
-            # 自动模式：根据use_gpu_inpainting和硬件情况决定
-            if self.use_gpu_inpainting and cuda_available:
-                # 使用 GPU 深度学习
+            # 自动模式：优先使用GPU（如果可用）
+            if cuda_available:
+                # 检测到GPU，使用GPU加速
                 self.device = "cuda"
                 self.torch_device = torch.device("cuda")
                 gpu_name = torch.cuda.get_device_name(0)
-                self.logger.info(f"GPU acceleration enabled: {gpu_name}")
+                self.logger.info(f"GPU acceleration enabled (auto mode): {gpu_name}")
             else:
-                # 使用 CPU
+                # 没有GPU，使用CPU
                 self.device = "cpu"
                 self.torch_device = torch.device("cpu")
+                self.logger.info("CPU mode (auto mode, no GPU available)")
 
-                if self.use_gpu_inpainting and not cuda_available:
+                # GPU不可用时，自动禁用GPU修复
+                if self.use_gpu_inpainting:
                     self.logger.warning("GPU inpainting requested but CUDA not available")
                     self.logger.warning("Falling back to OpenCV CPU inpainting")
-                    self.use_gpu_inpainting = False  # 自动降级
+                    self.use_gpu_inpainting = False
 
         self.logger.info(
             f"AIHandler: Device set to '{self.device}' (preference: '{self.device_preference}')"
         )
+
+    def update_device(self, new_device: str) -> None:
+        """
+        动态更新设备设置（支持运行时切换GPU/CPU）
+
+        Args:
+            new_device: 新的设备偏好 ("cuda", "cpu", "auto")
+        """
+        if new_device == self.device_preference:
+            self.logger.debug(f"Device preference unchanged: {new_device}")
+            return
+
+        old_device = self.device
+        self.device_preference = new_device
+        self._setup_device()
+
+        # 同步更新检测器的设备
+        if self.watermark_detector is not None:
+            self.watermark_detector.device = self.device
+            # 如果模型已加载，需要将模型移动到新设备
+            if self.watermark_detector.model is not None:
+                try:
+                    self.watermark_detector.model.to(self.device)
+                    self.logger.info(
+                        f"✅ Device updated: {old_device} → {self.device} (YOLO model moved)"
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to move YOLO model to {self.device}: {e}")
+            else:
+                self.logger.info(f"✅ Device updated: {old_device} → {self.device}")
+
+        # 如果切换到GPU且启用GPU修复，需要重新加载深度学习修复器
+        if self.device == "cuda" and self.use_gpu_inpainting:
+            if self.dl_inpainter is None:
+                try:
+                    self.logger.info("Loading GPU deep learning inpainter after device switch...")
+                    self.dl_inpainter = DeepLearningInpainter(
+                        config=self.config, device=self.torch_device
+                    )
+                    self.dl_inpainter.load_model()
+                except Exception as e:
+                    self.logger.error(f"Failed to load DL inpainter: {e}")
+                    self.use_gpu_inpainting = False
 
     def load_models(self) -> bool:
         """
@@ -229,11 +274,13 @@ class AIHandler:
             # ====================================================================
             # 步骤0: 预处理（在检测前应用）
             # ====================================================================
-            if any([
-                self.enable_blur_preprocess,
-                self.enable_denoise_preprocess,
-                self.enable_sharp_preprocess,
-            ]):
+            if any(
+                [
+                    self.enable_blur_preprocess,
+                    self.enable_denoise_preprocess,
+                    self.enable_sharp_preprocess,
+                ]
+            ):
                 frame = apply_preprocessing(
                     frame,
                     enable_blur=self.enable_blur_preprocess,
@@ -246,7 +293,9 @@ class AIHandler:
                     processing_info["preprocessing_applied"].append("denoise")
                 if self.enable_sharp_preprocess:
                     processing_info["preprocessing_applied"].append("sharpen")
-                self.logger.debug(f"Applied preprocessing: {processing_info['preprocessing_applied']}")
+                self.logger.debug(
+                    f"Applied preprocessing: {processing_info['preprocessing_applied']}"
+                )
 
             # ====================================================================
             # 步骤1: 确定水印区域
@@ -335,11 +384,13 @@ class AIHandler:
                 # ================================================================
                 # 步骤3: 后处理（在修复后应用）
                 # ================================================================
-                if any([
-                    self.enable_smooth_postprocess,
-                    self.enable_blend_postprocess,
-                    self.enable_enhance_postprocess,
-                ]):
+                if any(
+                    [
+                        self.enable_smooth_postprocess,
+                        self.enable_blend_postprocess,
+                        self.enable_enhance_postprocess,
+                    ]
+                ):
                     processed_frame = apply_postprocessing(
                         original_frame,
                         processed_frame,
@@ -354,7 +405,9 @@ class AIHandler:
                         processing_info["postprocessing_applied"].append("blend")
                     if self.enable_enhance_postprocess:
                         processing_info["postprocessing_applied"].append("enhance")
-                    self.logger.debug(f"Applied postprocessing: {processing_info['postprocessing_applied']}")
+                    self.logger.debug(
+                        f"Applied postprocessing: {processing_info['postprocessing_applied']}"
+                    )
 
             else:
                 # 未检测到水印或掩码为空

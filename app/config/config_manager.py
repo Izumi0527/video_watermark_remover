@@ -110,6 +110,20 @@ class ConfigManager:
         },
         "Advanced": {},
         "advanced": {},
+        "Batch": {
+            "max_concurrent_files": "1",
+            "auto_retry_failed": "yes",
+            "max_retry_count": "3",
+            "delete_temp_files": "yes",
+            "show_progress_details": "yes",
+        },
+        "batch": {
+            "max_concurrent_files": "1",
+            "auto_retry_failed": "yes",
+            "max_retry_count": "3",
+            "delete_temp_files": "yes",
+            "show_progress_details": "yes",
+        },
     }
 
     @staticmethod
@@ -217,6 +231,47 @@ class ConfigManager:
         if value in {"false", "no", "0", "n", "off"}:
             return False
         return default
+
+    # ===================== 批处理配置 API =====================
+
+    @staticmethod
+    def get_batch_max_concurrent(config: ConfigParser, default: int = 1) -> int:
+        """
+        获取批处理最大并发文件数，限制在1-8之间。
+        """
+        raw = ConfigManager._get_option_with_fallback(
+            config, ["batch", "Batch"], "max_concurrent_files"
+        )
+        try:
+            value = int(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+        return max(1, min(value, 8))
+
+    @staticmethod
+    def get_batch_auto_retry(config: ConfigParser, default: bool = True) -> bool:
+        """
+        是否自动重试失败的文件。
+        """
+        raw = ConfigManager._get_option_with_fallback(
+            config, ["batch", "Batch"], "auto_retry_failed"
+        )
+        if raw is None:
+            return default
+        value = raw.strip().lower()
+        return value in {"true", "yes", "1", "y", "on"}
+
+    @staticmethod
+    def get_batch_max_retry_count(config: ConfigParser, default: int = 3) -> int:
+        """
+        获取失败重试次数，限制在0-10之间。
+        """
+        raw = ConfigManager._get_option_with_fallback(config, ["batch", "Batch"], "max_retry_count")
+        try:
+            value = int(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+        return max(0, min(value, 10))
 
     @staticmethod
     def _create_default_config(config_path: str) -> None:

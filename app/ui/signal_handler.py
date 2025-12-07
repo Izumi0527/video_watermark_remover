@@ -12,14 +12,21 @@ from typing import Any, List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-# 导入视频处理线程
-from ..core.video.video_processor import VideoProcessorThread
-
 # 导入帧提取工具
 from ..core.video.frame_reader import extract_video_first_frame
 
+# 导入视频处理线程
+from ..core.video.video_processor import VideoProcessorThread
+
 # 导入AI参数构建器
 from .utils.ai_params_builder import AIParamsBuilder
+
+# 导入批处理组件
+from .widgets.batch.batch_processor_thread import (
+    BatchProcessorThread,
+    FileQueueManager,
+    ProcessingStatus,
+)
 
 
 class SignalHandler(QObject):
@@ -75,6 +82,11 @@ class SignalHandler(QObject):
         self.processed_image: Optional[Any] = None
         self.video_processor_thread: Optional[Any] = None
 
+        # 文件队列管理器和批处理线程
+        self.file_queue_manager = FileQueueManager()
+        self.batch_processor: Optional[BatchProcessorThread] = None
+        self.is_batch_mode = False  # 是否为批量处理模式
+
         # 设置日志
         self.logger = logging.getLogger(__name__)
         self.logger.info("SignalHandler initialized")
@@ -83,64 +95,27 @@ class SignalHandler(QObject):
 
     def handle_import_file(self, parent_widget) -> None:
         """
-        处理文件导入请求
+        处理文件导入请求 - 支持单选和多选
 
         Args:
             parent_widget: 父窗口组件，用于显示对话框
         """
         try:
-            file_path, _ = self._show_file_dialog(
+            file_paths = self._show_multi_file_dialog(
                 parent_widget,
                 "选择图片或视频文件",
                 "图片文件 (*.jpg *.jpeg *.png *.bmp);;视频文件 (*.mp4 *.avi *.mkv *.mov);;所有文件 (*)",
             )
 
-            if file_path:
-                self.input_file_path = file_path
+            if not file_paths:
+                return  # 用户取消
 
-                # 获取文件扩展名判断文件类型
-                file_ext = os.path.splitext(file_path)[1].lower()
-                video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
-                image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
-
-                if file_ext in image_exts:
-                    # 图片文件 - 使用原有逻辑
-                    self.preview_panel.set_image(file_path)
-                    self.preview_panel.set_manual_selection_image(file_path)
-                    status_msg = f"✅ 已选择图片: {os.path.basename(file_path)}"
-                    self.log_panel.add_status_message(f"图片文件已加载: {os.path.basename(file_path)}")
-
-                elif file_ext in video_exts:
-                    # 视频文件 - 提取第一帧或显示占位符
-                    first_frame = self._extract_video_first_frame(file_path)
-                    if first_frame is not None:
-                        self.preview_panel.set_image_from_array(first_frame)
-                        self.preview_panel.set_manual_selection_image_from_array(first_frame)
-                        status_msg = f"✅ 已选择视频: {os.path.basename(file_path)} (显示第一帧)"
-                        self.log_panel.add_status_message(f"视频文件已加载: {os.path.basename(file_path)}")
-                    else:
-                        # 无法提取第一帧，显示视频信息占位符
-                        self.preview_panel.show_video_placeholder(file_path)
-                        status_msg = f"✅ 已选择视频: {os.path.basename(file_path)}"
-                        self.log_panel.add_warning_log(
-                            f"视频文件已加载，但无法预览: {os.path.basename(file_path)}"
-                        )
-
-                else:
-                    # 不支持的格式
-                    status_msg = f"⚠️ 不支持的文件格式: {file_ext}"
-                    self.log_panel.add_warning_log(status_msg)
-                    self.logger.warning(f"Unsupported file format: {file_ext}")
-                    return
-
-                self.control_panel.set_start_button_enabled(True)
-                self.status_updated.emit(status_msg)
-
-                # 如果当前是手动模式，自动切换到手动选择标签页
-                if hasattr(self.file_panel, "is_manual_mode") and self.file_panel.is_manual_mode():
-                    self.preview_panel.switch_to_manual_tab()
-
-                self.logger.info(f"File imported: {file_path} ({file_ext})")
+            if len(file_paths) == 1:
+                # 单文件模式 - 使用现有逻辑
+                self._handle_single_file(file_paths[0])
+            else:
+                # 多文件模式 - 进入队列模式
+                self._handle_multiple_files(file_paths)
 
         except Exception as e:
             error_msg = f"文件导入失败: {str(e)}"
@@ -254,17 +229,22 @@ class SignalHandler(QObject):
     # ==================== 处理控制信号 ====================
 
     def handle_start_processing(self) -> None:
-        """处理开始处理请求 (Phase 4 Stage 1.4 - 集成详细进度)"""
+        """处理开始处理请求 - 支持单文件和批量模式"""
         if not self.input_file_path:
             self.log_panel.add_warning_log("请先选择要处理的文件")
             return
 
         try:
             self.control_panel.set_processing_state(True)
-            self.status_updated.emit("开始处理文件...")
-
-            # 显示处理进度状态
             self.preview_panel.show_processing_progress()
+
+            # 判断是否为批量模式
+            if self.is_batch_mode:
+                self._start_batch_processing()
+                return
+
+            # 单文件模式 - 保持原有逻辑
+            self.status_updated.emit("开始处理文件...")
 
             # 准备输出路径
             import os
@@ -364,11 +344,6 @@ class SignalHandler(QObject):
         self.status_updated.emit("处理已停止")
         self.logger.info("Processing stopped")
 
-    def handle_batch_processing(self) -> None:
-        """处理批处理请求"""
-        self.status_updated.emit("批处理功能启动")
-        self.logger.info("Batch processing requested")
-
     def handle_progress_update(self, value: int) -> None:
         """
         处理进度更新
@@ -412,10 +387,10 @@ class SignalHandler(QObject):
                 pixmap = QPixmap(output_path)
                 if not pixmap.isNull():
                     processing_info = {
-                        "detection_method": "自动检测" if self.file_panel.is_auto_mode() else "手动选择",
-                        "manual_regions_count": len(self.manual_selections)
-                        if self.manual_selections
-                        else 0,
+                        "detection_method": ("自动检测" if self.file_panel.is_auto_mode() else "手动选择"),
+                        "manual_regions_count": (
+                            len(self.manual_selections) if self.manual_selections else 0
+                        ),
                     }
                     self.preview_panel.set_processed_image(pixmap, processing_info)
                     self.logger.info(f"Loaded processed image: {output_path}")
@@ -442,12 +417,12 @@ class SignalHandler(QObject):
 
                     if not pixmap.isNull():
                         processing_info = {
-                            "detection_method": "自动检测"
-                            if self.file_panel.is_auto_mode()
-                            else "手动选择",
-                            "manual_regions_count": len(self.manual_selections)
-                            if self.manual_selections
-                            else 0,
+                            "detection_method": (
+                                "自动检测" if self.file_panel.is_auto_mode() else "手动选择"
+                            ),
+                            "manual_regions_count": (
+                                len(self.manual_selections) if self.manual_selections else 0
+                            ),
                         }
                         self.preview_panel.set_processed_image(pixmap, processing_info)
                         self.logger.info(f"Loaded processed video preview: {output_path}")
@@ -490,6 +465,126 @@ class SignalHandler(QObject):
 
         return file_path, selected_filter
 
+    def _show_multi_file_dialog(self, parent, title: str, filters: str) -> list[str]:
+        """
+        显示多选文件对话框
+
+        Args:
+            parent: 父窗口组件
+            title: 对话框标题
+            filters: 文件过滤器
+
+        Returns:
+            选中的文件路径列表
+        """
+        from PyQt6.QtWidgets import QFileDialog
+
+        last_dir = self.preferences.get_preference(
+            "paths", "last_input_dir", os.path.expanduser("~")
+        )
+        file_paths: list[str]
+        file_paths, _ = QFileDialog.getOpenFileNames(parent, title, last_dir, filters)
+
+        if file_paths:
+            self.preferences.set_preference(
+                "paths", "last_input_dir", os.path.dirname(file_paths[0])
+            )
+
+        return file_paths
+
+    def _handle_single_file(self, file_path: str):
+        """
+        处理单个文件 - 保持原有逻辑
+
+        Args:
+            file_path: 文件路径
+        """
+        self.is_batch_mode = False
+        self.file_queue_manager.clear_queue()
+        self.file_panel.hide_queue()
+
+        self.input_file_path = file_path
+
+        # 获取文件扩展名判断文件类型
+        file_ext = os.path.splitext(file_path)[1].lower()
+        video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
+        image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
+
+        if file_ext in image_exts:
+            # 图片文件
+            self.preview_panel.set_image(file_path)
+            self.preview_panel.set_manual_selection_image(file_path)
+            status_msg = f"✅ 已选择图片: {os.path.basename(file_path)}"
+            self.log_panel.add_status_message(f"图片文件已加载: {os.path.basename(file_path)}")
+
+        elif file_ext in video_exts:
+            # 视频文件
+            first_frame = self._extract_video_first_frame(file_path)
+            if first_frame is not None:
+                self.preview_panel.set_image_from_array(first_frame)
+                self.preview_panel.set_manual_selection_image_from_array(first_frame)
+                status_msg = f"✅ 已选择视频: {os.path.basename(file_path)} (显示第一帧)"
+                self.log_panel.add_status_message(f"视频文件已加载: {os.path.basename(file_path)}")
+            else:
+                self.preview_panel.show_video_placeholder(file_path)
+                status_msg = f"✅ 已选择视频: {os.path.basename(file_path)}"
+                self.log_panel.add_warning_log(f"视频文件已加载，但无法预览: {os.path.basename(file_path)}")
+
+        else:
+            # 不支持的格式
+            status_msg = f"⚠️ 不支持的文件格式: {file_ext}"
+            self.log_panel.add_warning_log(status_msg)
+            self.logger.warning(f"Unsupported file format: {file_ext}")
+            return
+
+        self.control_panel.set_start_button_enabled(True)
+        self.status_updated.emit(status_msg)
+
+        # 如果当前是手动模式，自动切换到手动选择标签页
+        if hasattr(self.file_panel, "is_manual_mode") and self.file_panel.is_manual_mode():
+            self.preview_panel.switch_to_manual_tab()
+
+        self.logger.info(f"File imported: {file_path} ({file_ext})")
+
+    def _handle_multiple_files(self, file_paths: list):
+        """
+        处理多个文件 - 进入队列模式
+
+        Args:
+            file_paths: 文件路径列表
+        """
+        self.is_batch_mode = True
+        self.input_file_path = file_paths[0]  # 第一个文件用于预览
+
+        # 清空旧队列，添加新文件
+        self.file_queue_manager.clear_queue()
+        for path in file_paths:
+            self.file_queue_manager.add_file(path)
+
+        # 更新UI
+        self._update_file_queue_display()
+        self.file_panel.show_queue()
+
+        # 预览第一个文件
+        file_ext = os.path.splitext(file_paths[0])[1].lower()
+        video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
+        image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
+
+        if file_ext in image_exts:
+            self.preview_panel.set_image(file_paths[0])
+        elif file_ext in video_exts:
+            first_frame = self._extract_video_first_frame(file_paths[0])
+            if first_frame is not None:
+                self.preview_panel.set_image_from_array(first_frame)
+
+        # 更新状态
+        status_msg = f"✅ 已选择 {len(file_paths)} 个文件，准备批量处理"
+        self.status_updated.emit(status_msg)
+        self.log_panel.add_status_message(f"已添加 {len(file_paths)} 个文件到队列")
+
+        self.control_panel.set_start_button_enabled(True)
+        self.logger.info(f"Added {len(file_paths)} files to batch queue")
+
     def _show_save_dialog(self, parent, title: str, filters: str):
         """
         显示保存文件对话框
@@ -513,6 +608,124 @@ class SignalHandler(QObject):
             self.preferences.set_preference("paths", "last_output_dir", os.path.dirname(file_path))
 
         return file_path, selected_filter
+
+    # ==================== 批处理相关方法 ====================
+
+    def _start_batch_processing(self):
+        """启动批量处理"""
+        queue = self.file_queue_manager.get_queue()
+        if not queue:
+            self.log_panel.add_warning_log("处理队列为空")
+            return
+
+        self.status_updated.emit(f"开始批量处理 {len(queue)} 个文件...")
+
+        # 获取高级参数
+        advanced_params = {}
+        if hasattr(self.control_panel, "get_advanced_parameters"):
+            advanced_params = self.control_panel.get_advanced_parameters()
+
+        # 构建AI参数
+        params_builder = AIParamsBuilder()
+        ai_params = params_builder.build_from_ui(
+            preferences=self.preferences,
+            advanced_params=advanced_params,
+            manual_selections=self.manual_selections,
+            input_file_path=None,
+        )
+
+        # 获取预加载的AI模型
+        preloaded_ai_handler = None
+        if self.main_window and hasattr(self.main_window, "ai_handler"):
+            preloaded_ai_handler = self.main_window.ai_handler
+
+        # 创建批处理线程
+        self.batch_processor = BatchProcessorThread(
+            queue=queue,
+            ai_params=ai_params,
+            config=self.main_window.config if self.main_window else None,
+            preloaded_ai_handler=preloaded_ai_handler,
+            max_concurrent_files=4,
+            auto_retry_failed=True,
+            max_retry_count=3,
+        )
+
+        # 连接信号
+        self.batch_processor.current_file_changed.connect(self._on_batch_file_changed)
+        self.batch_processor.file_progress.connect(self._on_batch_file_progress)
+        self.batch_processor.overall_progress.connect(self.control_panel.update_progress)
+        self.batch_processor.file_completed.connect(self._on_batch_file_completed)
+        self.batch_processor.batch_completed.connect(self._on_batch_completed)
+        self.batch_processor.status_message.connect(self._on_batch_status)
+
+        self.batch_processor.start()
+        self.logger.info("Batch processing started")
+
+    def _on_batch_file_changed(self, index: int, filename: str):
+        """批处理当前文件变化"""
+        self.file_queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
+        self._update_file_queue_display()
+        self.status_updated.emit(f"正在处理: {filename}")
+
+    def _on_batch_file_progress(self, progress: int, file_index: int):
+        """批处理文件进度更新"""
+        self.file_queue_manager.update_file_status(
+            file_index, ProcessingStatus.PROCESSING, progress
+        )
+        self._update_file_queue_display()
+
+    def _on_batch_file_completed(self, index: int, output_path: str, success: bool):
+        """批处理单个文件完成"""
+        status = ProcessingStatus.COMPLETED if success else ProcessingStatus.FAILED
+        self.file_queue_manager.update_file_status(index, status, 100)
+        self._update_file_queue_display()
+
+    def _on_batch_completed(self):
+        """批处理全部完成"""
+        self.control_panel.set_processing_state(False)
+
+        # 统计结果
+        stats = {
+            "total": self.file_queue_manager.get_queue_size(),
+            "completed": self.file_queue_manager.get_completed_count(),
+            "failed": self.file_queue_manager.get_failed_count(),
+        }
+
+        self.status_updated.emit(
+            f"批量处理完成: {stats['completed']}/{stats['total']} 成功, {stats['failed']} 失败"
+        )
+        self.log_panel.add_success_message(
+            f"批量处理完成: 成功 {stats['completed']} 个, 失败 {stats['failed']} 个"
+        )
+
+    def _on_batch_status(self, message: str):
+        """批处理状态消息"""
+        self.log_panel.add_status_message(message)
+
+    def _update_file_queue_display(self):
+        """更新文件队列显示"""
+        queue = self.file_queue_manager.get_queue()
+        self.file_panel.update_queue_display(queue)
+
+    def handle_queue_clear(self):
+        """处理清空队列请求"""
+        self.file_queue_manager.clear_queue()
+        self.file_panel.hide_queue()
+        self.is_batch_mode = False
+        self.input_file_path = None
+        self.control_panel.set_start_button_enabled(False)
+        self.status_updated.emit("队列已清空")
+
+    def handle_file_remove(self, index: int):
+        """处理移除文件请求"""
+        self.file_queue_manager.remove_file(index)
+
+        queue = self.file_queue_manager.get_queue()
+        if not queue:
+            self.handle_queue_clear()
+        else:
+            self._update_file_queue_display()
+            self.status_updated.emit(f"队列中还有 {len(queue)} 个文件")
 
     # ==================== 状态访问方法 ====================
 

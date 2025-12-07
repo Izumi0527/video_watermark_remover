@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from ...config.config_manager import ConfigManager
 from ...utils.model_downloader import ModelDownloader
 from ..exceptions import DetectionError
-from .gpu_monitor import ensure_gpu_memory, get_gpu_monitor, get_safe_batch_size
+from .gpu_monitor import ensure_gpu_memory, get_safe_batch_size
 
 if TYPE_CHECKING:
     from ultralytics import YOLO  # type: ignore[import-not-found]
@@ -168,7 +168,7 @@ class YOLOWatermarkDetector:
             bool: 加载是否成功
         """
         try:
-            from ultralytics import YOLO  # type: ignore[import-not-found]
+            from ultralytics import YOLO
 
             self.logger.info(f"Loading YOLO model from: {self.model_path}")
 
@@ -294,7 +294,7 @@ class YOLOWatermarkDetector:
                     # 分批处理
                     all_masks = []
                     for i in range(0, len(frames), safe_batch_size):
-                        batch = frames[i:i + safe_batch_size]
+                        batch = frames[i : i + safe_batch_size]
 
                         # 确保有足够显存
                         ensure_gpu_memory(min_free_mb=300)

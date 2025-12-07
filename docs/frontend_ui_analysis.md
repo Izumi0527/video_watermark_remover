@@ -91,15 +91,15 @@ parent_widget.detection_method_combo.addItems(
 )
 ```
 
-**问题**: 选项都是基于 OpenCV 的传统方法，但项目已改用 YOLO v11s 深度学习检测
+**问题**: 选项都是基于 OpenCV 的传统方法，但项目已改用 YOLO v11x 深度学习检测
 
 **修正后**:
 ```python
 parent_widget.detection_method_combo.addItems(
     [
-        "YOLO v11s 深度学习 (推荐)",
-        "YOLO v11s GPU 加速",
-        "YOLO v11s CPU 模式",
+        "YOLO v11x 深度学习auto (推荐)",
+        "YOLO v11x GPU 加速",
+        "YOLO v11x CPU 模式",
     ]
 )
 ```
@@ -138,7 +138,7 @@ parent_widget.inpainting_method_combo.addItems(
 **文件**: [advanced_parameters_widget.py](app/ui/widgets/advanced/advanced_parameters_widget.py:233-255)
 
 **修正内容**:
-- `detection_method`: "自动选择" → **"YOLO v11s 深度学习 (推荐)"**
+- `detection_method`: "自动选择" → **"YOLO v11x 深度学习auto (推荐)"**
 - `inpainting_method`: "自动选择" → **"GPU 深度学习 U-Net (推荐)"**
 - `enable_gpu`: `False` → **`True`** (默认启用 GPU 加速)
 
@@ -166,7 +166,7 @@ parent_widget.inpainting_method_combo.addItems(
 
 | 文件 | 修复内容 | 代码行 | 状态 |
 |-----|---------|-------|------|
-| advanced_parameters_tabs.py | 更新检测方法为 YOLO v11s | 64-70 | ✅ 已修复 |
+| advanced_parameters_tabs.py | 更新检测方法为 YOLO v11x | 64-70 | ✅ 已修复 |
 | advanced_parameters_tabs.py | 添加 GPU 深度学习修复选项 | 117-124 | ✅ 已修复 |
 | advanced_parameters_widget.py | 更新默认检测方法 | 235 | ✅ 已修复 |
 | advanced_parameters_widget.py | 更新默认修复方法 | 240 | ✅ 已修复 |

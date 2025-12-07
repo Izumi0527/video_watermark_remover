@@ -61,10 +61,11 @@ def frame_writer_worker(  # noqa: C901
 
         while frame_heap and frame_heap[0][0] == next_frame_index:
             _, frame = heapq.heappop(frame_heap)
-            out.write(frame)
-            del frame
-            next_frame_index += 1
-            written += 1
+            if out is not None:
+                out.write(frame)  # type: ignore[unreachable]
+                del frame
+                next_frame_index += 1
+                written += 1
 
         return written
 
@@ -126,8 +127,8 @@ def frame_writer_worker(  # noqa: C901
                             },
                             block=False,
                         )
-                    except Exception:
-                        pass
+                    except Exception:  # nosec B110
+                        pass  # 忽略队列关闭时的异常
 
                 # 定期GC
                 if next_frame_index % 50 == 0:

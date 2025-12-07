@@ -102,7 +102,7 @@ class AIParamsBuilder:
         params["conf_threshold"] = self._validator.validate("conf_threshold", raw_sensitivity)
 
         # 检测方法 → 设备选择（带验证）
-        detection_method = advanced_params.get("detection_method", "YOLO v11s 深度学习 (推荐)")
+        detection_method = advanced_params.get("detection_method", "YOLO v11x 深度学习auto (推荐)")
         raw_device = self._map_detection_method_to_device(detection_method)
         params["device"] = self._validator.validate("device", raw_device)
 
@@ -219,9 +219,7 @@ class AIParamsBuilder:
 
         # 压缩质量（带验证）
         raw_quality = advanced_params.get("compression_quality", 85)
-        params["compression_quality"] = self._validator.validate(
-            "compression_quality", raw_quality
-        )
+        params["compression_quality"] = self._validator.validate("compression_quality", raw_quality)
 
         # 文件名后缀（布尔值，无需验证）
         params["add_processed_suffix"] = advanced_params.get("add_suffix", True)
@@ -242,7 +240,7 @@ class AIParamsBuilder:
         将前端手动选择区域转换为后端可用格式
 
         Args:
-            manual_selections: QRect对象列表或None
+            manual_selections: QRect对象列表、tuple列表或None
             input_file_path: 输入文件路径（用于创建掩码时获取图像尺寸）
 
         Returns:
@@ -255,12 +253,34 @@ class AIParamsBuilder:
         try:
             regions = []
             for rect in manual_selections:
-                # 从QRect提取坐标和尺寸
-                x = rect.x()
-                y = rect.y()
-                w = rect.width()
-                h = rect.height()
+                # 智能识别输入格式并提取坐标
+                if hasattr(rect, "x") and callable(getattr(rect, "x")):
+                    # 格式1: QRect对象（PyQt6）
+                    x = rect.x()
+                    y = rect.y()
+                    w = rect.width()
+                    h = rect.height()
+                    self.logger.debug(f"[手动选择] 识别为QRect对象: ({x}, {y}, {w}, {h})")
+                elif isinstance(rect, (tuple, list)) and len(rect) == 4:
+                    # 格式2: tuple/list (x, y, w, h)
+                    x, y, w, h = rect
+                    self.logger.debug(f"[手动选择] 识别为tuple/list: ({x}, {y}, {w}, {h})")
+                elif isinstance(rect, dict):
+                    # 格式3: dict {"x": x, "y": y, "width": w, "height": h}
+                    x = rect.get("x", 0)
+                    y = rect.get("y", 0)
+                    w = rect.get("width", 0) or rect.get("w", 0)
+                    h = rect.get("height", 0) or rect.get("h", 0)
+                    self.logger.debug(f"[手动选择] 识别为dict: ({x}, {y}, {w}, {h})")
+                else:
+                    self.logger.warning(f"[手动选择] 未知格式: {type(rect)}, 跳过该区域")
+                    continue
+
                 regions.append((x, y, w, h))
+
+            if not regions:
+                self.logger.warning("[手动选择] 没有有效的选择区域")
+                return None
 
             self.logger.info(f"[手动选择] 成功转换 {len(regions)} 个选择区域")
             self.logger.debug(f"[区域详情] {regions}")
@@ -268,7 +288,7 @@ class AIParamsBuilder:
             return regions
 
         except Exception as e:
-            self.logger.error(f"[手动选择] 转换失败: {e}")
+            self.logger.error(f"[手动选择] 转换失败: {e}", exc_info=True)
             return None
 
     def _map_detection_method_to_device(self, detection_method: str) -> str:
@@ -276,9 +296,9 @@ class AIParamsBuilder:
         映射检测方法到设备类型
 
         前端选项 → 后端device参数：
-        - "YOLO v11s 深度学习 (推荐)" → "auto"
-        - "YOLO v11s GPU 加速" → "cuda"
-        - "YOLO v11s CPU 模式" → "cpu"
+        - "YOLO v11x 深度学习auto (推荐)" → "auto"
+        - "YOLO v11x GPU 加速" → "cuda"
+        - "YOLO v11x CPU 模式" → "cpu"
         """
         if "GPU" in detection_method or "gpu" in detection_method.lower():
             return "cuda"

@@ -16,6 +16,9 @@ from typing import Any, Dict
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
+# 导入配置管理器
+from app.config.config_manager import ConfigManager
+
 from .batch_file_manager import BatchFileManager
 
 # 导入拆分出的模块
@@ -48,6 +51,10 @@ class BatchProcessingWidget(QWidget):
 
         # 并发处理配置
         self.max_concurrent_files = 4  # 默认并发处理4个文件
+
+        # 自动重试配置
+        self.auto_retry_failed = True  # 默认自动重试
+        self.max_retry_count = 3  # 默认重试次数
 
         # UI组件引用
         self.ui_components = {}
@@ -95,8 +102,14 @@ class BatchProcessingWidget(QWidget):
         self.ai_params = ai_params
 
     def set_config(self, config):
-        """设置配置"""
+        """设置配置并从中读取批处理参数"""
         self.config = config
+        if config:
+            # 从配置读取最大并发数
+            self.max_concurrent_files = ConfigManager.get_batch_max_concurrent(config, default=4)
+            # 读取自动重试设置
+            self.auto_retry_failed = ConfigManager.get_batch_auto_retry(config, default=True)
+            self.max_retry_count = ConfigManager.get_batch_max_retry_count(config, default=3)
 
     def set_preloaded_ai_handler(self, ai_handler):
         """
@@ -146,13 +159,15 @@ class BatchProcessingWidget(QWidget):
         # 重置所有文件状态为等待
         self.file_manager.reset_all_files_to_waiting()
 
-        # 创建并启动批量处理线程（支持预加载AI模型和并发处理）
+        # 创建并启动批量处理线程（支持预加载AI模型、并发处理和自动重试）
         self.batch_processor = BatchProcessorThread(
             queue=queue,
             ai_params=self.ai_params,
             config=self.config,
             preloaded_ai_handler=self.preloaded_ai_handler,  # 传递预加载的AI处理器
             max_concurrent_files=self.max_concurrent_files,  # 传递并发数配置
+            auto_retry_failed=self.auto_retry_failed,  # 传递自动重试配置
+            max_retry_count=self.max_retry_count,  # 传递最大重试次数
             parent=self,
         )
 

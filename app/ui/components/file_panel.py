@@ -1,7 +1,20 @@
 import logging
+import os
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..widgets.batch.batch_processor_thread import ProcessingStatus
 
 
 class FilePanel(QWidget):
@@ -16,6 +29,8 @@ class FilePanel(QWidget):
     theme_toggle_requested = pyqtSignal()
     auto_mode_changed = pyqtSignal(bool)
     manual_mode_changed = pyqtSignal(bool)
+    queue_clear_requested = pyqtSignal()
+    file_remove_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,6 +48,9 @@ class FilePanel(QWidget):
 
         # 处理模式组
         self._create_processing_mode_group(layout)
+
+        # 文件队列组
+        self._create_file_queue_group(layout)
 
     def _create_file_operations_group(self, main_layout):
         """创建文件操作组"""
@@ -130,3 +148,101 @@ class FilePanel(QWidget):
     def is_manual_mode(self):
         """检查是否为手动模式"""
         return self.manual_mode_checkbox.isChecked()
+
+    def _create_file_queue_group(self, main_layout):
+        """创建文件队列显示组"""
+        self.queue_group = QGroupBox("文件队列")
+        self.queue_group.setObjectName("file_queue_group")
+        self.queue_group.setVisible(False)  # 初始隐藏
+
+        queue_layout = QVBoxLayout(self.queue_group)
+        queue_layout.setContentsMargins(8, 8, 8, 8)
+        queue_layout.setSpacing(4)
+
+        # 队列信息标签
+        self.queue_info_label = QLabel("已选择 0 个文件")
+        self.queue_info_label.setObjectName("queue_info_label")
+        queue_layout.addWidget(self.queue_info_label)
+
+        # 文件列表
+        self.file_list_widget = QListWidget()
+        self.file_list_widget.setMaximumHeight(120)
+        queue_layout.addWidget(self.file_list_widget)
+
+        # 操作按钮行
+        btn_layout = QHBoxLayout()
+
+        self.btn_remove_file = QPushButton("移除选中")
+        self.btn_remove_file.clicked.connect(self._on_remove_file)
+        btn_layout.addWidget(self.btn_remove_file)
+
+        self.btn_clear_queue = QPushButton("清空队列")
+        self.btn_clear_queue.clicked.connect(self._on_clear_queue)
+        btn_layout.addWidget(self.btn_clear_queue)
+
+        btn_layout.addStretch()
+        queue_layout.addLayout(btn_layout)
+
+        main_layout.addWidget(self.queue_group)
+
+    def update_queue_display(self, queue_data: list):
+        """
+        更新队列显示
+
+        Args:
+            queue_data: 队列数据列表，每项包含 input_path, status, progress
+        """
+        self.file_list_widget.clear()
+
+        if not queue_data:
+            self.queue_group.setVisible(False)
+            return
+
+        self.queue_group.setVisible(True)
+
+        # 状态图标映射
+        status_icons = {
+            ProcessingStatus.WAITING: "⏳",
+            ProcessingStatus.PROCESSING: "🔄",
+            ProcessingStatus.COMPLETED: "✅",
+            ProcessingStatus.FAILED: "❌",
+        }
+
+        for item in queue_data:
+            filename = os.path.basename(item.get("input_path", ""))
+            status = item.get("status")
+            progress = item.get("progress", 0)
+
+            # 处理中显示进度百分比
+            if status == ProcessingStatus.PROCESSING:
+                icon = f"🔄 {progress}%"
+            else:
+                icon = status_icons.get(status, "⏳")
+
+            list_item = QListWidgetItem(f"{icon} {filename}")
+            self.file_list_widget.addItem(list_item)
+
+        # 更新统计信息
+        total = len(queue_data)
+        completed = sum(1 for i in queue_data if i.get("status") == ProcessingStatus.COMPLETED)
+        failed = sum(1 for i in queue_data if i.get("status") == ProcessingStatus.FAILED)
+
+        self.queue_info_label.setText(f"文件队列: {total} 个 | 完成: {completed} | 失败: {failed}")
+
+    def show_queue(self):
+        """显示队列区域"""
+        self.queue_group.setVisible(True)
+
+    def hide_queue(self):
+        """隐藏队列区域"""
+        self.queue_group.setVisible(False)
+
+    def _on_remove_file(self):
+        """移除选中的文件"""
+        current_row = self.file_list_widget.currentRow()
+        if current_row >= 0:
+            self.file_remove_requested.emit(current_row)
+
+    def _on_clear_queue(self):
+        """清空队列"""
+        self.queue_clear_requested.emit()

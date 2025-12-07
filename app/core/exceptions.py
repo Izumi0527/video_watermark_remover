@@ -33,8 +33,8 @@
 
 """
 
-from typing import Any, Callable, Optional
 import logging
+from typing import Any, Callable, Optional
 
 # ==================== 基础异常类 ====================
 
@@ -453,7 +453,7 @@ class GlobalExceptionHandler:
         import sys
 
         self._original_excepthook = sys.excepthook
-        sys.excepthook = self._excepthook
+        sys.excepthook = self._excepthook  # type: ignore[assignment]
 
     def uninstall(self) -> None:
         """
@@ -534,9 +534,7 @@ class GlobalExceptionHandler:
         if isinstance(exception, VideoWatermarkRemoverError):
             error_info["details"] = exception.details
             error_info["original_exception"] = (
-                str(exception.original_exception)
-                if exception.original_exception
-                else None
+                str(exception.original_exception) if exception.original_exception else None
             )
 
         # 获取堆栈跟踪
@@ -561,9 +559,7 @@ class GlobalExceptionHandler:
 
     def _log_exception(self, error_info: dict) -> None:
         """记录异常到日志"""
-        log_message = (
-            f"[{error_info['context']}] {error_info['type']}: {error_info['message']}"
-        )
+        log_message = f"[{error_info['context']}] {error_info['type']}: {error_info['message']}"
 
         if error_info.get("details"):
             log_message += f" | 详情: {error_info['details']}"

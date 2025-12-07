@@ -12,6 +12,7 @@
 
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from threading import Lock
@@ -56,6 +57,8 @@ class BatchProcessorThread(QThread):
         config=None,
         preloaded_ai_handler=None,
         max_concurrent_files: int = 4,
+        auto_retry_failed: bool = True,
+        max_retry_count: int = 3,
         parent=None,
     ):
         """
@@ -67,6 +70,8 @@ class BatchProcessorThread(QThread):
             config: 配置对象
             preloaded_ai_handler: 预加载的 AI 处理器（可选）
             max_concurrent_files: 最大并发文件数（默认4个）
+            auto_retry_failed: 是否自动重试失败的文件（默认True）
+            max_retry_count: 最大重试次数（默认3次）
             parent: 父对象
         """
         super().__init__(parent)
@@ -79,6 +84,12 @@ class BatchProcessorThread(QThread):
         self.should_stop = False
         self.logger = logging.getLogger(__name__)
 
+        # 自动重试配置
+        self.auto_retry_failed = auto_retry_failed
+        self.max_retry_count = max_retry_count
+        # 重试计数器：{file_index: retry_count}
+        self._retry_counts: Dict[int, int] = {}
+
         # 线程安全的锁（用于更新共享状态）
         self._lock = Lock()
         self._completed_count = 0
@@ -86,12 +97,15 @@ class BatchProcessorThread(QThread):
         if preloaded_ai_handler:
             self.logger.info("批量处理将使用预加载的AI模型，性能将得到优化")
         self.logger.info(f"批量处理并发数：{max_concurrent_files}")
+        if auto_retry_failed:
+            self.logger.info(f"自动重试已启用，最大重试次数：{max_retry_count}")
 
     def set_queue(self, file_queue):
         """设置文件队列"""
         self.file_queue = file_queue or []
         self.should_stop = False
         self._completed_count = 0
+        self._retry_counts.clear()  # 重置重试计数器
 
     def run(self):
         """
@@ -171,7 +185,7 @@ class BatchProcessorThread(QThread):
         self, index: int, input_path: str, output_path: str, total_files: int
     ) -> tuple[str, bool]:
         """
-        单文件处理包装器（用于线程池）
+        单文件处理包装器（用于线程池），支持递增延迟自动重试
 
         Args:
             index: 文件索引
@@ -182,13 +196,43 @@ class BatchProcessorThread(QThread):
         Returns:
             (output_path, success) 元组
         """
+        # 初始化重试计数
+        if index not in self._retry_counts:
+            self._retry_counts[index] = 0
+
         # 更新当前处理文件（线程安全）
         filename = os.path.basename(input_path)
         self.current_file_changed.emit(index, filename)
-        self.status_message.emit(f"[INFO] 处理文件 {index + 1}/{total_files}: {filename}")
+
+        retry_info = (
+            f" (重试 {self._retry_counts[index]}/{self.max_retry_count})"
+            if self._retry_counts[index] > 0
+            else ""
+        )
+        self.status_message.emit(f"[INFO] 处理文件 {index + 1}/{total_files}: {filename}{retry_info}")
 
         # 调用实际处理方法
         success = self._process_single_file(input_path, output_path, index)
+
+        # 自动重试逻辑（递增延迟策略：1秒、2秒、4秒...）
+        if not success and self.auto_retry_failed:
+            while self._retry_counts[index] < self.max_retry_count and not self.should_stop:
+                self._retry_counts[index] += 1
+                # 递增延迟：2^(retry_count-1) 秒，即 1, 2, 4, 8...
+                delay = 2 ** (self._retry_counts[index] - 1)
+                self.status_message.emit(
+                    f"[WARNING] 文件处理失败，{delay}秒后重试 "
+                    f"({self._retry_counts[index]}/{self.max_retry_count}): {filename}"
+                )
+                time.sleep(delay)  # 递增延迟等待
+
+                if self.should_stop:
+                    break
+
+                success = self._process_single_file(input_path, output_path, index)
+                if success:
+                    self.status_message.emit(f"[SUCCESS] 重试成功: {filename}")
+                    break
 
         return (output_path, success)
 
@@ -343,3 +387,7 @@ class FileQueueManager:
     def get_failed_count(self) -> int:
         """获取失败的文件数量"""
         return sum(1 for item in self.queue if item["status"] == ProcessingStatus.FAILED)
+
+    def get_processing_count(self) -> int:
+        """获取正在处理的文件数量"""
+        return sum(1 for item in self.queue if item["status"] == ProcessingStatus.PROCESSING)

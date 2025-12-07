@@ -9,8 +9,8 @@ def combobox_styles(colors: dict) -> str:
         color: {colors['text_primary']};
         border: 1px solid {colors['border']};
         border-radius: 4px;
-        padding: 6px 8px;
-        min-height: 25px;
+        padding: 8px 8px;
+        min-height: 16px;
         font-weight: 500;
     }}
 
@@ -45,8 +45,8 @@ def combobox_styles(colors: dict) -> str:
     }}
 
     QComboBox QAbstractItemView::item {{
-        padding: 6px;
-        min-height: 25px;
+        padding: 8px;
+        min-height: 16px;
     }}
 
     QComboBox QAbstractItemView::item:hover {{

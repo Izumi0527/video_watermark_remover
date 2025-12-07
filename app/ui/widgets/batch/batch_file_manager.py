@@ -209,11 +209,17 @@ class BatchFileManager:
         获取队列统计信息
 
         Returns:
-            包含统计信息的字典
+            包含统计信息的字典，键名:
+            - total: 总文件数
+            - completed: 已完成数
+            - failed: 失败数
+            - waiting: 等待处理数
+            - processing: 正在处理数
         """
         return {
             "total": self.queue_manager.get_queue_size(),
             "completed": self.queue_manager.get_completed_count(),
             "failed": self.queue_manager.get_failed_count(),
-            "pending": self.queue_manager.get_pending_count(),
+            "waiting": self.queue_manager.get_pending_count(),
+            "processing": self.queue_manager.get_processing_count(),
         }

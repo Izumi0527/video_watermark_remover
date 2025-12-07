@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -28,7 +27,6 @@ class ControlPanel(QWidget):
     # 信号定义
     start_processing_requested = pyqtSignal()
     stop_processing_requested = pyqtSignal()
-    batch_processing_requested = pyqtSignal()
 
     # Phase 6: 进度更新信号（组件解耦）
     progress_update_requested = pyqtSignal(dict)
@@ -137,58 +135,19 @@ class ControlPanel(QWidget):
         main_layout.addWidget(progress_group)
 
     def _create_advanced_tabs_group(self, main_layout):
-        """创建高级功能标签页组"""
-        tabs_group = QGroupBox("高级功能")
-        tabs_group.setObjectName("advanced_tabs_group")
+        """创建参数设置组"""
+        params_group = QGroupBox("参数设置")  # 标题改为"参数设置"
+        params_group.setObjectName("parameters_group")
 
-        # tabs_group.setMinimumHeight(450) # Removed fixed height to allow layout to adapt
-        tabs_layout = QVBoxLayout(tabs_group)
-        tabs_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
-        tabs_layout.setSpacing(0)
+        params_layout = QVBoxLayout(params_group)
+        params_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
+        params_layout.setSpacing(0)
 
-        # 创建标签页容器
-        self.advanced_tabs = QTabWidget()
-
-        # 批处理标签页
-        self._create_batch_processing_tab()
-
-        # 参数控制标签页
-        self._create_parameters_tab()
-
-        tabs_layout.addWidget(self.advanced_tabs)
-        main_layout.addWidget(tabs_group, 1)  # stretch=1，让高级功能占据所有剩余空间
-
-    def _create_batch_processing_tab(self):
-        """创建批处理标签页"""
-        batch_tab = QWidget()
-        batch_layout = QVBoxLayout(batch_tab)
-
-        # 批处理按钮
-        self.btn_batch_processing = QPushButton("📁 批量处理")
-        self.btn_batch_processing.setMinimumHeight(40)
-        self.btn_batch_processing.clicked.connect(self._on_batch_processing)
-        self.btn_batch_processing.setToolTip("选择多个文件进行批量处理")
-        batch_layout.addWidget(self.btn_batch_processing)
-
-        # 占位符说明
-        batch_info = QWidget()
-        batch_info.setMinimumHeight(100)
-        batch_layout.addWidget(batch_info)
-
-        # batch_layout.addStretch()  # 移除：避免底部过多空白
-
-        self.advanced_tabs.addTab(batch_tab, "📦 批处理")
-
-    def _create_parameters_tab(self):
-        """创建参数控制标签页"""
-        params_tab = QWidget()
-        params_layout = QVBoxLayout(params_tab)
-
-        # 集成高级参数组件
+        # 直接添加高级参数组件（不再嵌套QTabWidget）
         self.advanced_params_widget = AdvancedParametersWidget()
         params_layout.addWidget(self.advanced_params_widget)
 
-        self.advanced_tabs.addTab(params_tab, "⚙️ 参数设置")
+        main_layout.addWidget(params_group, 1)  # stretch=1，让参数设置占据所有剩余空间
 
     def _on_start_processing(self):
         """处理开始处理按钮点击"""
@@ -203,11 +162,6 @@ class ControlPanel(QWidget):
         self.btn_start_processing.setEnabled(True)
         self.btn_stop_processing.setEnabled(False)
         self.stop_processing_requested.emit()
-
-    def _on_batch_processing(self):
-        """处理批处理按钮点击"""
-        self.logger.debug("Batch processing requested")
-        self.batch_processing_requested.emit()
 
     def set_start_button_enabled(self, enabled):
         """设置开始按钮是否可用"""
