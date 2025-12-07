@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLa
 from ..config.config_manager import ConfigManager
 from ..config.preferences import get_preferences_manager
 from ..config.styles import ModernStyleManager
+from ..config.styles.colors import DEFAULT_THEME
 from ..core.ai.ai_handler import AIHandler
 from .components.control_panel import ControlPanel
 
@@ -81,11 +82,11 @@ class MainWindow(QMainWindow):
 
         # 初始化偏好设置和样式管理
         self.preferences = get_preferences_manager()
-        saved_theme = self.preferences.get_preference("ui", "theme", "dark")
+        saved_theme = self.preferences.get_preference("ui", "theme", DEFAULT_THEME)
         self.style_manager = ModernStyleManager(saved_theme)
 
         # 设置窗口属性
-        self.setWindowTitle("智能水印去除工具 - v0.4.0")
+        self.setWindowTitle("智能水印去除工具 - v0.5.0")
         self._restore_window_geometry()
 
         # 初始化UI（必须在创建signal_handler之前）
@@ -199,7 +200,7 @@ class MainWindow(QMainWindow):
         subtitle_font.setPointSize(14)
         subtitle_font.setBold(False)
 
-        title_label = QLabel("智能水印去除工具 - v0.4.0")
+        title_label = QLabel("智能水印去除工具 - v0.5.0")
         title_label.setObjectName("title_primary")
         title_label.setFont(title_font)
 
@@ -271,7 +272,7 @@ class MainWindow(QMainWindow):
         current_theme = (
             self.style_manager.current_theme
             if hasattr(self.style_manager, "current_theme")
-            else "dark"
+            else DEFAULT_THEME
         )
         theme_icon = "☀️" if current_theme == "dark" else "🌙"
         self.file_panel.btn_theme_toggle.setText(f"{theme_icon} 切换主题")

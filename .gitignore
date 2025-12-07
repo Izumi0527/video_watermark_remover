@@ -156,7 +156,7 @@ configs/*.ini
 !configs/default_config.ini # Keep default config versioned
 
 # Models (if large or downloaded)
-models/*
+models/yolo11*.pt
 !models/placeholder.txt
 
 # Output/Generated videos

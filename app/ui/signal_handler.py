@@ -12,6 +12,9 @@ from typing import Any, List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+# 导入配置
+from ..config.styles.colors import DEFAULT_THEME
+
 # 导入帧提取工具
 from ..core.video.frame_reader import extract_video_first_frame
 
@@ -165,7 +168,7 @@ class SignalHandler(QObject):
                 apply_style_callback()
 
                 # 保存主题偏好
-                current_theme = getattr(self.style_manager, "current_theme", "dark")
+                current_theme = getattr(self.style_manager, "current_theme", DEFAULT_THEME)
                 self.preferences.set_preference("ui", "theme", current_theme)
 
                 status_msg = f"主题已切换为: {current_theme}"

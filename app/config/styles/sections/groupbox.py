@@ -21,6 +21,6 @@ def groupbox_styles(colors: dict) -> str:
         color: {colors['primary']};
         font-weight: bold;
         font-size: 14px;
-        background-color: {colors['background']};
+        background-color: transparent;
     }}
     """
