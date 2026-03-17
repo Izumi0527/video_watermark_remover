@@ -103,7 +103,7 @@ Write-Host "=" * 60 -ForegroundColor $Colors.Info
 
 # 检查虚拟环境
 if (-not (Test-Path ".venv")) {
-    Write-Host "❌ 虚拟环境不存在，请先运行: .\scripts\setup.ps1" -ForegroundColor $Colors.Error
+    Write-Host "❌ 虚拟环境不存在，请先运行: .\scripts\vwr.ps1 setup -Dev" -ForegroundColor $Colors.Error
     exit 1
 }
 
@@ -590,7 +590,7 @@ if ((Test-Path $TestDataPath) -and (-not $KeepTestFiles)) {
 }
 
 Write-Host ""
-Write-Host "📋 端到端测试完成。运行完整测试套件: .\scripts\test-all.ps1" -ForegroundColor $Colors.Info
+Write-Host "📋 端到端测试完成。运行完整测试套件: .\scripts\vwr.ps1 test all" -ForegroundColor $Colors.Info
 
 # 返回适当的退出码
 if ($TestResults.Failed -gt 0) {

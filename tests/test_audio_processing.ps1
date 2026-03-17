@@ -99,7 +99,7 @@ Write-Host "=" * 60 -ForegroundColor $Colors.Info
 
 # 检查虚拟环境
 if (-not (Test-Path ".venv")) {
-    Write-Host "❌ 虚拟环境不存在，请先运行: .\scripts\setup.ps1" -ForegroundColor $Colors.Error
+    Write-Host "❌ 虚拟环境不存在，请先运行: .\scripts\vwr.ps1 setup -Dev" -ForegroundColor $Colors.Error
     exit 1
 }
 

@@ -63,11 +63,11 @@ pylsp-mypy>=0.6.0          # MyPy集成
 #    pre-commit install
 #
 # 3. 运行代码质量检查：
-#    .\scripts\check-quality.ps1
+#    .\scripts\vwr.ps1 quality
 #    或手动运行: black . --check && flake8 . && mypy app/
 #
 # 4. 运行测试：
-#    .\scripts\test.ps1
+#    .\scripts\vwr.ps1 test all
 #    或手动运行: pytest tests/ -v --cov=app
 #
 # 5. 生成文档：

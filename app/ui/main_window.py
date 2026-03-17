@@ -9,7 +9,6 @@ from ..config.config_manager import ConfigManager
 from ..config.preferences import get_preferences_manager
 from ..config.styles import ModernStyleManager
 from ..config.styles.colors import DEFAULT_THEME
-from ..core.ai.ai_handler import AIHandler
 from .components.control_panel import ControlPanel
 
 # 导入重构后的组件
@@ -39,6 +38,10 @@ class AIModelPreloader(QThread):
         """后台加载AI模型"""
         try:
             self.logger.info("开始后台加载AI模型...")
+
+            # 延迟导入（避免在 UI 模块导入阶段强依赖 torch）
+            from ..core.ai.ai_handler import AIHandler  # noqa: WPS433
+
             # 创建AIHandler并加载模型
             ai_handler = AIHandler(self.config, ai_params={})
             if ai_handler.load_models():
@@ -50,6 +53,13 @@ class AIModelPreloader(QThread):
                 self.error.emit(error_msg)
         except Exception as e:
             error_msg = f"AI模型加载异常: {str(e)}"
+            # 常见：Windows 下先加载 PyQt6(Qt DLL) 再加载 torch 可能触发 WinError 1114
+            if isinstance(e, OSError) and getattr(e, "winerror", None) == 1114:
+                error_msg += (
+                    "\n可能原因：PyQt6/Qt 先加载了与 PyTorch 冲突的 DLL，导致 torch 初始化失败。"
+                    "\n建议：使用 main.py 或 scripts/vwr.ps1 启动（本项目已在入口预加载 torch），"
+                    "或重启终端/电脑后再试。"
+                )
             self.logger.error(error_msg)
             self.error.emit(error_msg)
 

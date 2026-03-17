@@ -1,6 +1,6 @@
 # 智能视频水印去除工具 - 完整技术文档 🎬
 
-> **版本**: v0.5.0 | **更新日期**: 2025-12-07 | **Python**: 3.12 | **代码量**: ~28,000+ 行
+> **版本**: v0.5.0 | **更新日期**: 2025-12-07 | **Python**: 3.12.10 | **代码量**: ~28,000+ 行
 
 基于深度学习和传统图像处理技术的智能视频水印去除工具，支持图片和视频文件的水印智能检测与高质量去除。
 
@@ -73,7 +73,7 @@
 
 #### GUI与基础框架
 - **PyQt6** >= 6.6.0 - 现代化GUI框架
-- **Python** 3.12 - 核心开发语言
+- **Python** 3.12.10 - 核心开发语言
 - **uv** - 现代化Python包管理和虚拟环境工具
 
 #### 图像处理
@@ -159,7 +159,7 @@ graph TD
   - Windows 10/11 (主要支持) ✅
   - Linux (Ubuntu 20.04+)
   - macOS (10.15+)
-- **Python**: 3.12
+- **Python**: 3.12.10
 - **uv**: 最新版本（用于包管理和虚拟环境）
 - **FFmpeg**: 最新稳定版（必需）
 
@@ -173,32 +173,25 @@ graph TD
 
 ### 方式一：自动化脚本安装（推荐）⭐
 
-**Windows平台**:
+**Windows平台（PowerShell）**:
 ```powershell
 # 1. 克隆或下载项目到本地
 cd C:\cascadeProjects\video_watermark_remover
 
 # 2. 运行环境初始化脚本（仅首次运行）
-.\scripts\setup.ps1
+.\scripts\vwr.ps1 setup
 
 # 3. 启动应用
-.\scripts\start.ps1
+.\scripts\vwr.ps1 run
 ```
 
 **自动完成内容**:
 - ✅ 检查并安装uv包管理器
-- ✅ 使用uv创建.venv虚拟环境（Python 3.12）
+- ✅ 使用uv创建.venv虚拟环境（Python 3.12.10）
 - ✅ 使用uv安装所有核心依赖和开发工具
 - ✅ 下载YOLOv11x-Watermark模型
 
-**Linux/macOS平台**:
-```bash
-# 1. 环境初始化
-./scripts/setup.sh
-
-# 2. 启动应用
-./scripts/run.sh
-```
+> 说明：仓库当前仅提供 Windows PowerShell 脚本（统一入口：`.\scripts\vwr.ps1`）；Linux/macOS 可按“手动安装（使用uv）”运行。
 
 ### 方式二：手动安装（使用uv）
 
@@ -213,8 +206,8 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 # Linux/macOS:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 3. 使用uv创建Python 3.12虚拟环境
-uv venv --python 3.12
+# 3. 使用uv创建Python 3.12.10虚拟环境
+uv venv --python 3.12.10
 
 # 4. 激活虚拟环境
 # Windows:
@@ -245,22 +238,20 @@ uv pip install -r requirements-dev.txt
 pre-commit install
 
 # 运行代码质量检查
-.\scripts\check-quality.ps1  # Windows
-./scripts/check-quality.sh   # Linux/macOS
+.\scripts\vwr.ps1 quality
 
 # 运行测试
-.\scripts\test.ps1           # Windows
-./scripts/test.sh            # Linux/macOS
+.\scripts\vwr.ps1 test unit -Quick
 ```
 
 ### 验证安装
 
 ```powershell
 # 运行快速测试
-.\scripts\test.ps1 -Quick
+.\scripts\vwr.ps1 test unit -Quick
 
 # 检查代码质量
-.\scripts\check-quality.ps1 -Quick
+.\scripts\vwr.ps1 quality -Quick
 
 # 启动应用
 uv run python main.py
@@ -479,7 +470,7 @@ video_watermark_remover/
 | **应用代码** | 11,949 行 | 47个文件 |
 | **测试代码** | 5,508 行 | 29个文件 |
 | **文档** | 8,591 行 | 16个文档 |
-| **脚本** | ~2,000 行 | 20个脚本 |
+| **脚本** | 1 个 | 统一入口：`scripts/vwr.ps1` |
 | **Python文件** | 76 个 | 应用47 + 测试29 |
 | **代码规范率** | 79.7% | ≤300行/文件 |
 
@@ -493,19 +484,19 @@ video_watermark_remover/
 
 ```powershell
 # 运行所有测试
-.\scripts\test.ps1
+.\scripts\vwr.ps1 test all
 
 # 仅运行单元测试
-.\scripts\test.ps1 unit
+.\scripts\vwr.ps1 test unit
 
-# 运行测试并生成覆盖率报告
-.\scripts\test.ps1 -Coverage
+# 生成覆盖率报告
+.\scripts\vwr.ps1 coverage
 
-# 运行特定测试
-.\scripts\test.ps1 -TestName test_config_manager
+# 运行特定测试（示例：按名称过滤）
+.\.venv\Scripts\python.exe -m pytest -k test_config_manager
 
 # 快速测试（跳过耗时检查）
-.\scripts\test.ps1 -Quick
+.\scripts\vwr.ps1 test unit -Quick
 ```
 
 #### 手动运行测试
@@ -532,19 +523,19 @@ pytest tests/ -m performance
 
 ```powershell
 # 运行所有质量检查
-.\scripts\check-quality.ps1
+.\scripts\vwr.ps1 quality
 
 # 自动修复格式问题
-.\scripts\check-quality.ps1 -Fix
+.\scripts\vwr.ps1 quality -Fix
 
 # 快速检查（跳过类型检查）
-.\scripts\check-quality.ps1 -Quick
+.\scripts\vwr.ps1 quality -Quick
 
 # 仅检查特定类型
-.\scripts\check-quality.ps1 -Check format   # 代码格式
-.\scripts\check-quality.ps1 -Check style    # 代码风格
-.\scripts\check-quality.ps1 -Check type     # 类型注解
-.\scripts\check-quality.ps1 -Check security # 安全检查
+.\scripts\vwr.ps1 quality -Check format   # 代码格式
+.\scripts\vwr.ps1 quality -Check style    # 代码风格
+.\scripts\vwr.ps1 quality -Check type     # 类型注解
+.\scripts\vwr.ps1 quality -Check security # 安全检查
 ```
 
 ### 测试覆盖情况
@@ -658,7 +649,7 @@ enable_cache = yes
   - 优化日志面板颜色一致性
   - 调整控件尺寸和间距
 - 🔧 **技术升级**:
-  - 统一使用Python 3.12
+  - 统一使用Python 3.12.10
   - 采用uv作为包管理和虚拟环境工具
 - 📝 **版本号升级**: v0.4.0 → v0.5.0
 
@@ -733,11 +724,11 @@ enable_cache = yes
 **提交检查**:
 ```powershell
 # 提交前必须运行
-.\scripts\check-quality.ps1
-.\scripts\test.ps1 -Quick
+.\scripts\vwr.ps1 quality
+.\scripts\vwr.ps1 test unit -Quick
 
 # 如有问题，自动修复
-.\scripts\check-quality.ps1 -Fix
+.\scripts\vwr.ps1 quality -Fix
 ```
 
 ### 功能扩展
@@ -805,4 +796,4 @@ class NewWidget(QWidget):
 
 **智能视频水印去除工具** - 让视频内容更纯净 ✨
 
-*文档版本: v0.5.0 | 最后更新: 2025-12-07 | Python: 3.12*
+*文档版本: v0.5.0 | 最后更新: 2025-12-07 | Python: 3.12.10*

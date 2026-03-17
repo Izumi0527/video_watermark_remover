@@ -53,8 +53,8 @@ tests/test_data/
 # 运行音频处理测试时会自动生成音频文件
 .\tests\test_audio_processing.ps1
 
-# 运行性能测试时会自动生成图像文件  
-.\scripts\test-performance.ps1
+# 运行性能基准测试（生成 JSON 报告到 logs/）
+.\scripts\vwr.ps1 perf
 
 # 运行端到端测试时会自动生成配置文件
 .\tests\test_end_to_end.ps1

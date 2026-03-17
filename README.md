@@ -4,7 +4,7 @@
 
 **基于深度学习的智能视频水印检测与去除工具**
 
-[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12.10-blue.svg)](https://www.python.org/)
 [![PyQt6](https://img.shields.io/badge/PyQt6-6.6.0+-green.svg)](https://www.qt.io/qt-for-python)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-v0.5.0-orange.svg)](https://github.com/yourusername/video_watermark_remover/releases)
@@ -41,29 +41,21 @@
 git clone https://github.com/yourusername/video_watermark_remover.git
 cd video_watermark_remover
 
-# 2. 运行自动化安装脚本（首次运行）
-.\scripts\setup.ps1
+# 2. 初始化环境（首次运行）
+#   - 如需更快安装（CPU 版 PyTorch），可加：-TorchBackend cpu
+#   - 如需使用镜像（解决下载慢），可加：-DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
+#     或设置环境变量：$env:UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
+#   - 如需开发依赖（pytest/black 等），可加：-Dev
+.\scripts\vwr.ps1 setup
 
 # 3. 启动应用
-.\scripts\start.ps1
+.\scripts\vwr.ps1 run
 ```
 
-### Linux/macOS平台
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/yourusername/video_watermark_remover.git
-cd video_watermark_remover
-
-# 2. 运行自动化安装脚本
-./scripts/setup.sh
-
-# 3. 启动应用
-./scripts/run.sh
-```
+> 说明：当前仓库仅提供 Windows PowerShell 脚本（`.\scripts\vwr.ps1`）。如在 Linux/macOS 使用，请按“手动安装”章节自行创建虚拟环境并运行 `python main.py`。
 
 **首次启动**将自动完成：
-- ✅ 使用uv创建Python 3.12虚拟环境
+- ✅ 使用uv创建Python 3.12.10虚拟环境
 - ✅ 使用uv安装所有依赖包
 - ✅ YOLOv11x模型自动下载
 - ✅ 环境配置检查
@@ -107,7 +99,7 @@ cd video_watermark_remover
 | 组件 | 要求 | 说明 |
 |------|------|------|
 | **操作系统** | Windows 10/11, Linux, macOS | Windows为主要支持平台 |
-| **Python** | 3.12 | 官方最新稳定版 |
+| **Python** | 3.12.10 | 推荐稳定版本 |
 | **uv** | 最新版 | Python包管理和虚拟环境工具 |
 | **CPU** | 多核处理器 | 推荐4核及以上 |
 | **内存** | 8GB+ RAM | 推荐16GB |
@@ -121,17 +113,12 @@ cd video_watermark_remover
 
 ### 方式一：自动化脚本（推荐）⭐
 
-**Windows**:
 ```powershell
-.\scripts\setup.ps1   # 首次运行
-.\scripts\start.ps1   # 启动应用
+.\scripts\vwr.ps1 setup   # 首次运行（创建 .venv + 安装依赖）
+.\scripts\vwr.ps1 run     # 启动应用（带环境检查）
 ```
 
-**Linux/macOS**:
-```bash
-./scripts/setup.sh    # 首次运行
-./scripts/run.sh      # 启动应用
-```
+> 说明：脚本仅支持 Windows PowerShell；Linux/macOS 请参考“手动安装”。
 
 ### 方式二：手动安装
 
@@ -140,8 +127,8 @@ cd video_watermark_remover
 # Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 # Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. 使用uv创建Python 3.12虚拟环境
-uv venv --python 3.12
+# 2. 使用uv创建Python 3.12.10虚拟环境
+uv venv --python 3.12.10
 
 # 3. 激活虚拟环境
 # Windows: .\.venv\Scripts\activate
@@ -156,17 +143,15 @@ uv run python main.py
 
 ### 开发环境配置
 
-```bash
-# 使用uv安装开发依赖
-uv pip install -r requirements-dev.txt
+```powershell
+# 使用 vwr 脚本安装开发依赖（推荐）
+.\scripts\vwr.ps1 setup -Dev
 
 # 运行代码质量检查
-.\scripts\check-quality.ps1  # Windows
-./scripts/check-quality.sh   # Linux/macOS
+.\scripts\vwr.ps1 quality
 
 # 运行测试
-.\scripts\test.ps1           # Windows
-./scripts/test.sh            # Linux/macOS
+.\scripts\vwr.ps1 test unit -Quick
 ```
 
 ---
@@ -210,8 +195,8 @@ video_watermark_remover/
 │   ├── config/            # 配置管理
 │   └── utils/             # 工具函数
 ├── tests/                 # 测试代码 (5,508行, 29个文件)
-├── scripts/               # 自动化脚本 (20个)
-├── docs/                  # 文档 (16个)
+├── scripts/               # 自动化脚本（统一入口：vwr.ps1）
+├── docs/                  # 文档
 ├── models/                # AI模型
 ├── logs/                  # 运行日志
 ├── config.ini             # 应用配置
@@ -272,8 +257,8 @@ video_watermark_remover/
 
 ```powershell
 # 提交前检查
-.\scripts\check-quality.ps1
-.\scripts\test.ps1 -Quick
+.\scripts\vwr.ps1 quality
+.\scripts\vwr.ps1 test unit -Quick
 ```
 
 ---
