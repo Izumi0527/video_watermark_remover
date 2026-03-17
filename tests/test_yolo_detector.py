@@ -10,6 +10,12 @@ import os
 import sys
 import time
 
+import pytest
+
+pytest.importorskip("cv2")
+pytest.importorskip("numpy")
+pytest.importorskip("torch")
+
 import cv2
 import numpy as np
 import torch

@@ -17,8 +17,10 @@
 import time
 from typing import Optional, Tuple
 
-import cv2
-import numpy as np
+import pytest
+
+cv2 = pytest.importorskip("cv2")
+np = pytest.importorskip("numpy")
 
 
 def create_test_image_with_watermark(width: int = 400, height: int = 300) -> np.ndarray:

@@ -58,3 +58,9 @@ docstring-convention = google
 # Show statistics
 statistics = True
 count = True
+
+# 说明：pre-commit 会把“暂存的文件路径”显式传给 flake8，
+# 此时 exclude 不会生效。测试目录中包含大量集成/脚本型用例，
+# 为避免阻塞提交，对 tests 下常见的脚本型告警做按目录忽略。
+per-file-ignores =
+    tests/*: E402,F401,F841,C901

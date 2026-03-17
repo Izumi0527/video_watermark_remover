@@ -6,8 +6,14 @@
 
 """
 
+import json
 import logging
 import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Any, List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -83,12 +89,13 @@ class SignalHandler(QObject):
         self.output_file_path: Optional[str] = None
         self.manual_selections: List[Any] = []
         self.processed_image: Optional[Any] = None
-        self.video_processor_thread: Optional[Any] = None
+        self.video_processor_thread: Optional[VideoProcessorThread] = None
 
         # 文件队列管理器和批处理线程
         self.file_queue_manager = FileQueueManager()
         self.batch_processor: Optional[BatchProcessorThread] = None
         self.is_batch_mode = False  # 是否为批量处理模式
+        self._batch_stop_requested = False  # 批量停止请求标记（用于取消/完成口径分流）
 
         # 设置日志
         self.logger = logging.getLogger(__name__)
@@ -132,21 +139,45 @@ class SignalHandler(QObject):
         Args:
             parent_widget: 父窗口组件，用于显示对话框
         """
-        if not self.processed_image:
-            self.log_panel.add_warning_log("没有处理后的文件可导出")
+        if not self.output_file_path or not os.path.exists(self.output_file_path):
+            self.log_panel.add_warning_log("没有可导出的处理结果，请先完成处理")
             return
 
         try:
+            source_path = self.output_file_path
+            source_suffix = Path(source_path).suffix
+            suffix_label = source_suffix.lstrip(".").upper() if source_suffix else "文件"
+            filters = (
+                f"{suffix_label} 文件 (*{source_suffix});;所有文件 (*)" if source_suffix else "所有文件 (*)"
+            )
+
             file_path, _ = self._show_save_dialog(
-                parent_widget, "保存处理后的文件", "PNG文件 (*.png);;JPEG文件 (*.jpg);;所有文件 (*)"
+                parent_widget,
+                "另存为处理后的文件",
+                filters,
+                default_filename=os.path.basename(source_path),
             )
 
             if file_path:
-                # TODO: 这里应该保存处理后的图像
-                status_msg = f"文件已导出: {os.path.basename(file_path)}"
+                target_path = Path(file_path)
+                if source_suffix:
+                    # 另存为：保持源文件扩展名，避免误以为做了格式转换
+                    if not target_path.suffix:
+                        target_path = target_path.with_suffix(source_suffix)
+                    elif target_path.suffix.lower() != source_suffix.lower():
+                        target_path = target_path.with_suffix(source_suffix)
+
+                if os.path.abspath(str(target_path)) == os.path.abspath(source_path):
+                    self.log_panel.add_warning_log("导出路径与处理结果相同，无需另存")
+                    return
+
+                shutil.copy2(source_path, str(target_path))
+                self.preferences.set_preference("paths", "last_output_dir", str(target_path.parent))
+
+                status_msg = f"文件已导出: {target_path.name}"
                 self.status_updated.emit(status_msg)
-                self.log_panel.add_success_message(f"文件导出成功: {file_path}")
-                self.logger.info(f"File exported: {file_path}")
+                self.log_panel.add_success_message(f"文件导出成功: {target_path}")
+                self.logger.info(f"File exported: {target_path}")
 
         except Exception as e:
             error_msg = f"文件导出失败: {str(e)}"
@@ -240,6 +271,8 @@ class SignalHandler(QObject):
         try:
             self.control_panel.set_processing_state(True)
             self.preview_panel.show_processing_progress()
+            self.output_file_path = None
+            self.file_panel.set_export_enabled(False)
 
             # 判断是否为批量模式
             if self.is_batch_mode:
@@ -279,29 +312,30 @@ class SignalHandler(QObject):
             if self.main_window and hasattr(self.main_window, "ai_handler"):
                 preloaded_ai_handler = self.main_window.ai_handler
 
-            self.video_processor = VideoProcessorThread(
+            self.video_processor_thread = VideoProcessorThread(
                 input_path=self.input_file_path,
                 output_path=output_path,
                 ai_params=ai_params,
-                config=None,  # TODO: 传递config
+                config=self.main_window.config if self.main_window else None,
                 preloaded_ai_handler=preloaded_ai_handler,
             )
 
             # 连接信号
-            self.video_processor.progress.connect(self.control_panel.update_progress)
-            self.video_processor.status.connect(self.log_panel.add_status_message)
-            self.video_processor.finished.connect(self._on_processing_finished)
-            self.video_processor.error.connect(self._on_processing_error)
-            # TODO: Implement preview_update method in PreviewPanel
-            # self.video_processor.preview_update.connect(self.preview_panel.update_preview)
+            self.video_processor_thread.progress.connect(self.control_panel.update_progress)
+            self.video_processor_thread.status.connect(self.log_panel.add_status_message)
+            self.video_processor_thread.finished.connect(self._on_processing_finished)
+            self.video_processor_thread.error.connect(self._on_processing_error)
+            self.video_processor_thread.preview_update.connect(
+                self.preview_panel.update_processing_preview_from_bgr
+            )
 
             # 连接详细进度信号 (Phase 4 Stage 1.4)
-            self.video_processor.detailed_progress.connect(
+            self.video_processor_thread.detailed_progress.connect(
                 self.control_panel.update_detailed_progress
             )
 
             # 启动处理线程
-            self.video_processor.start()
+            self.video_processor_thread.start()
 
             self.logger.info("Processing started with detailed progress tracking")
 
@@ -314,6 +348,7 @@ class SignalHandler(QObject):
     def _on_processing_finished(self, output_path: str):
         """处理完成回调 (Phase 4 Stage 1.4)"""
         self.control_panel.set_processing_state(False)
+        self.video_processor_thread = None
         if output_path:
             self.log_panel.add_success_message(f"处理完成: {output_path}")
             self.status_updated.emit("处理完成")
@@ -329,22 +364,41 @@ class SignalHandler(QObject):
         else:
             self.log_panel.add_warning_log("处理被取消")
             self.status_updated.emit("处理取消")
+            self.output_file_path = None
+            self.file_panel.set_export_enabled(False)
 
     def _on_processing_error(self, error_msg: str):
         """处理错误回调 (Phase 4 Stage 1.4)"""
         self.control_panel.set_processing_state(False)
         self.log_panel.add_error_message(f"处理失败: {error_msg}")
         self.status_updated.emit("处理失败")
+        self.output_file_path = None
+        self.file_panel.set_export_enabled(False)
+        self.video_processor_thread = None
 
     def handle_stop_processing(self) -> None:
         """处理停止处理请求 (Phase 4 Stage 1.4)"""
-        if hasattr(self, "video_processor") and self.video_processor:
-            self.video_processor.stop()
-            self.video_processor.wait(5000)  # 等待最多5秒
+        stopped_msg = "处理已停止"
+
+        # 批量模式：不在 UI 线程阻塞等待（避免卡顿）；由 batch_completed 负责最终收尾
+        if self.batch_processor and self.batch_processor.isRunning():
+            self._batch_stop_requested = True
+            self.batch_processor.stop()
+            stopped_msg = "批量停止请求已发送"
+
+        if self.video_processor_thread:
+            self.video_processor_thread.stop()
+            self.video_processor_thread.wait(5000)  # 等待最多5秒
+            if self.video_processor_thread.isRunning():
+                self.logger.warning("停止处理超时：处理线程仍在运行")
+            else:
+                self.video_processor_thread = None
 
         self.control_panel.set_processing_state(False)
         self.control_panel.reset_progress()  # 同时重置详细进度
-        self.status_updated.emit("处理已停止")
+        self.status_updated.emit(stopped_msg)
+        self.output_file_path = None
+        self.file_panel.set_export_enabled(False)
         self.logger.info("Processing stopped")
 
     def handle_progress_update(self, value: int) -> None:
@@ -507,6 +561,8 @@ class SignalHandler(QObject):
         self.file_panel.hide_queue()
 
         self.input_file_path = file_path
+        self.output_file_path = None
+        self.file_panel.set_export_enabled(False)
 
         # 获取文件扩展名判断文件类型
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -558,6 +614,8 @@ class SignalHandler(QObject):
         """
         self.is_batch_mode = True
         self.input_file_path = file_paths[0]  # 第一个文件用于预览
+        self.output_file_path = None
+        self.file_panel.set_export_enabled(False)
 
         # 清空旧队列，添加新文件
         self.file_queue_manager.clear_queue()
@@ -588,7 +646,9 @@ class SignalHandler(QObject):
         self.control_panel.set_start_button_enabled(True)
         self.logger.info(f"Added {len(file_paths)} files to batch queue")
 
-    def _show_save_dialog(self, parent, title: str, filters: str):
+    def _show_save_dialog(
+        self, parent, title: str, filters: str, default_filename: Optional[str] = None
+    ):
         """
         显示保存文件对话框
 
@@ -596,6 +656,7 @@ class SignalHandler(QObject):
             parent: 父窗口组件
             title: 对话框标题
             filters: 文件过滤器
+            default_filename: 默认文件名（可选）
 
         Returns:
             (file_path, selected_filter) 元组
@@ -605,7 +666,12 @@ class SignalHandler(QObject):
         last_dir = self.preferences.get_preference(
             "paths", "last_output_dir", os.path.expanduser("~")
         )
-        file_path, selected_filter = QFileDialog.getSaveFileName(parent, title, last_dir, filters)
+        initial_path = (
+            os.path.join(last_dir, default_filename) if default_filename else str(last_dir)
+        )
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            parent, title, initial_path, filters
+        )
 
         if file_path:
             self.preferences.set_preference("paths", "last_output_dir", os.path.dirname(file_path))
@@ -616,6 +682,7 @@ class SignalHandler(QObject):
 
     def _start_batch_processing(self):
         """启动批量处理"""
+        self._batch_stop_requested = False
         queue = self.file_queue_manager.get_queue()
         if not queue:
             self.log_panel.add_warning_log("处理队列为空")
@@ -656,7 +723,7 @@ class SignalHandler(QObject):
         # 连接信号
         self.batch_processor.current_file_changed.connect(self._on_batch_file_changed)
         self.batch_processor.file_progress.connect(self._on_batch_file_progress)
-        self.batch_processor.overall_progress.connect(self.control_panel.update_progress)
+        self.batch_processor.overall_progress.connect(self._on_batch_overall_progress)
         self.batch_processor.file_completed.connect(self._on_batch_file_completed)
         self.batch_processor.batch_completed.connect(self._on_batch_completed)
         self.batch_processor.status_message.connect(self._on_batch_status)
@@ -666,40 +733,90 @@ class SignalHandler(QObject):
 
     def _on_batch_file_changed(self, index: int, filename: str):
         """批处理当前文件变化"""
+        if self._batch_stop_requested:
+            return
         self.file_queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
         self._update_file_queue_display()
         self.status_updated.emit(f"正在处理: {filename}")
 
     def _on_batch_file_progress(self, progress: int, file_index: int):
         """批处理文件进度更新"""
+        if self._batch_stop_requested:
+            return
         self.file_queue_manager.update_file_status(
             file_index, ProcessingStatus.PROCESSING, progress
         )
         self._update_file_queue_display()
 
-    def _on_batch_file_completed(self, index: int, output_path: str, success: bool):
+    def _on_batch_overall_progress(self, progress: int) -> None:
+        """批处理总体进度更新"""
+        if self._batch_stop_requested:
+            return
+        self.control_panel.update_progress(progress)
+
+    def _on_batch_file_completed(self, index: int, output_path: str, status: object):
         """批处理单个文件完成"""
-        status = ProcessingStatus.COMPLETED if success else ProcessingStatus.FAILED
-        self.file_queue_manager.update_file_status(index, status, 100)
+        final_status = status if isinstance(status, ProcessingStatus) else ProcessingStatus.FAILED
+
+        if final_status == ProcessingStatus.CANCELLED:
+            current = self.file_queue_manager.get_file_info(index) or {}
+            current_progress = int(current.get("progress", 0) or 0)
+            self.file_queue_manager.update_file_status(
+                index, ProcessingStatus.CANCELLED, current_progress, "用户取消"
+            )
+        else:
+            self.file_queue_manager.update_file_status(index, final_status, 100)
+
         self._update_file_queue_display()
 
     def _on_batch_completed(self):
         """批处理全部完成"""
         self.control_panel.set_processing_state(False)
 
-        # 统计结果
-        stats = {
-            "total": self.file_queue_manager.get_queue_size(),
-            "completed": self.file_queue_manager.get_completed_count(),
-            "failed": self.file_queue_manager.get_failed_count(),
-        }
+        # 取消路径：将未完成项统一标记为 CANCELLED，避免误判为 FAILED/COMPLETED
+        if self._batch_stop_requested or (
+            self.batch_processor and self.batch_processor.should_stop
+        ):
+            queue = self.file_queue_manager.get_queue()
+            for idx, item in enumerate(queue):
+                item_status = item.get("status")
+                if item_status in (ProcessingStatus.WAITING, ProcessingStatus.PROCESSING):
+                    progress = int(item.get("progress", 0) or 0)
+                    self.file_queue_manager.update_file_status(
+                        idx, ProcessingStatus.CANCELLED, progress, "用户取消"
+                    )
 
-        self.status_updated.emit(
-            f"批量处理完成: {stats['completed']}/{stats['total']} 成功, {stats['failed']} 失败"
-        )
-        self.log_panel.add_success_message(
-            f"批量处理完成: 成功 {stats['completed']} 个, 失败 {stats['failed']} 个"
-        )
+            self._update_file_queue_display()
+
+            total = self.file_queue_manager.get_queue_size()
+            completed = self.file_queue_manager.get_completed_count()
+            failed = self.file_queue_manager.get_failed_count()
+            cancelled = sum(
+                1
+                for item in self.file_queue_manager.get_queue()
+                if item.get("status") == ProcessingStatus.CANCELLED
+            )
+
+            msg = f"批量处理已取消: 成功 {completed} 个, 失败 {failed} 个, 取消 {cancelled} 个 (共 {total} 个)"
+            self.status_updated.emit(msg)
+            self.log_panel.add_warning_log(msg)
+        else:
+            # 正常完成路径
+            stats = {
+                "total": self.file_queue_manager.get_queue_size(),
+                "completed": self.file_queue_manager.get_completed_count(),
+                "failed": self.file_queue_manager.get_failed_count(),
+            }
+
+            self.status_updated.emit(
+                f"批量处理完成: {stats['completed']}/{stats['total']} 成功, {stats['failed']} 失败"
+            )
+            self.log_panel.add_success_message(
+                f"批量处理完成: 成功 {stats['completed']} 个, 失败 {stats['failed']} 个"
+            )
+
+        self._batch_stop_requested = False
+        self.batch_processor = None
 
     def _on_batch_status(self, message: str):
         """批处理状态消息"""
@@ -716,6 +833,8 @@ class SignalHandler(QObject):
         self.file_panel.hide_queue()
         self.is_batch_mode = False
         self.input_file_path = None
+        self.output_file_path = None
+        self.file_panel.set_export_enabled(False)
         self.control_panel.set_start_button_enabled(False)
         self.status_updated.emit("队列已清空")
 
@@ -729,6 +848,191 @@ class SignalHandler(QObject):
         else:
             self._update_file_queue_display()
             self.status_updated.emit(f"队列中还有 {len(queue)} 个文件")
+
+    def handle_open_output_dir(self, index: int) -> None:
+        """
+        打开输出目录（批量模式辅助功能）
+
+        优先打开“当前选中项”的输出目录；若未选中，则打开队列第一个文件的输出目录。
+        若输出文件尚未生成，则打开输出路径所在目录（通常与输入目录一致）。
+        """
+        file_info = self._get_queue_item_or_first(index)
+        if not file_info:
+            self.log_panel.add_warning_log("处理队列为空")
+            return
+
+        input_path = str(file_info.get("input_path", "") or "")
+        output_path = str(file_info.get("output_path", "") or "")
+
+        directory = self._resolve_output_directory(input_path=input_path, output_path=output_path)
+        if not directory:
+            self.log_panel.add_warning_log("无法确定输出目录")
+            return
+
+        if not os.path.isdir(directory):
+            self.log_panel.add_warning_log(f"输出目录不存在: {directory}")
+            return
+
+        ok, msg = self._open_path_in_file_manager(directory=directory, output_path=output_path)
+        if ok:
+            self.status_updated.emit(msg)
+            self.log_panel.add_status_message(msg)
+        else:
+            self.log_panel.add_warning_log(msg)
+
+    def _get_queue_item_or_first(self, index: int) -> Optional[dict[str, Any]]:
+        """获取队列项：优先 index，否则返回第一个。"""
+        queue = self.file_queue_manager.get_queue()
+        if not queue:
+            return None
+
+        if 0 <= index < len(queue):
+            return queue[index]
+        return queue[0]
+
+    def _resolve_output_directory(self, input_path: str, output_path: str) -> str:
+        """从输入/输出路径解析需要打开的目录。"""
+        if output_path:
+            return os.path.dirname(output_path)
+        if input_path:
+            return os.path.dirname(input_path)
+        return ""
+
+    def _open_path_in_file_manager(  # noqa: C901
+        self, directory: str, output_path: str
+    ) -> tuple[bool, str]:
+        """使用系统文件管理器打开目录或定位输出文件。"""
+        try:
+            if os.name == "nt":
+                windir = os.environ.get("WINDIR") or r"C:\Windows"
+                explorer = os.path.join(windir, "explorer.exe")
+
+                if output_path and os.path.isfile(output_path):
+                    result = subprocess.run([explorer, "/select,", output_path], check=False)
+                    if result.returncode != 0:
+                        return (
+                            False,
+                            f"无法打开资源管理器定位文件（返回码 {result.returncode}）",
+                        )
+                    return (True, f"已定位输出文件: {os.path.basename(output_path)}")
+
+                result = subprocess.run([explorer, directory], check=False)
+                if result.returncode != 0:
+                    return (False, f"无法打开输出目录（返回码 {result.returncode}）")
+                return (True, f"已打开输出目录: {directory}")
+
+            if sys.platform == "darwin":
+                open_cmd = "/usr/bin/open"
+                result = subprocess.run([open_cmd, directory], check=False)
+                if result.returncode != 0:
+                    return (False, f"当前环境无法打开文件管理器（返回码 {result.returncode}）")
+                return (True, f"已打开输出目录: {directory}")
+
+            xdg_open = shutil.which("xdg-open")
+            if not xdg_open:
+                return (False, "当前环境缺少 xdg-open，无法打开文件管理器")
+
+            result = subprocess.run([xdg_open, directory], check=False)
+            if result.returncode != 0:
+                return (False, f"当前环境无法打开文件管理器（返回码 {result.returncode}）")
+            return (True, f"已打开输出目录: {directory}")
+
+        except Exception as e:  # noqa: BLE001
+            return (False, f"打开输出目录失败: {e}")
+
+    def handle_export_batch_manifest(self, parent_widget) -> None:  # noqa: C901
+        """
+        导出批处理清单（JSON）
+
+        用于保存当前队列的处理状态，便于追溯与排查问题。
+        """
+        queue = self.file_queue_manager.get_queue()
+        if not queue:
+            self.log_panel.add_warning_log("处理队列为空")
+            return
+
+        stats = {
+            "total": self.file_queue_manager.get_queue_size(),
+            "completed": self.file_queue_manager.get_completed_count(),
+            "failed": self.file_queue_manager.get_failed_count(),
+            "processing": self.file_queue_manager.get_processing_count(),
+            "pending": self.file_queue_manager.get_pending_count(),
+        }
+
+        manifest_items: list[dict[str, Any]] = []
+
+        manifest: dict[str, Any] = {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "app_version": None,
+            "platform": sys.platform,
+            "os_name": os.name,
+            "stats": stats,
+            "batch": {
+                "max_concurrent_files": getattr(self.batch_processor, "max_concurrent_files", None),
+                "auto_retry_failed": getattr(self.batch_processor, "auto_retry_failed", None),
+                "max_retry_count": getattr(self.batch_processor, "max_retry_count", None),
+            },
+            "items": manifest_items,
+        }
+
+        try:
+            from PyQt6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app and hasattr(app, "applicationVersion"):
+                version = str(app.applicationVersion() or "").strip()
+                manifest["app_version"] = version if version else None
+        except Exception as e:  # noqa: BLE001
+            self.logger.debug(f"获取应用版本失败（不影响清单导出）: {e}")
+
+        for idx, item in enumerate(queue):
+            status = item.get("status")
+            if isinstance(status, ProcessingStatus):
+                status_value = status.value
+            else:
+                status_value = str(status)
+            manifest_items.append(
+                {
+                    "index": idx,
+                    "input_path": item.get("input_path", ""),
+                    "output_path": item.get("output_path", ""),
+                    "status": status_value,
+                    "progress": int(item.get("progress", 0) or 0),
+                    "error_message": item.get("error_message", ""),
+                }
+            )
+
+        default_name = f"batch_manifest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        file_path, _ = self._show_save_dialog(
+            parent_widget,
+            "导出批处理清单",
+            "JSON文件 (*.json);;所有文件 (*)",
+            default_filename=default_name,
+        )
+
+        if not file_path:
+            return
+
+        try:
+            target_path = Path(file_path)
+            if target_path.suffix.lower() != ".json":
+                target_path = target_path.with_suffix(".json")
+
+            target_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            self.preferences.set_preference("paths", "last_output_dir", str(target_path.parent))
+
+            self.status_updated.emit(f"批处理清单已导出: {target_path.name}")
+            self.log_panel.add_success_message(f"批处理清单导出成功: {target_path}")
+            self.logger.info(f"Batch manifest exported: {target_path}")
+
+        except Exception as e:
+            error_msg = f"批处理清单导出失败: {e}"
+            self.log_panel.add_error_message(error_msg)
+            self.logger.error(error_msg)
 
     # ==================== 状态访问方法 ====================
 
@@ -751,10 +1055,13 @@ class SignalHandler(QObject):
 
     def cleanup(self) -> None:
         """清理资源"""
+        if self.batch_processor and self.batch_processor.isRunning():
+            self.batch_processor.stop()
+            self.batch_processor.wait(2000)
+
         # 停止处理线程
-        if self.video_processor_thread and hasattr(self.video_processor_thread, "isRunning"):
-            if self.video_processor_thread.isRunning():
-                self.video_processor_thread.quit()
-                self.video_processor_thread.wait()
+        if self.video_processor_thread and self.video_processor_thread.isRunning():
+            self.video_processor_thread.stop()
+            self.video_processor_thread.wait(5000)
 
         self.logger.info("SignalHandler cleaned up")

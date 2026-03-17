@@ -8,13 +8,13 @@ from multiprocessing import synchronize
 from typing import Any, Optional, Tuple, cast
 
 import cv2
-import psutil  # type: ignore[import-untyped]
 from PyQt6.QtCore import QTimer
 
 from .audio_tasks import async_audio_extractor
 from .frame_processor import frame_processor_worker, init_worker_ai_handler
 from .frame_reader import frame_reader_worker
 from .frame_writer import frame_writer_worker
+from .path_utils import build_temp_path
 
 
 def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_queues.Queue[Any]:
@@ -24,7 +24,7 @@ def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_que
 
 def _calculate_queue_sizes(processor) -> Tuple[int, int]:
     try:
-        import psutil
+        import psutil  # type: ignore[import-untyped]
 
         available_mb = psutil.virtual_memory().available / (1024 * 1024)
 
@@ -127,7 +127,7 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
         progress_queue = _create_manager_queue(manager)
         processor._stop_event = cast(synchronize.Event, manager.Event())
 
-        temp_output_path = processor.output_path.replace(".", "_temp_pipeline.")
+        temp_output_path = build_temp_path(processor.output_path, "temp_pipeline")
 
         audio_completion_event = None
         audio_thread = None
@@ -294,11 +294,11 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
                 if os.path.exists(temp_output_path):
                     if os.path.exists(processor.output_path):
                         os.remove(processor.output_path)
-                    os.rename(temp_output_path, processor.output_path)
+                    os.replace(temp_output_path, processor.output_path)
         else:
             if os.path.exists(processor.output_path):
                 os.remove(processor.output_path)
-            os.rename(temp_output_path, processor.output_path)
+            os.replace(temp_output_path, processor.output_path)
 
         processor.progress.emit(100)
         processor.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
@@ -338,8 +338,8 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
                 try:
                     while not queue.empty():
                         queue.get_nowait()
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    processor.logger.debug(f"清空队列失败: {e}")
 
         if audio_temp_path and os.path.exists(audio_temp_path):
             try:

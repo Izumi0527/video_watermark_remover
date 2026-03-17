@@ -1,4 +1,5 @@
 import logging
+import time
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -31,6 +32,7 @@ class PreviewPanel(QWidget):
         self.logger = logging.getLogger(__name__)
         self._current_image = None
         self._processed_image = None
+        self._last_processing_preview_ts = 0.0
         self._init_ui()
 
     def _init_ui(self):
@@ -292,6 +294,55 @@ class PreviewPanel(QWidget):
             # 自动切换到对比标签页
             self.preview_tabs.setCurrentWidget(self.comparison_tab)
             self.logger.info("Processed image preview updated")
+
+    def update_processing_preview_from_bgr(self, frame_bgr) -> None:
+        """
+        处理过程中实时更新“处理后”预览图。
+
+        说明：
+        - 输入为 OpenCV 常见的 BGR numpy 数组
+        - 这里做 BGR -> RGB 转换，并对刷新频率做简单节流，避免 UI 卡顿
+        """
+        try:
+            if frame_bgr is None:
+                return
+
+            now = time.monotonic()
+            if now - self._last_processing_preview_ts < 0.12:
+                return
+            self._last_processing_preview_ts = now
+
+            if not hasattr(frame_bgr, "shape") or len(frame_bgr.shape) != 3:
+                return
+
+            h, w, c = frame_bgr.shape
+            if h <= 0 or w <= 0 or c < 3:
+                return
+
+            # BGR -> RGB（避免依赖 cv2，直接使用数组翻转通道）
+            frame_rgb = frame_bgr[:, :, :3][:, :, ::-1]
+
+            from PyQt6.QtGui import QImage, QPixmap
+
+            bytes_per_line = 3 * w
+            q_image = QImage(
+                frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+            ).copy()
+            pixmap = QPixmap.fromImage(q_image)
+            if pixmap.isNull():
+                return
+
+            scaled_pixmap = pixmap.scaled(
+                450,
+                320,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.processed_image_label.setPixmap(scaled_pixmap)
+            self.processed_image_label.setText("")
+
+        except Exception as e:
+            self.logger.debug(f"更新处理中预览失败: {e}")
 
     def clear_preview(self):
         """清空预览"""

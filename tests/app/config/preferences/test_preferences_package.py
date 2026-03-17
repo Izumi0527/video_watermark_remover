@@ -9,9 +9,9 @@ from app.config import preferences
 def test_defaults_deepcopy():
     base = preferences.PreferencesDefaults.DEFAULT_PREFERENCES
     copy = preferences.PreferencesDefaults.get_default_preferences()
-    copy["ui"]["theme"] = "light"
-    assert base["ui"]["theme"] == "dark"
-    assert copy["ui"]["theme"] == "light"
+    copy["ui"]["theme"] = "dark"
+    assert base["ui"]["theme"] == "light"
+    assert copy["ui"]["theme"] == "dark"
 
 
 def test_validator_rules():
@@ -75,7 +75,7 @@ def test_manager_set_get(tmp_path):
     assert manager.get_recent_files() == []
 
     assert manager.reset_to_defaults()
-    assert manager.get_preference("ui", "theme") == "dark"
+    assert manager.get_preference("ui", "theme") == "light"
 
 
 def test_global_manager_singleton(tmp_path, monkeypatch):
@@ -100,14 +100,14 @@ def test_global_manager_singleton(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_preferences_manager", None)
     m3 = mod.get_preferences_manager(str(cfg2))
     assert m3 is not m1
-    assert m3.get_preference("ui", "theme") == "dark"
+    assert m3.get_preference("ui", "theme") == "light"
 
 
 @pytest.mark.parametrize(
     "input_json,expected_theme",
     [
         ({"ui": {"theme": "light"}}, "light"),
-        ({}, "dark"),
+        ({}, "light"),
     ],
 )
 def test_storage_merge_with_default(tmp_path, input_json, expected_theme):

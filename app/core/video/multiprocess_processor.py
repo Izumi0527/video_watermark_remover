@@ -11,6 +11,7 @@ import cv2
 from PyQt6.QtCore import QTimer
 
 from .chunk_worker import init_chunk_worker_ai_handler, process_video_chunk
+from .path_utils import build_temp_path
 
 
 def _calculate_chunks(
@@ -213,11 +214,9 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         processor.progress.emit(95)
 
         # 发射合并视频块阶段进度
-        processor._emit_detailed_progress(
-            "merging_audio", 0, 1, {"sub_phase": "merging_chunks"}
-        )
+        processor._emit_detailed_progress("merging_audio", 0, 1, {"sub_phase": "merging_chunks"})
 
-        temp_merged_path = processor.output_path.replace(".", "_temp_merged.")
+        temp_merged_path = build_temp_path(processor.output_path, "temp_merged")
         _merge_video_chunks(processor, chunk_paths, temp_merged_path)
 
         if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
@@ -225,9 +224,7 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
             processor.progress.emit(97)
 
             # 发射音频合并阶段进度
-            processor._emit_detailed_progress(
-                "merging_audio", 0, 1, {"sub_phase": "merging_audio"}
-            )
+            processor._emit_detailed_progress("merging_audio", 0, 1, {"sub_phase": "merging_audio"})
 
             audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
                 original_video_path=processor.input_path,
@@ -244,11 +241,11 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
                 if os.path.exists(temp_merged_path):
                     if os.path.exists(processor.output_path):
                         os.remove(processor.output_path)
-                    os.rename(temp_merged_path, processor.output_path)
+                    os.replace(temp_merged_path, processor.output_path)
         else:
             if os.path.exists(processor.output_path):
                 os.remove(processor.output_path)
-            os.rename(temp_merged_path, processor.output_path)
+            os.replace(temp_merged_path, processor.output_path)
 
         processor.progress.emit(100)
         processor.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")

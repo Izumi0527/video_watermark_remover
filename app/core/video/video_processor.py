@@ -174,5 +174,10 @@ class VideoProcessorThread(QThread):
 
     def stop(self) -> None:
         self._is_running = False
+        if self._stop_event:
+            try:
+                self._stop_event.set()
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"设置停止事件失败: {e}")
         self.status.emit("⏹️ 正在停止处理...")
         self.logger.info("Stop signal received")

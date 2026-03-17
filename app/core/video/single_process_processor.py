@@ -3,6 +3,7 @@ import os
 import cv2
 
 from ..exceptions import ModelLoadError, VideoReadError, VideoWriteError
+from .path_utils import build_temp_path
 
 
 def process_video_singleprocess(processor) -> None:  # noqa: C901
@@ -103,8 +104,14 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
 
         if not processor._is_running:
             processor.status.emit("⚠️ 处理已取消")
+            if out:
+                out.release()
+                out = None
             if os.path.exists(processor.output_path):
-                os.remove(processor.output_path)
+                try:
+                    os.remove(processor.output_path)
+                except Exception as e:  # noqa: BLE001
+                    processor.logger.warning(f"取消处理时删除输出文件失败: {e}")
             processor.finished.emit("")
             return
 
@@ -116,10 +123,10 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
         final_output_path = processor.output_path
 
         if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
-            temp_video_path = processor.output_path.replace(".", "_temp_video.")
+            temp_video_path = build_temp_path(processor.output_path, "temp_video")
 
             if os.path.exists(processor.output_path):
-                os.rename(processor.output_path, temp_video_path)
+                os.replace(processor.output_path, temp_video_path)
 
             processor._emit_detailed_progress("merging_audio", 0, 1)
             processor.status.emit("🎵 正在合并原始音频...")
@@ -141,7 +148,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
                 if os.path.exists(temp_video_path):
                     if os.path.exists(final_output_path):
                         os.remove(final_output_path)
-                    os.rename(temp_video_path, final_output_path)
+                    os.replace(temp_video_path, final_output_path)
 
             if os.path.exists(temp_video_path) and temp_video_path != final_output_path:
                 try:

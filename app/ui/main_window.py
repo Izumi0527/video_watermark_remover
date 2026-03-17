@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(title_container, stretch=1, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # 右侧状态标签
-        self.lbl_status = QLabel("✅ AI模型已就绪，可以开始处理")
+        self.lbl_status = QLabel("⏳ AI模型准备中（后台加载）")
         self.lbl_status.setObjectName("status_badge")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setFixedHeight(28)
@@ -242,6 +242,12 @@ class MainWindow(QMainWindow):
         # 文件队列操作信号 -> SignalHandler
         self.file_panel.queue_clear_requested.connect(self.signal_handler.handle_queue_clear)
         self.file_panel.file_remove_requested.connect(self.signal_handler.handle_file_remove)
+        self.file_panel.open_output_dir_requested.connect(
+            self.signal_handler.handle_open_output_dir
+        )
+        self.file_panel.export_manifest_requested.connect(
+            lambda: self.signal_handler.handle_export_batch_manifest(self)
+        )
 
         # 预览面板信号 -> SignalHandler
         self.preview_panel.manual_selection_changed.connect(

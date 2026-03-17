@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
 
-import cv2
-import numpy as np
 import pytest
+
+cv2 = pytest.importorskip("cv2")
+np = pytest.importorskip("numpy")
 
 from app.core.video import (
     chunk_worker,

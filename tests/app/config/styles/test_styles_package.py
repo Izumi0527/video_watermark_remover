@@ -1,5 +1,9 @@
 import types
 
+import pytest
+
+pytest.importorskip("PyQt6")
+
 from app.config import styles
 
 

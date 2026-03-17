@@ -25,7 +25,7 @@ def main():
 
         # Set application properties
         app.setApplicationName("智能视频水印去除工具")
-        app.setApplicationVersion("0.3.0-refactored")
+        app.setApplicationVersion("0.5.0")
         app.setOrganizationName("VideoWatermarkRemover")
 
         # Create and show the main window

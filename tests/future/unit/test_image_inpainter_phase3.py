@@ -16,9 +16,10 @@ ImageInpainter 单元测试
 
 from unittest.mock import Mock, patch
 
-import cv2
-import numpy as np
 import pytest
+
+cv2 = pytest.importorskip("cv2")
+np = pytest.importorskip("numpy")
 
 from app.core.ai.image_inpainter import ImageInpainter
 

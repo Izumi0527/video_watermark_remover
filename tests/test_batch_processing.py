@@ -9,6 +9,10 @@
 import os
 import sys
 
+import pytest
+
+pytest.importorskip("PyQt6")
+
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 

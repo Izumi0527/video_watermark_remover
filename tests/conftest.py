@@ -77,7 +77,7 @@ def mock_image():
     Returns:
         numpy.ndarray: 640x480 的黑色 BGR 图像
     """
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     return np.zeros((480, 640, 3), dtype=np.uint8)
 
@@ -90,6 +90,6 @@ def mock_mask():
     Returns:
         numpy.ndarray: 640x480 的全零掩码
     """
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     return np.zeros((480, 640), dtype=np.uint8)

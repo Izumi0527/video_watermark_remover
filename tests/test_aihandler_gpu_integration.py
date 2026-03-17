@@ -9,6 +9,11 @@ import os
 import sys
 import time
 
+import pytest
+
+pytest.importorskip("cv2")
+pytest.importorskip("numpy")
+
 import cv2
 import numpy as np
 

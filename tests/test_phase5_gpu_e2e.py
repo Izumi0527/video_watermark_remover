@@ -9,6 +9,12 @@ import os
 import sys
 import time
 
+import pytest
+
+pytest.importorskip("PyQt6")
+pytest.importorskip("cv2")
+pytest.importorskip("numpy")
+
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

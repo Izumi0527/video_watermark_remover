@@ -31,6 +31,8 @@ class FilePanel(QWidget):
     manual_mode_changed = pyqtSignal(bool)
     queue_clear_requested = pyqtSignal()
     file_remove_requested = pyqtSignal(int)
+    open_output_dir_requested = pyqtSignal(int)
+    export_manifest_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -183,6 +185,22 @@ class FilePanel(QWidget):
         btn_layout.addStretch()
         queue_layout.addLayout(btn_layout)
 
+        # 批量处理辅助操作（导出清单 / 打开输出目录）
+        batch_action_layout = QHBoxLayout()
+
+        self.btn_open_output_dir = QPushButton("📂 打开输出目录")
+        self.btn_open_output_dir.setToolTip("打开选中文件（或第一个文件）的输出目录")
+        self.btn_open_output_dir.clicked.connect(self._on_open_output_dir)
+        batch_action_layout.addWidget(self.btn_open_output_dir)
+
+        self.btn_export_manifest = QPushButton("📄 导出处理清单")
+        self.btn_export_manifest.setToolTip("导出当前队列的处理清单（JSON）")
+        self.btn_export_manifest.clicked.connect(self._on_export_manifest)
+        batch_action_layout.addWidget(self.btn_export_manifest)
+
+        batch_action_layout.addStretch()
+        queue_layout.addLayout(batch_action_layout)
+
         main_layout.addWidget(self.queue_group)
 
     def update_queue_display(self, queue_data: list):
@@ -206,6 +224,7 @@ class FilePanel(QWidget):
             ProcessingStatus.PROCESSING: "🔄",
             ProcessingStatus.COMPLETED: "✅",
             ProcessingStatus.FAILED: "❌",
+            ProcessingStatus.CANCELLED: "⏹️",
         }
 
         for item in queue_data:
@@ -226,8 +245,11 @@ class FilePanel(QWidget):
         total = len(queue_data)
         completed = sum(1 for i in queue_data if i.get("status") == ProcessingStatus.COMPLETED)
         failed = sum(1 for i in queue_data if i.get("status") == ProcessingStatus.FAILED)
+        cancelled = sum(1 for i in queue_data if i.get("status") == ProcessingStatus.CANCELLED)
 
-        self.queue_info_label.setText(f"文件队列: {total} 个 | 完成: {completed} | 失败: {failed}")
+        self.queue_info_label.setText(
+            f"文件队列: {total} 个 | 完成: {completed} | 失败: {failed} | 取消: {cancelled}"
+        )
 
     def show_queue(self):
         """显示队列区域"""
@@ -246,3 +268,12 @@ class FilePanel(QWidget):
     def _on_clear_queue(self):
         """清空队列"""
         self.queue_clear_requested.emit()
+
+    def _on_open_output_dir(self):
+        """打开输出目录"""
+        current_row = self.file_list_widget.currentRow()
+        self.open_output_dir_requested.emit(current_row)
+
+    def _on_export_manifest(self):
+        """导出批处理清单"""
+        self.export_manifest_requested.emit()

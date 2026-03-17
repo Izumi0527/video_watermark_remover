@@ -55,6 +55,7 @@ class BatchProcessingWidget(QWidget):
         # 自动重试配置
         self.auto_retry_failed = True  # 默认自动重试
         self.max_retry_count = 3  # 默认重试次数
+        self._stop_requested = False  # 批量停止请求标记（用于取消/完成口径分流）
 
         # UI组件引用
         self.ui_components = {}
@@ -145,6 +146,7 @@ class BatchProcessingWidget(QWidget):
 
     def start_batch_processing(self):
         """开始批量处理"""
+        self._stop_requested = False
         queue_manager = self.file_manager.get_queue_manager()
         queue = queue_manager.get_queue()
 
@@ -188,6 +190,7 @@ class BatchProcessingWidget(QWidget):
     def stop_batch_processing(self):
         """停止批量处理"""
         if self.batch_processor and self.batch_processor.isRunning():
+            self._stop_requested = True
             self.batch_processor.stop()
             self.batch_processor.wait(5000)  # 等待最多5秒
 
@@ -247,27 +250,61 @@ class BatchProcessingWidget(QWidget):
         """总体进度更新"""
         self.ui_components["overall_progress_bar"].setValue(progress)
 
-    def _on_file_completed(self, index: int, output_path: str, success: bool):
+    def _on_file_completed(self, index: int, output_path: str, status: object):
         """文件处理完成 (Phase 4 Stage 1.4 - 增强版)"""
-        status = ProcessingStatus.COMPLETED if success else ProcessingStatus.FAILED
+        final_status = status if isinstance(status, ProcessingStatus) else ProcessingStatus.FAILED
         queue_manager = self.file_manager.get_queue_manager()
-        queue_manager.update_file_status(index, status, 100)
+
+        if final_status == ProcessingStatus.CANCELLED:
+            current = queue_manager.get_file_info(index) or {}
+            current_progress = int(current.get("progress", 0) or 0)
+            queue_manager.update_file_status(
+                index, ProcessingStatus.CANCELLED, current_progress, "用户取消"
+            )
+        else:
+            queue_manager.update_file_status(index, final_status, 100)
+
         self._update_queue_display()
         self._update_statistics()  # 更新统计信息
 
     def _on_batch_completed(self):
         """批量处理完成"""
-        self.ui_components["current_file_label"].setText("批量处理已完成")
-        self._reset_ui_state()
-        self.processing_finished.emit()
-
-        # 显示完成统计
-        stats = self.file_manager.get_queue_statistics()
-        QMessageBox.information(
-            self,
-            "处理完成",
-            f"批量处理完成！\n总计: {stats['total']}\n成功: {stats['completed']}\n失败: {stats['failed']}",
+        cancelled = self._stop_requested or (
+            self.batch_processor is not None and getattr(self.batch_processor, "should_stop", False)
         )
+
+        if cancelled:
+            queue_manager = self.file_manager.get_queue_manager()
+            queue = queue_manager.get_queue()
+            for idx, item in enumerate(queue):
+                item_status = item.get("status")
+                if item_status in (ProcessingStatus.WAITING, ProcessingStatus.PROCESSING):
+                    progress = int(item.get("progress", 0) or 0)
+                    queue_manager.update_file_status(
+                        idx, ProcessingStatus.CANCELLED, progress, "用户取消"
+                    )
+
+            self.ui_components["current_file_label"].setText("批量处理已取消")
+            self._update_queue_display()
+            self._update_statistics()
+            self._reset_ui_state()
+            self.processing_finished.emit()
+
+            QMessageBox.information(self, "已取消", "批量处理已取消")
+        else:
+            self.ui_components["current_file_label"].setText("批量处理已完成")
+            self._reset_ui_state()
+            self.processing_finished.emit()
+
+            # 显示完成统计
+            stats = self.file_manager.get_queue_statistics()
+            QMessageBox.information(
+                self,
+                "处理完成",
+                f"批量处理完成！\n总计: {stats['total']}\n成功: {stats['completed']}\n失败: {stats['failed']}",
+            )
+
+        self._stop_requested = False
 
     def _on_status_message(self, message: str):
         """状态消息更新"""

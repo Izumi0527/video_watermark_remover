@@ -13,7 +13,7 @@
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
 from threading import Lock
 from typing import Any, Dict, List, Optional
@@ -46,7 +46,7 @@ class BatchProcessorThread(QThread):
     current_file_changed = pyqtSignal(int, str)  # 当前处理文件索引和名称
     file_progress = pyqtSignal(int, int)  # 当前文件进度百分比和文件索引
     overall_progress = pyqtSignal(int)  # 总体进度百分比
-    file_completed = pyqtSignal(int, str, bool)  # 文件完成：索引，输出路径，是否成功
+    file_completed = pyqtSignal(int, str, object)  # 文件完成：索引，输出路径，处理状态
     batch_completed = pyqtSignal()  # 批量处理完成
     status_message = pyqtSignal(str)  # 状态消息
 
@@ -93,6 +93,9 @@ class BatchProcessorThread(QThread):
         # 线程安全的锁（用于更新共享状态）
         self._lock = Lock()
         self._completed_count = 0
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self._futures: Dict[Future, int] = {}
+        self._active_processors: Dict[int, VideoProcessorThread] = {}
 
         if preloaded_ai_handler:
             self.logger.info("批量处理将使用预加载的AI模型，性能将得到优化")
@@ -106,8 +109,38 @@ class BatchProcessorThread(QThread):
         self.should_stop = False
         self._completed_count = 0
         self._retry_counts.clear()  # 重置重试计数器
+        with self._lock:
+            self._futures.clear()
+            self._active_processors.clear()
+        self._executor = None
 
-    def run(self):
+    def _cancel_pending_futures(self) -> int:
+        """尝试取消尚未执行的任务，返回取消数量。"""
+        with self._lock:
+            futures = list(self._futures.keys())
+
+        cancelled_count = 0
+        for future in futures:
+            try:
+                if future.cancel():
+                    cancelled_count += 1
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"取消待执行任务失败: {e}")
+
+        return cancelled_count
+
+    def _stop_active_processors(self) -> None:
+        """停止当前正在处理中的子任务（尽力而为）。"""
+        with self._lock:
+            processors = list(self._active_processors.values())
+
+        for processor in processors:
+            try:
+                processor.stop()
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"停止子任务失败: {e}")
+
+    def run(self):  # noqa: C901
         """
         运行批量处理（并发版本）
 
@@ -126,10 +159,13 @@ class BatchProcessorThread(QThread):
             f"[INFO] 开始并发批量处理 {total_files} 个文件 " f"(并发数: {self.max_concurrent_files})"
         )
 
-        # 使用 ThreadPoolExecutor 实现并发处理
-        with ThreadPoolExecutor(max_workers=self.max_concurrent_files) as executor:
+        executor = ThreadPoolExecutor(max_workers=self.max_concurrent_files)
+        self._executor = executor
+        future_to_index: Dict[Future, int] = {}
+        pending_futures: set[Future] = set()
+
+        try:
             # 提交所有任务到线程池
-            future_to_index = {}
             for index, file_info in enumerate(self.file_queue):
                 if self.should_stop:
                     break
@@ -139,10 +175,14 @@ class BatchProcessorThread(QThread):
 
                 if not input_path or not output_path:
                     self.logger.error(f"文件路径无效：{file_info}")
+                    self.file_completed.emit(index, "", ProcessingStatus.FAILED)
+                    with self._lock:
+                        self._completed_count += 1
+                        overall_progress = int((self._completed_count / total_files) * 100)
+                    self.overall_progress.emit(overall_progress)
                     continue
 
-                # 提交任务到线程池
-                future = executor.submit(
+                future: Future = executor.submit(
                     self._process_single_file_wrapper,
                     index,
                     input_path,
@@ -150,40 +190,66 @@ class BatchProcessorThread(QThread):
                     total_files,
                 )
                 future_to_index[future] = index
+                pending_futures.add(future)
+                with self._lock:
+                    self._futures[future] = index
 
-            # 收集处理结果
-            for future in as_completed(future_to_index):
+            # 轮询收集处理结果（支持随时取消）
+            while pending_futures:
                 if self.should_stop:
-                    self.status_message.emit("[INFO] 批量处理已取消")
+                    self._cancel_pending_futures()
+                    self._stop_active_processors()
                     break
 
-                index = future_to_index[future]
-                try:
-                    output_path, success = future.result()
+                done, pending_futures = wait(
+                    pending_futures,
+                    timeout=0.2,
+                    return_when=FIRST_COMPLETED,
+                )
 
-                    # 发送文件完成信号
-                    self.file_completed.emit(index, output_path if success else "", success)
+                for future in done:
+                    with self._lock:
+                        self._futures.pop(future, None)
 
-                    # 线程安全地更新完成计数和总体进度
+                    file_index = future_to_index.get(future)
+                    if file_index is None:
+                        continue
+
+                    try:
+                        output_path, status = future.result()
+                        self.file_completed.emit(file_index, output_path, status)
+                    except Exception as e:  # noqa: BLE001
+                        self.logger.error(f"处理文件 {file_index} 时发生异常: {e}")
+                        self.file_completed.emit(file_index, "", ProcessingStatus.FAILED)
+
                     with self._lock:
                         self._completed_count += 1
                         overall_progress = int((self._completed_count / total_files) * 100)
-                        self.overall_progress.emit(overall_progress)
+                    self.overall_progress.emit(overall_progress)
 
-                except Exception as e:
-                    self.logger.error(f"处理文件 {index} 时发生异常: {e}")
-                    self.file_completed.emit(index, "", False)
+        finally:
+            self.is_running = False
+            self._executor = None
+            with self._lock:
+                self._futures.clear()
 
-        self.is_running = False
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
 
-        if not self.should_stop:
-            self.status_message.emit(f"[SUCCESS] 批量处理完成 ({self._completed_count}/{total_files})")
+            if self.should_stop:
+                self.status_message.emit("[INFO] 批量处理已取消")
+            else:
+                self.status_message.emit(
+                    f"[SUCCESS] 批量处理完成 ({self._completed_count}/{total_files})"
+                )
 
-        self.batch_completed.emit()
+            self.batch_completed.emit()
 
     def _process_single_file_wrapper(
         self, index: int, input_path: str, output_path: str, total_files: int
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, ProcessingStatus]:
         """
         单文件处理包装器（用于线程池），支持递增延迟自动重试
 
@@ -194,8 +260,11 @@ class BatchProcessorThread(QThread):
             total_files: 总文件数
 
         Returns:
-            (output_path, success) 元组
+            (output_path, status) 元组
         """
+        if self.should_stop:
+            return ("", ProcessingStatus.CANCELLED)
+
         # 初始化重试计数
         if index not in self._retry_counts:
             self._retry_counts[index] = 0
@@ -212,10 +281,10 @@ class BatchProcessorThread(QThread):
         self.status_message.emit(f"[INFO] 处理文件 {index + 1}/{total_files}: {filename}{retry_info}")
 
         # 调用实际处理方法
-        success = self._process_single_file(input_path, output_path, index)
+        status = self._process_single_file(input_path, output_path, index)
 
         # 自动重试逻辑（递增延迟策略：1秒、2秒、4秒...）
-        if not success and self.auto_retry_failed:
+        if status == ProcessingStatus.FAILED and self.auto_retry_failed:
             while self._retry_counts[index] < self.max_retry_count and not self.should_stop:
                 self._retry_counts[index] += 1
                 # 递增延迟：2^(retry_count-1) 秒，即 1, 2, 4, 8...
@@ -224,19 +293,27 @@ class BatchProcessorThread(QThread):
                     f"[WARNING] 文件处理失败，{delay}秒后重试 "
                     f"({self._retry_counts[index]}/{self.max_retry_count}): {filename}"
                 )
-                time.sleep(delay)  # 递增延迟等待
+
+                # 递增延迟等待（可中断）
+                remaining = float(delay)
+                while remaining > 0 and not self.should_stop:
+                    time.sleep(min(0.1, remaining))
+                    remaining -= 0.1
 
                 if self.should_stop:
                     break
 
-                success = self._process_single_file(input_path, output_path, index)
-                if success:
+                status = self._process_single_file(input_path, output_path, index)
+                if status == ProcessingStatus.COMPLETED:
                     self.status_message.emit(f"[SUCCESS] 重试成功: {filename}")
                     break
 
-        return (output_path, success)
+        result_path = output_path if status == ProcessingStatus.COMPLETED else ""
+        return (result_path, status)
 
-    def _process_single_file(self, input_path: str, output_path: str, file_index: int) -> bool:
+    def _process_single_file(  # noqa: C901
+        self, input_path: str, output_path: str, file_index: int
+    ) -> ProcessingStatus:
         """
         处理单个文件（使用 VideoProcessorThread）
 
@@ -246,13 +323,16 @@ class BatchProcessorThread(QThread):
             file_index: 文件索引
 
         Returns:
-            bool: 处理是否成功
+            ProcessingStatus: 单文件处理结果状态
         """
         try:
+            if self.should_stop:
+                return ProcessingStatus.CANCELLED
+
             # 检查输入文件是否存在
             if not os.path.exists(input_path):
                 self.logger.error(f"输入文件不存在: {input_path}")
-                return False
+                return ProcessingStatus.FAILED
 
             # 创建输出目录
             output_dir = os.path.dirname(output_path)
@@ -269,52 +349,74 @@ class BatchProcessorThread(QThread):
             )
 
             # 连接进度信号
-            processor.progress.connect(
-                lambda progress: self.file_progress.emit(progress, file_index)
-            )
+            def on_progress(progress: int) -> None:
+                if self.should_stop:
+                    return
+                self.file_progress.emit(progress, file_index)
+
+            processor.progress.connect(on_progress)
 
             # 创建事件循环标志
-            processing_completed = False
             processing_success = False
             processing_error = None
 
             def on_finished(result_path):
-                nonlocal processing_completed, processing_success
-                processing_completed = True
+                nonlocal processing_success
                 processing_success = bool(result_path)
 
             def on_error(error_msg):
-                nonlocal processing_completed, processing_error
-                processing_completed = True
+                nonlocal processing_error
                 processing_error = error_msg
 
             # 连接完成和错误信号
             processor.finished.connect(on_finished)
             processor.error.connect(on_error)
 
-            # 同步运行处理（在当前线程中）
-            processor.run()
+            with self._lock:
+                self._active_processors[file_index] = processor
+
+            try:
+                # 同步运行处理（在当前线程中）
+                if self.should_stop:
+                    processor.stop()
+                    return ProcessingStatus.CANCELLED
+                processor.run()
+            finally:
+                with self._lock:
+                    self._active_processors.pop(file_index, None)
 
             # 检查处理结果
             if processing_error:
                 self.logger.error(f"文件处理失败: {input_path} - {processing_error}")
-                return False
+                return ProcessingStatus.FAILED
 
             if processing_success and os.path.exists(output_path):
                 self.logger.info(f"文件处理完成: {input_path} -> {output_path}")
-                return True
-            else:
-                self.logger.warning(f"文件处理未生成输出: {input_path}")
-                return False
+                return ProcessingStatus.COMPLETED
+
+            if self.should_stop:
+                self.logger.info(f"文件处理已取消: {input_path}")
+                return ProcessingStatus.CANCELLED
+
+            self.logger.warning(f"文件处理未生成输出: {input_path}")
+            return ProcessingStatus.FAILED
 
         except Exception as e:
             self.logger.error(f"处理单个文件时发生异常: {e}", exc_info=True)
-            return False
+            if self.should_stop:
+                return ProcessingStatus.CANCELLED
+            return ProcessingStatus.FAILED
 
     def stop(self):
         """停止处理"""
+        if self.should_stop:
+            return
         self.should_stop = True
+        cancelled_count = self._cancel_pending_futures()
+        self._stop_active_processors()
         self.status_message.emit("[INFO] 正在停止批量处理...")
+        if cancelled_count > 0:
+            self.status_message.emit(f"[INFO] 已取消 {cancelled_count} 个待执行任务")
 
 
 class FileQueueManager:

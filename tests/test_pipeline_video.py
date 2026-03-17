@@ -13,8 +13,11 @@ import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 
-import cv2
-import numpy as np
+import pytest
+
+cv2 = pytest.importorskip("cv2")
+np = pytest.importorskip("numpy")
+pytest.importorskip("PyQt6")
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
