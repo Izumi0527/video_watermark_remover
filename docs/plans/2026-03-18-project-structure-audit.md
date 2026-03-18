@@ -10,6 +10,14 @@
 
 ---
 
+## 0) 执行状态（截至 2026-03-18）
+
+- [ ] Task 1：冻结现状与建立基线（未落盘目录树快照）
+- [x] Task 2：配置与分发清单对齐
+- [ ] Task 3：清理空目录/重复入口（待确认后执行）
+- [x] Task 4：测试目录重分层与归档
+- [ ] Task 5：可选的更大结构优化
+
 ## 1) 当前目录结构（摘要快照）
 
 > 注：本快照聚焦“代码/配置/脚本/测试/文档”，运行产物（`.venv`、`__pycache__`、`logs/` 等）仅在诊断中提及。
@@ -22,6 +30,7 @@ video_watermark_remover/
   requirements-dev.txt
   config.ini                      # 本地配置（.gitignore 已忽略）
   config.ini.example              # 配置模板（建议用于生成“用户配置目录”的 config.ini）
+  LICENSE                         # 许可证（MIT）
   app/                            # 主 Python 包（setuptools packages=["app"]）
     assets/
       icons/
@@ -55,17 +64,17 @@ video_watermark_remover/
 
   scripts/
     vwr.ps1                       # 统一的开发/运行脚本入口
-    vwr.ps1.md
-    README.md
+    README.md                     # 脚本文档统一入口（含 vwr.ps1 详细说明）
+    vwr.ps1.md                    # 兼容占位：内容已合并到 README.md
 
   tests/
     conftest.py
     unit/                         # 单测目录（存在部分单测）
-    integration/                  # 仅 __init__.py（内容待补齐或合并）
+    integration/                  # 集成测试目录（已归档 test_*.py）
+    e2e/                          # 端到端测试目录
+      ps1/                        # PowerShell 端到端脚本
     app/config/...                # 细分到 app/config 的单测
     core/ai/video/...             # 细分到 core 的单测
-    test_*.py                     # 顶层散落的测试（偏集成/端到端/脚本型）
-    test_*.ps1                    # PowerShell 端到端脚本（e2e）
     test_data/                    # 测试素材（含 configs、视频/图片/模型样本）
 
   docs/
@@ -86,23 +95,24 @@ video_watermark_remover/
 ## 2) 结构诊断：不一致与可优化点（按优先级）
 
 ### A. “目录存在但为空/名不副实”
-- `app/services/`、`app/ui/dialogs/` 为空：需要确认是否保留作为未来扩展点；若确认无用可删除（删除属于高风险操作，需要明确确认）。
-- `tests/integration/` 仅有 `__init__.py`：与大量顶层 `test_*.py` 的“集成/端到端”性质不匹配，建议统一归档。
-- `screenshot/`、`test_output/` 当前为空：若为运行产物目录，建议统一命名与 `.gitignore` 策略并明确约定。
+- [ ] `app/services/`、`app/ui/dialogs/` 为空：需要确认是否保留作为未来扩展点；若确认无用可删除（删除属于高风险操作，需要明确确认）。
+- [x] `tests/integration/` 曾仅有 `__init__.py`：已将顶层 `tests/test_*.py` 归档至 `tests/integration/`，并新增 `tests/e2e/ps1/` 承载 PowerShell 端到端脚本。
+- [ ] `screenshot/` 当前为空：若为运行产物目录，建议统一命名与 `.gitignore` 策略并明确约定。
+- [x] `test_output/` 命名/忽略不一致：已补充 `.gitignore` 忽略 `test_output/`（是否保留目录本身仍待确认）。
 
 ### B. 配置目录与打包配置疑似脱节（影响分发/可维护性）
-- `.gitignore`、`MANIFEST.in`、`pyproject.toml` 中历史遗留引用 `configs/*.ini`，但仓库根目录目前没有 `configs/`（现有为 `config.ini.example`，且应用默认使用“用户配置目录”）。
-- `MANIFEST.in` 引用了一批可能不存在的文件（如 `LICENSE`、`CHANGELOG.md`、`requirements-minimal.txt`、`install.sh` 等），需要对齐真实结构，避免发布失败或分发包缺文件。
+- [x] `.gitignore`、`MANIFEST.in`、`pyproject.toml` 中历史遗留引用 `configs/*.ini`：已移除历史引用；保留 `config.ini.example` 作为模板，并统一以“用户配置目录”为准。
+- [x] `MANIFEST.in` 引用不存在文件：已对齐真实结构，避免 sdist 打包失败或分发包缺文件。
 
 ### C. 同一领域出现“新旧两套组织方式”的迹象
-- `app/config/preferences/` 已存在包结构，但同目录还有 `preferences_defaults.py` / `preferences_storage.py` / `preferences_validator.py` / `user_preferences_manager.py` 等：需要确认它们与 `preferences/` 的关系，避免后续维护产生重复逻辑与入口混乱。
+- [ ] `app/config/preferences/` 已存在包结构，但同目录还有 `preferences_defaults.py` / `preferences_storage.py` / `preferences_validator.py` / `user_preferences_manager.py` 等：需要确认它们与 `preferences/` 的关系，避免后续维护产生重复逻辑与入口混乱。
 
 ### D. 测试目录分层混杂（影响可读性与执行策略）
-- 既有 `tests/unit/`、`tests/integration/`，又有 `tests/app/...`、`tests/core/...`，同时还存在大量顶层 `tests/test_*.py` 及 `tests/*.ps1`。
-- 建议统一一个“主分层”：例如 `tests/unit/`、`tests/integration/`、`tests/e2e/`，并把“按模块细分”作为二级目录（如 `tests/unit/app/config/...`）。
+- [x] 顶层 `tests/test_*.py` 及 `tests/*.ps1` 散落：已归档到 `tests/integration/` 与 `tests/e2e/ps1/`。
+- [ ] 统一一个“主分层”（unit/integration/e2e）并把“按模块细分”作为二级目录：尚未完全统一（`tests/app/...`、`tests/core/...` 等历史分层仍保留）。
 
 ### E. “运行产物目录”策略需要一致（避免误提交与污染仓库）
-- 当前存在 `__pycache__`（根目录与包内）、`.venv/`、`logs/` 等，虽已被 `.gitignore` 覆盖，但建议在文档中明确“哪些目录是可删除的运行产物、哪些是必须保留的占位目录”。
+- [ ] 当前存在 `__pycache__`（根目录与包内）、`.venv/`、`logs/` 等，虽已被 `.gitignore` 覆盖，但建议在文档中明确“哪些目录是可删除的运行产物、哪些是必须保留的占位目录”。
 
 ---
 
@@ -117,9 +127,9 @@ video_watermark_remover/
 
 ## 4) 执行计划（分阶段，可回滚；后续执行前需要确认）
 
-> 说明：本节是“未来要做的事”的可执行清单；本次仅输出计划，不直接实施。
+> 说明：本节为可执行清单与里程碑；截至 2026-03-18，Task 2 与 Task 4 已执行完成（详见第 6/7 节），其余任务保留为后续待办。
 
-### Task 1：冻结现状与建立基线（可回滚点）
+### Task 1：冻结现状与建立基线（可回滚点）（未完成）
 
 **Files:**
 - Modify: `docs/plans/2026-03-18-project-structure-audit.md`
@@ -135,7 +145,7 @@ video_watermark_remover/
   - `git status --porcelain`
 - 期望：无未忽略的大体积产物被纳入版本控制。
 
-### Task 2：配置与分发清单对齐（低风险）
+### Task 2：配置与分发清单对齐（低风险）（已完成）
 
 **Files:**
 - Modify: `pyproject.toml`
@@ -165,7 +175,7 @@ video_watermark_remover/
 **Step 5：同步脚本 AutoFix 行为**
 - `scripts/vwr.ps1 run -AutoFix`：从 `config.ini.example` 生成配置文件到“用户配置目录”，并在输出中打印实际路径。
 
-### Task 3：清理空目录/重复入口（高风险操作点：删除/移动需确认）
+### Task 3：清理空目录/重复入口（高风险操作点：删除/移动需确认）（未开始）
 
 **Files:**
 - Potential Delete: `app/services/`（若确认不再需要）
@@ -180,7 +190,7 @@ video_watermark_remover/
 **Step 2：与负责人确认删除/迁移清单**
 - 输出“候选删除/迁移列表 + 影响范围 + 回滚方式”，得到明确确认后再执行。
 
-### Task 4：测试目录重分层与归档（中风险：移动文件需确认）
+### Task 4：测试目录重分层与归档（中风险：移动文件需确认）（已完成）
 
 **Files:**
 - Potential Move: `tests/test_*.py` → `tests/integration/` 或 `tests/e2e/`
@@ -202,7 +212,7 @@ video_watermark_remover/
   - `python -m pytest -q`
 - 目标：单测在合理时间内完成（若超过 60s，需拆分 slow 标记或分组运行）。
 
-### Task 5：可选的更大结构优化（仅在低风险整理完成后评估）
+### Task 5：可选的更大结构优化（仅在低风险整理完成后评估）（未开始）
 
 **候选方向（择一或不做）：**
 - `src/` 布局：将 `app/` 移入 `src/app/`，避免“从工作目录误导入本地包”的典型坑。
@@ -240,7 +250,7 @@ video_watermark_remover/
 - `LICENSE`：补齐 MIT License 文件，修复 README 徽章链接。
 - `.gitignore`：移除历史遗留的 `configs/*.ini` 规则；补充忽略 `test_output/`。
 - `scripts/vwr.ps1`：`run -AutoFix` 从 `config.ini.example` 生成配置到“用户配置目录”，并打印实际路径。
-- `README.md`、`config.ini.example`、`scripts/vwr.ps1.md`：更新配置文件位置与生成方式说明，减少误导。
+- `README.md`、`config.ini.example`、`scripts/README.md`（原 `scripts/vwr.ps1.md`）：更新配置文件位置与生成方式说明，减少误导。
 - `tests/`：将顶层“集成/端到端脚本”归档到 `tests/integration/`、`tests/e2e/ps1/`，并同步 `scripts/vwr.ps1` 与 `tests/test_data/README.md` 的引用路径。
 
 ---

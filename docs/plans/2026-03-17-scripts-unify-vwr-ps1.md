@@ -65,8 +65,8 @@
 - Modify: `README.md`
 - Modify: `docs/complete-technical-documentation.md`
 - Modify: `tests/test_data/README.md`
-- Create: `scripts/vwr.ps1.md`
-- Modify: `scripts/README.md`
+- Modify: `scripts/README.md`（脚本文档统一入口，含 vwr.ps1 详细说明）
+- Modify: `scripts/vwr.ps1.md`（兼容占位：内容已合并到 `scripts/README.md`）
 
 **Step 1: 替换所有旧脚本调用**
 - `setup.ps1` → `.\scripts\vwr.ps1 setup`
