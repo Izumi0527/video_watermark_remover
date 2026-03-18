@@ -51,13 +51,13 @@ tests/test_data/
 
 ```powershell
 # 运行音频处理测试时会自动生成音频文件
-.\tests\test_audio_processing.ps1
+.\tests\e2e\ps1\test_audio_processing.ps1
 
 # 运行性能基准测试（生成 JSON 报告到 logs/）
 .\scripts\vwr.ps1 perf
 
 # 运行端到端测试时会自动生成配置文件
-.\tests\test_end_to_end.ps1
+.\tests\e2e\ps1\test_end_to_end.ps1
 ```
 
 ### 手动创建测试数据
@@ -68,7 +68,7 @@ tests/test_data/
 
 ```powershell
 # 运行测试时添加 -KeepTestFiles 参数
-.\tests\test_audio_processing.ps1 -KeepTestFiles
+.\tests\e2e\ps1\test_audio_processing.ps1 -KeepTestFiles
 ```
 
 ## 注意事项

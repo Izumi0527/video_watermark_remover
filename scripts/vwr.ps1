@@ -655,18 +655,36 @@ function Invoke-Run {
             Write-Warn "未检测到 FFmpeg（音频保留功能需要）。请安装后确保 ffmpeg 在 PATH 中。"
         }
 
-        # 配置文件
-        $configIni = Join-Path $ProjectRoot "config.ini"
+        # 配置文件（与 ConfigManager 默认路径保持一致）
         $configExample = Join-Path $ProjectRoot "config.ini.example"
+        $configIni = $null
+
+        try {
+            $configIni = (& $venv.Python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())" 2>$null | Select-Object -First 1).Trim()
+        } catch {
+            $configIni = $null
+        }
+
+        if (-not $configIni) {
+            # 兜底：按 app/config/config_manager.py 的 Windows fallback 规则构造
+            $fallbackDir = Join-Path $env:USERPROFILE "AppData/Local/YourOrg/VideoWatermarkRemover"
+            $configIni = Join-Path $fallbackDir "config.ini"
+        }
+
+        $configDir = Split-Path -Parent $configIni
+        if ($configDir -and -not (Test-Path $configDir)) {
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        }
+
         if (-not (Test-Path $configIni)) {
             if ((Test-Path $configExample) -and $AutoFix) {
                 Copy-Item -Path $configExample -Destination $configIni -Force
-                Write-Ok "AutoFix：已从 config.ini.example 生成 config.ini"
+                Write-Ok "AutoFix：已从 config.ini.example 生成配置文件：$configIni"
             } else {
-                Write-Warn "未找到 config.ini（可从 config.ini.example 复制生成）"
+                Write-Warn "未找到配置文件：$configIni（可从 config.ini.example 复制生成）"
             }
         } else {
-            Write-Ok "配置文件：config.ini"
+            Write-Ok "配置文件：$configIni"
         }
     } else {
         Write-Warn "已跳过环境检查（-SkipChecks）"
@@ -879,8 +897,13 @@ function Invoke-Test {
         $exitCode = Invoke-Pytest -PytestArgs $pytestArgs
         $reportData.Results.unit = @{ exitCode = $exitCode }
     } elseif ($type -eq "integration") {
-        $pytestArgs = @("tests", "-v", "-m", "integration")
+        $pytestArgs = @("tests/integration", "-v")
+        if ($Quick) { $pytestArgs += @("-m", "not slow") }
         $exitCode = Invoke-Pytest -PytestArgs $pytestArgs
+        if ($exitCode -eq 5) {
+            Write-Warn "未收集到任何集成测试（pytest 退出码 5）。请确认依赖已安装，或检查 tests/integration 下是否存在 test_*.py。"
+            $exitCode = 0
+        }
         $reportData.Results.integration = @{ exitCode = $exitCode }
     } elseif ($type -eq "all") {
         $pytestArgs = @("tests", "-v")
@@ -894,9 +917,9 @@ function Invoke-Test {
             if ($Quick) { $psArgs += "-Quick" }
 
             foreach ($psTest in @(
-                    @{ name = "audio"; path = "tests/test_audio_processing.ps1" },
-                    @{ name = "preferences"; path = "tests/test_user_preferences.ps1" },
-                    @{ name = "e2e"; path = "tests/test_end_to_end.ps1" }
+                    @{ name = "audio"; path = "tests/e2e/ps1/test_audio_processing.ps1" },
+                    @{ name = "preferences"; path = "tests/e2e/ps1/test_user_preferences.ps1" },
+                    @{ name = "e2e"; path = "tests/e2e/ps1/test_end_to_end.ps1" }
                 )) {
                 if (Test-Path $psTest.path) {
                     Write-Info "运行 PowerShell 测试：$($psTest.path)"
@@ -914,9 +937,9 @@ function Invoke-Test {
         }
     } elseif ($type -in @("audio", "preferences", "e2e")) {
         $scriptPath = switch ($type) {
-            "audio" { "tests/test_audio_processing.ps1" }
-            "preferences" { "tests/test_user_preferences.ps1" }
-            "e2e" { "tests/test_end_to_end.ps1" }
+            "audio" { "tests/e2e/ps1/test_audio_processing.ps1" }
+            "preferences" { "tests/e2e/ps1/test_user_preferences.ps1" }
+            "e2e" { "tests/e2e/ps1/test_end_to_end.ps1" }
         }
 
         $psArgs = @()

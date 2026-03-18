@@ -91,7 +91,7 @@
 
 功能：
 - 检查 `.venv`、关键依赖、FFmpeg、配置文件
-- `-AutoFix` 时可自动执行 `setup`、自动生成 `config.ini`（来自 `config.ini.example`）
+- `-AutoFix` 时可自动执行 `setup`、并在**用户配置目录**自动生成 `config.ini`（来自 `config.ini.example`）
 - 使用 `.venv\Scripts\python.exe` 启动 `main.py`
 
 常用示例：

@@ -199,9 +199,12 @@ video_watermark_remover/
 ├── docs/                  # 文档
 ├── models/                # AI模型
 ├── logs/                  # 运行日志
-├── config.ini             # 应用配置
+├── config.ini.example     # 配置模板（复制到用户配置目录后生效）
 └── main.py                # 程序入口
 ```
+
+> 说明：应用运行时会在“用户配置目录”自动生成 `config.ini`（默认不纳入版本控制）。  
+> 如需确认路径，可运行：`python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"`
 
 **代码统计**: ~28,000+ 行代码，76个Python文件，79.7%代码规范率
 

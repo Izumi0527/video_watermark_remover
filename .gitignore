@@ -152,8 +152,7 @@ Thumbs.db
 logs/
 app.log
 *.log
-configs/*.ini
-!configs/default_config.ini # Keep default config versioned
+
 
 # Models (if large or downloaded)
 models/yolo11*.pt
@@ -190,6 +189,7 @@ user_preferences.json
 test_results/
 test-results/
 .test_output/
+test_output/
 
 # User-uploaded test files
 test_videos/

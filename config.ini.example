@@ -1,12 +1,16 @@
 # 智能视频水印去除工具 - 配置文件模板
 # ============================================================
 # 使用说明：
-# 1. 将此文件复制为 config.ini（在同一目录下）
-#    Windows: copy config.ini.example config.ini
-#    Linux/Mac: cp config.ini.example config.ini
+# 1. 将此文件复制为 config.ini（放到“用户配置目录”中）
+#    - 如不确定路径，可运行：
+#      python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"
+#    - Windows（默认）示例路径：
+#      %USERPROFILE%\\AppData\\Local\\YourOrg\\VideoWatermarkRemover\\config.ini
+#    - 也可使用脚本自动生成：
+#      .\\scripts\\vwr.ps1 run -AutoFix
 # 2. 根据需要修改配置项
 # 3. 修改配置后需要重启应用程序才能生效
-# 4. 如需恢复默认设置，删除 config.ini 后重启程序即可
+# 4. 如需恢复默认设置，删除“用户配置目录”中的 config.ini 后重启程序即可
 # ============================================================
 
 [Paths]

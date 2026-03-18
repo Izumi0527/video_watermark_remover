@@ -1,58 +1,42 @@
-# 智能视频水印去除工具 - 项目清单文件
-# 确保所有必要文件都包含在发布中
+# 智能视频水印去除工具 - 发布清单（sdist）
+# 目标：
+# - 只包含发布/运行所需的最小集合
+# - 避免引用不存在文件导致打包失败
+# - 避免将大体积模型与运行产物打包进发布物
 
+include pyproject.toml
 include README.md
-include LICENSE
-include CHANGELOG.md
-include PHASE3_COMPLETION_SUMMARY.md
-
-# 依赖文件
 include requirements.txt
-include requirements-minimal.txt
 include requirements-dev.txt
+include config.ini.example
+include LICENSE
 
-# 安装脚本
-include install.sh
-include install.bat
-include setup.py
+# 入口脚本（Windows PowerShell）
+include scripts/README.md
+recursive-include scripts *.ps1 *.md
 
-# 配置文件
-include configs/*.ini
-recursive-include configs *
-
-# 应用程序文件
+# 应用代码与资源
 recursive-include app *.py
-recursive-include app *.ui
-recursive-include app *.qrc
+recursive-include app/assets *
 
-# 测试文件
-include test_*.py
-recursive-include tests *.py
+# 文档
+recursive-include docs *.md
 
-# 资源文件
-recursive-include assets *
-recursive-include icons *.png *.ico *.icns
-recursive-include docs *.md *.rst *.txt
+# 测试（仅代码与必要样例文件；避免引入大文件）
+recursive-include tests *.py *.ps1 *.md *.ini *.yaml *.yml *.json
 
-# 排除不必要的文件
-global-exclude *.pyc
-global-exclude *.pyo
-global-exclude *.pyd
-global-exclude __pycache__
-global-exclude .git*
-global-exclude .DS_Store
-global-exclude Thumbs.db
-global-exclude *.tmp
-global-exclude *.log
+# 额外说明文件
+include models/README.md
+exclude models/*.pt
 
-# 排除开发文件
-exclude .gitignore
-exclude .pre-commit-config.yaml
-exclude tox.ini
-exclude .coverage
-prune .vscode
-prune .idea
+# 排除运行产物/缓存
+global-exclude __pycache__ *.py[cod] *.log *.tmp
+prune .git
+prune .venv
 prune venv
 prune env
+prune logs
 prune .pytest_cache
 prune .mypy_cache
+prune .vscode
+prune .idea

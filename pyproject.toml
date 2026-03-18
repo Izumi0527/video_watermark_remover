@@ -72,11 +72,15 @@ vwr = "main:main"
 video-watermark-remover-gui = "main:main"
 
 [tool.setuptools]
-packages = ["app"]
 include-package-data = true
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["*.py", "configs/*.ini", "assets/*"]
+app = ["assets/*", "assets/icons/*"]
 
 # Black代码格式化配置
 [tool.black]
