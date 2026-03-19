@@ -524,6 +524,45 @@ function Invoke-UvPipInstall {
     Write-Ok "依赖安装完成"
 }
 
+function Install-EditableProject {
+    param([switch]$NoDeps)
+
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+    }
+
+    Ensure-Uv
+
+    $uvArgs = @("pip", "install", "--python", $venv.Python, "-e", ".")
+    if ($NoDeps) {
+        $uvArgs += "--no-deps"
+    }
+
+    Write-Info "开始安装当前项目（editable）..."
+    Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
+    & uv @uvArgs | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "当前项目 editable 安装失败（退出码：$LASTEXITCODE）。"
+    }
+
+    Write-Ok "当前项目已安装为 editable"
+}
+
+function Assert-ProjectImportable {
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+    }
+
+    $appPath = (& $venv.Python -c "import app; import main; print(app.__file__)" 2>$null | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0 -or -not $appPath) {
+        throw "项目导入验证失败：无法导入 app/main。请重新运行：.\\scripts\\vwr.ps1 setup"
+    }
+
+    return $appPath.Trim()
+}
+
 function Assert-DevTools {
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
@@ -564,10 +603,13 @@ function Invoke-Setup {
     Write-Info "依赖清单：$requirementsFile"
 
     Invoke-UvPipInstall -RequirementsFile $requirementsFile -TorchBackendValue $TorchBackend -DefaultIndexValue $DefaultIndex -IndexStrategyValue $IndexStrategy
+    Install-EditableProject -NoDeps
+    $appPath = Assert-ProjectImportable
 
     $venv = Get-VenvInfo
     $pyVer = & $venv.Python --version 2>&1
     Write-Ok "Python：$pyVer"
+    Write-Ok "导入验证：$appPath"
     Write-Ok "完成：可运行 .\\scripts\\vwr.ps1 run"
 }
 
