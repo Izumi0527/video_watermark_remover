@@ -10,14 +10,15 @@ include requirements.txt
 include requirements-dev.txt
 include config.ini.example
 include LICENSE
+include main.py
 
 # 入口脚本（Windows PowerShell）
 include scripts/README.md
 recursive-include scripts *.ps1 *.md
 
 # 应用代码与资源
-recursive-include app *.py
-recursive-include app/assets *
+recursive-include src/app *.py
+recursive-include src/app/assets *
 
 # 文档
 recursive-include docs *.md

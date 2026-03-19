@@ -201,9 +201,7 @@ class ConfigValidator:
             ),
         }
 
-    def validate(
-        self, param_name: str, value: Any, fallback: Optional[Any] = None
-    ) -> Any:
+    def validate(self, param_name: str, value: Any, fallback: Optional[Any] = None) -> Any:
         """
         验证单个参数值
 
@@ -226,9 +224,7 @@ class ConfigValidator:
         try:
             converted = rule.param_type(value)
         except (TypeError, ValueError):
-            self.logger.warning(
-                f"[参数验证] {param_name}={value} 类型转换失败，使用默认值 {default}"
-            )
+            self.logger.warning(f"[参数验证] {param_name}={value} 类型转换失败，使用默认值 {default}")
             return default
 
         # 2. 枚举值验证
@@ -243,24 +239,16 @@ class ConfigValidator:
 
         # 3. 范围验证（数值类型）
         if rule.min_value is not None and converted < rule.min_value:
-            self.logger.warning(
-                f"[参数验证] {param_name}={converted} < 最小值 {rule.min_value}，"
-                f"使用最小值"
-            )
+            self.logger.warning(f"[参数验证] {param_name}={converted} < 最小值 {rule.min_value}，" f"使用最小值")
             return rule.param_type(rule.min_value)
 
         if rule.max_value is not None and converted > rule.max_value:
-            self.logger.warning(
-                f"[参数验证] {param_name}={converted} > 最大值 {rule.max_value}，"
-                f"使用最大值"
-            )
+            self.logger.warning(f"[参数验证] {param_name}={converted} > 最大值 {rule.max_value}，" f"使用最大值")
             return rule.param_type(rule.max_value)
 
         return converted
 
-    def validate_params(
-        self, params: Dict[str, Any], warn_unknown: bool = False
-    ) -> Dict[str, Any]:
+    def validate_params(self, params: Dict[str, Any], warn_unknown: bool = False) -> Dict[str, Any]:
         """
         批量验证参数字典
 

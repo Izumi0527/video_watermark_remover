@@ -161,9 +161,7 @@ class ProcessingMetrics:
             frame_index: 帧索引
         """
         with self._lock:
-            self._current_frame = FrameMetrics(
-                frame_index=frame_index, timestamp=time.time()
-            )
+            self._current_frame = FrameMetrics(frame_index=frame_index, timestamp=time.time())
 
     def record_detection_time(self, time_ms: float) -> None:
         """记录检测耗时（毫秒）"""
@@ -189,9 +187,7 @@ class ProcessingMetrics:
                 return
 
             end_time = time.time()
-            self._current_frame.total_time_ms = (
-                end_time - self._current_frame.timestamp
-            ) * 1000
+            self._current_frame.total_time_ms = (end_time - self._current_frame.timestamp) * 1000
 
             # 添加到历史
             self._frame_history.append(self._current_frame)
@@ -283,9 +279,7 @@ class ProcessingMetrics:
             remaining_frames = self._total_frames - len(self._frame_history)
             return remaining_frames / fps
 
-    def register_progress_callback(
-        self, callback: Callable[[ProcessingStats], None]
-    ) -> None:
+    def register_progress_callback(self, callback: Callable[[ProcessingStats], None]) -> None:
         """
         注册进度回调
 
@@ -295,9 +289,7 @@ class ProcessingMetrics:
         with self._lock:
             self._progress_callbacks.append(callback)
 
-    def unregister_progress_callback(
-        self, callback: Callable[[ProcessingStats], None]
-    ) -> None:
+    def unregister_progress_callback(self, callback: Callable[[ProcessingStats], None]) -> None:
         """移除进度回调"""
         with self._lock:
             if callback in self._progress_callbacks:
@@ -364,9 +356,7 @@ class ProcessingMetrics:
         if self._memory_snapshots:
             stats.peak_memory_mb = max(s.process_memory_mb for s in self._memory_snapshots)
             gpu_memories = [
-                s.gpu_memory_mb
-                for s in self._memory_snapshots
-                if s.gpu_memory_mb is not None
+                s.gpu_memory_mb for s in self._memory_snapshots if s.gpu_memory_mb is not None
             ]
             if gpu_memories:
                 stats.peak_gpu_memory_mb = max(gpu_memories)

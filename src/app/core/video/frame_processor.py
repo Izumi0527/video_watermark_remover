@@ -26,7 +26,9 @@ def init_worker_ai_handler(ai_params: dict) -> None:
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info(f"Initializing AI handler for worker process (PID: {__import__('os').getpid()})")
+        logger.info(
+            f"Initializing AI handler for worker process (PID: {__import__('os').getpid()})"
+        )
         _worker_ai_params = ai_params
         _worker_ai_handler = AIHandler(None, ai_params)
 
@@ -83,7 +85,9 @@ def frame_processor_worker(  # noqa: C901
                 return
             _worker_ai_handler = ai_handler  # 缓存供后续使用
 
-        logger.info(f"Worker {worker_id} started (using {'pre-initialized' if _worker_ai_handler else 'newly loaded'} AI handler)")
+        logger.info(
+            f"Worker {worker_id} started (using {'pre-initialized' if _worker_ai_handler else 'newly loaded'} AI handler)"
+        )
         processed_count = 0
 
         while not stop_event.is_set():

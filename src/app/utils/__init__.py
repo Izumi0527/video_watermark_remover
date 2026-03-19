@@ -1,6 +1,5 @@
 # 工具类模块
 from .logger_setup import setup_logging
-from .utils import ensure_directory_exists, format_duration, get_file_basename
 
 # Phase 6: 性能监控指标
 from .metrics import (
@@ -10,6 +9,7 @@ from .metrics import (
     ProcessingStats,
     get_processing_metrics,
 )
+from .utils import ensure_directory_exists, format_duration, get_file_basename
 
 __all__ = [
     "ensure_directory_exists",

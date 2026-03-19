@@ -555,9 +555,9 @@ function Assert-ProjectImportable {
         throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
     }
 
-    $appPath = (& $venv.Python -c "import app; import main; print(app.__file__)" 2>$null | Select-Object -Last 1)
+    $appPath = (& $venv.Python -c "import app; from app.entrypoints import main as _entrypoint; print(app.__file__)" 2>$null | Select-Object -Last 1)
     if ($LASTEXITCODE -ne 0 -or -not $appPath) {
-        throw "项目导入验证失败：无法导入 app/main。请重新运行：.\\scripts\\vwr.ps1 setup"
+        throw "项目导入验证失败：无法导入 app/app.entrypoints。请重新运行：.\\scripts\\vwr.ps1 setup"
     }
 
     return $appPath.Trim()

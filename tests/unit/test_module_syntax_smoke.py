@@ -14,13 +14,14 @@ import pytest
 # 按重要性列出的待编译模块路径（相对仓库根目录）
 MODULE_PATHS = [
     "main.py",
-    "app/config/config_manager.py",
-    "app/utils/logger_setup.py",
-    "app/utils/utils.py",
-    "app/core/ai/ai_handler.py",
-    "app/core/ai/yolo_detector.py",
-    "app/core/video/video_processor.py",
-    "app/ui/main_window.py",
+    "src/app/entrypoints.py",
+    "src/app/config/config_manager.py",
+    "src/app/utils/logger_setup.py",
+    "src/app/utils/utils.py",
+    "src/app/core/ai/ai_handler.py",
+    "src/app/core/ai/yolo_detector.py",
+    "src/app/core/video/video_processor.py",
+    "src/app/ui/main_window.py",
 ]
 
 

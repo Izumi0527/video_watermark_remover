@@ -10,6 +10,9 @@ Phase 6 重构: 按组件类型分类到子目录
 为保持向后兼容，所有样式函数可从此模块直接导入
 """
 
+# 杂项样式
+from .additional import additional_styles
+
 # 容器组件样式
 from .containers import groupbox_styles, main_window_styles, tab_styles
 
@@ -18,9 +21,6 @@ from .controls import button_styles, checkbox_styles, combobox_styles, textedit_
 
 # 展示组件样式
 from .display import label_styles, listwidget_styles, progressbar_styles
-
-# 杂项样式
-from .additional import additional_styles
 
 __all__ = [
     # 容器组件

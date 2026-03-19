@@ -97,20 +97,12 @@ def preprocess_sharpen(
         锐化后的图像
     """
     # 标准锐化核
-    kernel = np.array([
-        [0, -1, 0],
-        [-1, 5, -1],
-        [0, -1, 0]
-    ], dtype=np.float32)
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
 
     # 调整锐化强度
     if strength != 1.0:
         # 将锐化效果与原图混合
-        identity = np.array([
-            [0, 0, 0],
-            [0, 1, 0],
-            [0, 0, 0]
-        ], dtype=np.float32)
+        identity = np.array([[0, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=np.float32)
         kernel = identity + strength * (kernel - identity)
 
     sharpened = cv2.filter2D(frame, -1, kernel)
@@ -206,10 +198,7 @@ def postprocess_smooth_edges(
     # 混合原图和修复图
     result = np.zeros_like(processed, dtype=np.float32)
     for c in range(3):
-        result[:, :, c] = (
-            original[:, :, c] * (1 - blurred_mask) +
-            processed[:, :, c] * blurred_mask
-        )
+        result[:, :, c] = original[:, :, c] * (1 - blurred_mask) + processed[:, :, c] * blurred_mask
 
     return np.clip(result, 0, 255).astype(np.uint8)
 
@@ -245,8 +234,7 @@ def postprocess_blend(
     mask_3c = np.stack([mask_bool] * 3, axis=-1)
 
     blended_region = (
-        original.astype(np.float32) * (1 - blend_ratio) +
-        processed.astype(np.float32) * blend_ratio
+        original.astype(np.float32) * (1 - blend_ratio) + processed.astype(np.float32) * blend_ratio
     )
 
     result[mask_3c] = blended_region[mask_3c]
@@ -331,9 +319,7 @@ def apply_postprocessing(
     # 边缘平滑
     if enable_smooth:
         logger.debug("Applying edge smoothing postprocessing")
-        result = postprocess_smooth_edges(
-            original, result, mask, blur_radius=smooth_blur_radius
-        )
+        result = postprocess_smooth_edges(original, result, mask, blur_radius=smooth_blur_radius)
 
     # 混合
     if enable_blend:

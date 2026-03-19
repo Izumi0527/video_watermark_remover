@@ -65,18 +65,20 @@ dev = [
 "Documentation" = "https://github.com/yourusername/video-watermark-remover/wiki"
 
 [project.scripts]
-video-watermark-remover = "main:main"
-vwr = "main:main"
+video-watermark-remover = "app.entrypoints:main"
+vwr = "app.entrypoints:main"
 
 [project.gui-scripts]
-video-watermark-remover-gui = "main:main"
+video-watermark-remover-gui = "app.entrypoints:main"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["main"]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["app*"]
 
 [tool.setuptools.package-data]
@@ -187,7 +189,7 @@ exclude_lines = [
 
 # Bandit安全检查配置
 [tool.bandit]
-targets = ["app", "main.py"]
+targets = ["src/app", "main.py"]
 exclude_dirs = [
     "tests",
     ".venv",
