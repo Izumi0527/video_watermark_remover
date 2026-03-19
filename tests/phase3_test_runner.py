@@ -19,7 +19,6 @@ python tests/phase3_test_runner.py
 版本: v2.0 (重构版)
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -82,7 +81,7 @@ def main():
     # 生成综合报告
     print("\n" + "=" * 60)
     print(f"[统计] 第三阶段测试总结果: {total_passed}/{total_tests} 通过")
-    print(f"[统计] 测试通过率: {(total_passed/total_tests)*100:.1f}%")
+    print(f"[统计] 测试通过率: {(total_passed / total_tests) * 100:.1f}%")
 
     # 显示失败的测试
     failed_tests = [name for name, result in all_results.items() if not result]

@@ -563,6 +563,34 @@ function Assert-ProjectImportable {
     return $appPath.Trim()
 }
 
+function Test-ProjectImportable {
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        return $false
+    }
+
+    & $venv.Python -c "import app; from app.entrypoints import main as _entrypoint" *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-ProjectImportable {
+    param([switch]$AutoFixSetup)
+
+    if (Test-ProjectImportable) {
+        return
+    }
+
+    if ($AutoFixSetup) {
+        Write-Warn "当前环境尚未完成项目安装，AutoFix 将重新执行 setup..."
+        Invoke-Setup
+        if (Test-ProjectImportable) {
+            return
+        }
+    }
+
+    throw "当前环境尚未完成项目安装，请先运行：.\\scripts\\vwr.ps1 setup"
+}
+
 function Assert-DevTools {
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
@@ -678,6 +706,8 @@ function Invoke-Run {
         }
     }
 
+    Ensure-ProjectImportable -AutoFixSetup:$AutoFix
+
     if (-not $SkipChecks) {
         Write-Section "环境检查"
 
@@ -736,7 +766,7 @@ function Invoke-Run {
 
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    $env:PYTHONPATH = (Get-Location).Path
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 
     $mainPy = Join-Path $ProjectRoot "main.py"
     if (-not (Test-Path $mainPy)) {
@@ -755,23 +785,24 @@ function Invoke-Run {
 function Invoke-Quality {
     Write-Section "代码质量检查 (quality)"
     Assert-DevTools
+    Ensure-ProjectImportable
 
     $venv = Get-VenvInfo
 
     $targets = @()
-    if (Test-Path "app") { $targets += "app" }
+    if (Test-Path "src/app") { $targets += "src/app" }
     if (Test-Path "main.py") { $targets += "main.py" }
     if (Test-Path "tests") { $targets += "tests" }
 
     if ($targets.Count -eq 0) {
-        throw "未找到需要检查的目标（app/main.py/tests）"
+        throw "未找到需要检查的目标（src/app/main.py/tests）"
     }
 
     $failed = $false
 
     if ($Check -eq "all" -or $Check -eq "format") {
         Write-Info "Black：$(if($Fix){'格式化'}else{'检查'})"
-        $blackArgs = @()
+        $blackArgs = @("--line-length", "100")
         if (-not $Fix) {
             $blackArgs += @("--check", "--diff")
         }
@@ -811,7 +842,7 @@ function Invoke-Quality {
 
     if (-not $Quick -and ($Check -eq "all" -or $Check -eq "type")) {
         Write-Info "MyPy：检查"
-        & $venv.Python -m mypy "app" "main.py" | Out-Host
+        & $venv.Python -m mypy "src/app" "main.py" | Out-Host
         if ($LASTEXITCODE -ne 0) {
             $failed = $true
             Write-Err "MyPy 未通过"
@@ -824,7 +855,7 @@ function Invoke-Quality {
 
     if (-not $Quick -and ($Check -eq "all" -or $Check -eq "security")) {
         Write-Info "Bandit：安全检查"
-        & $venv.Python -m bandit -r "app" "main.py" | Out-Host
+        & $venv.Python -m bandit -r "src/app" "main.py" | Out-Host
         if ($LASTEXITCODE -ne 0) {
             $failed = $true
             Write-Err "Bandit 未通过"
@@ -866,6 +897,7 @@ function Invoke-Pytest {
     param([string[]]$PytestArgs)
 
     Assert-DevTools
+    Ensure-ProjectImportable
     $venv = Get-VenvInfo
 
     # 先做一次关键依赖探测，避免 pytest 在收集阶段抛出难以理解的 ImportError
@@ -1211,6 +1243,7 @@ function Invoke-Build {
         throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup -Dev"
     }
 
+    Ensure-ProjectImportable
     Ensure-Uv
 
     Write-Info "确保 PyInstaller 已安装..."
@@ -1238,12 +1271,12 @@ function Invoke-Build {
     }
     Get-ChildItem -Path $ProjectRoot -Filter "*.spec" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
-    $iconPath = Join-Path $ProjectRoot "app/assets/icons/app.ico"
+    $iconPath = Join-Path $ProjectRoot "src/app/assets/icons/app.ico"
     $pyInstallerArgs = @(
         "--onefile",
         "--windowed",
         "--name=智能水印去除工具",
-        "--add-data=app;app",
+        "--add-data=src/app;app",
         "--add-data=models;models",
         "--hidden-import=PyQt6",
         "--hidden-import=cv2",

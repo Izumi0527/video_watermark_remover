@@ -5,7 +5,7 @@
 -r requirements.txt
 
 # ===== 代码格式化和风格检查 =====
-black>=23.0.0              # 代码自动格式化
+black==23.12.1            # 代码自动格式化（与 pre-commit 保持一致）
 isort>=5.12.0              # import语句排序
 flake8>=6.0.0              # PEP 8风格检查
 mypy>=1.0.0                # 静态类型检查

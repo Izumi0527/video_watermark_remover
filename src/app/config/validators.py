@@ -12,7 +12,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Dict, List, Optional, TypeVar
 
 T = TypeVar("T")
 

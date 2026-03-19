@@ -2,6 +2,7 @@
 """
 Test video preview functionality
 """
+
 import os
 import sys
 

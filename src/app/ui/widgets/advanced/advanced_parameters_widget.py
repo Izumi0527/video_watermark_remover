@@ -202,58 +202,58 @@ class AdvancedParametersWidget(QWidget):
         """获取当前参数"""
         return {
             # 检测参数
-            "detection_sensitivity": (self.sensitivity_slider.value() / 100.0)
-            if self.sensitivity_slider
-            else 0.5,
-            "detection_method": self.detection_method_combo.currentText()
-            if self.detection_method_combo
-            else "",
+            "detection_sensitivity": (
+                (self.sensitivity_slider.value() / 100.0) if self.sensitivity_slider else 0.5
+            ),
+            "detection_method": (
+                self.detection_method_combo.currentText() if self.detection_method_combo else ""
+            ),
             "min_detection_area": self.min_area_spin.value() if self.min_area_spin else 0,
-            "enable_blur_preprocess": self.enable_blur_check.isChecked()
-            if self.enable_blur_check
-            else False,
-            "enable_sharp_preprocess": self.enable_sharp_check.isChecked()
-            if self.enable_sharp_check
-            else False,
-            "enable_denoise_preprocess": self.enable_denoise_check.isChecked()
-            if self.enable_denoise_check
-            else False,
+            "enable_blur_preprocess": (
+                self.enable_blur_check.isChecked() if self.enable_blur_check else False
+            ),
+            "enable_sharp_preprocess": (
+                self.enable_sharp_check.isChecked() if self.enable_sharp_check else False
+            ),
+            "enable_denoise_preprocess": (
+                self.enable_denoise_check.isChecked() if self.enable_denoise_check else False
+            ),
             # 修复参数
-            "inpainting_method": self.inpainting_method_combo.currentText()
-            if self.inpainting_method_combo
-            else "",
-            "inpainting_radius": self.inpaint_radius_spin.value()
-            if self.inpaint_radius_spin
-            else 0,
+            "inpainting_method": (
+                self.inpainting_method_combo.currentText() if self.inpainting_method_combo else ""
+            ),
+            "inpainting_radius": (
+                self.inpaint_radius_spin.value() if self.inpaint_radius_spin else 0
+            ),
             "inpainting_quality": self.quality_slider.value() if self.quality_slider else 0,
-            "enable_smooth_postprocess": self.enable_smooth_check.isChecked()
-            if self.enable_smooth_check
-            else False,
-            "enable_blend_postprocess": self.enable_blend_check.isChecked()
-            if self.enable_blend_check
-            else False,
-            "enable_enhance_postprocess": self.enable_enhance_check.isChecked()
-            if self.enable_enhance_check
-            else False,
+            "enable_smooth_postprocess": (
+                self.enable_smooth_check.isChecked() if self.enable_smooth_check else False
+            ),
+            "enable_blend_postprocess": (
+                self.enable_blend_check.isChecked() if self.enable_blend_check else False
+            ),
+            "enable_enhance_postprocess": (
+                self.enable_enhance_check.isChecked() if self.enable_enhance_check else False
+            ),
             # 性能参数
             "thread_count": self.thread_count_spin.value() if self.thread_count_spin else 0,
             "enable_gpu": self.enable_gpu_check.isChecked() if self.enable_gpu_check else False,
             "gpu_memory_limit": self.gpu_memory_spin.value() if self.gpu_memory_spin else 0,
             "cache_size": self.cache_size_spin.value() if self.cache_size_spin else 0,
-            "enable_cache": self.enable_cache_check.isChecked()
-            if self.enable_cache_check
-            else False,
+            "enable_cache": (
+                self.enable_cache_check.isChecked() if self.enable_cache_check else False
+            ),
             # 输出参数
-            "output_format": self.output_format_combo.currentText()
-            if self.output_format_combo
-            else "",
-            "compression_quality": self.compression_slider.value()
-            if self.compression_slider
-            else 0,
+            "output_format": (
+                self.output_format_combo.currentText() if self.output_format_combo else ""
+            ),
+            "compression_quality": (
+                self.compression_slider.value() if self.compression_slider else 0
+            ),
             "add_suffix": self.add_suffix_check.isChecked() if self.add_suffix_check else False,
-            "add_timestamp": self.add_timestamp_check.isChecked()
-            if self.add_timestamp_check
-            else False,
+            "add_timestamp": (
+                self.add_timestamp_check.isChecked() if self.add_timestamp_check else False
+            ),
         }
 
     def set_parameters(self, parameters: Dict[str, Any]):  # noqa: C901
