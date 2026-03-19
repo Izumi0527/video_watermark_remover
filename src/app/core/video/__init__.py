@@ -11,14 +11,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .video_processor import VideoProcessorThread
+    from .thread import VideoProcessorThread
 
 __all__ = ["VideoProcessorThread"]
 
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401
     if name == "VideoProcessorThread":
-        from .video_processor import VideoProcessorThread  # 延迟导入
+        from .thread import VideoProcessorThread  # 延迟导入
 
         return VideoProcessorThread
 

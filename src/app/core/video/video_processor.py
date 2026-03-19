@@ -8,9 +8,35 @@ from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
-from ..ai.ai_handler import AIHandler
-from ..audio.ffmpeg_audio_processor import FFmpegAudioProcessor
+AIHandler = None
+FFmpegAudioProcessor = None
+
+
+def _resolve_ai_handler_class():
+    global AIHandler
+    if AIHandler is None:
+        from ..ai.ai_handler import AIHandler as imported_ai_handler
+
+        AIHandler = imported_ai_handler
+    return AIHandler
+
+
+def _resolve_ffmpeg_audio_processor_class():
+    global FFmpegAudioProcessor
+    if FFmpegAudioProcessor is None:
+        from ..audio.ffmpeg_audio_processor import (
+            FFmpegAudioProcessor as imported_ffmpeg_audio_processor,
+        )
+
+        FFmpegAudioProcessor = imported_ffmpeg_audio_processor
+    return FFmpegAudioProcessor
+
+
 from ..exceptions import ModelLoadError, UnsupportedFormatError
+from .chunk_worker import process_video_chunk
+from .frame_processor import frame_processor_worker, init_worker_ai_handler
+from .frame_reader import extract_video_first_frame, extract_video_frame_at, frame_reader_worker
+from .frame_writer import frame_writer_worker
 from .image_processor import process_image
 from .multiprocess_processor import process_video_multiprocess
 from .pipeline_processor import process_video_pipeline
@@ -35,7 +61,7 @@ class VideoProcessorThread(QThread):
         output_path: str,
         ai_params: Optional[Dict[str, Any]],
         config: Optional[ConfigParser] = None,
-        preloaded_ai_handler: Optional[AIHandler] = None,
+        preloaded_ai_handler: Optional[Any] = None,
         enable_multiprocess: bool = False,
         num_processes: Optional[int] = None,
         use_pipeline: bool = False,
@@ -46,8 +72,9 @@ class VideoProcessorThread(QThread):
         self.output_path = output_path
         self.ai_params = ai_params or {}
         self.config = config
-        self.ai_handler: Optional[AIHandler] = preloaded_ai_handler
-        self.ffmpeg_processor: Optional[FFmpegAudioProcessor] = FFmpegAudioProcessor(config)
+        self.ai_handler: Optional[Any] = preloaded_ai_handler
+        ffmpeg_processor_class = _resolve_ffmpeg_audio_processor_class()
+        self.ffmpeg_processor: Optional[Any] = ffmpeg_processor_class(config)
         self._is_running = True
 
         self.enable_multiprocess = enable_multiprocess
@@ -123,7 +150,8 @@ class VideoProcessorThread(QThread):
             if self.ai_handler is None:
                 self._emit_detailed_progress("loading_models", 0, 1)
                 self.status.emit("🔄 正在加载AI模型...")
-                self.ai_handler = AIHandler(self.config, self.ai_params)
+                ai_handler_class = _resolve_ai_handler_class()
+                self.ai_handler = ai_handler_class(self.config, self.ai_params)
                 if not self.ai_handler.load_models():
                     raise ModelLoadError("无法加载 AI 模型")
                 self._emit_detailed_progress("loading_models", 1, 1)
@@ -181,3 +209,18 @@ class VideoProcessorThread(QThread):
                 self.logger.warning(f"设置停止事件失败: {e}")
         self.status.emit("⏹️ 正在停止处理...")
         self.logger.info("Stop signal received")
+
+
+__all__ = [
+    "VideoProcessorThread",
+    "process_video_singleprocess",
+    "process_video_multiprocess",
+    "process_video_pipeline",
+    "process_video_chunk",
+    "init_worker_ai_handler",
+    "frame_processor_worker",
+    "extract_video_first_frame",
+    "extract_video_frame_at",
+    "frame_reader_worker",
+    "frame_writer_worker",
+]

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.core.video.path_utils import build_temp_path
+from app.core.video.utils.path import build_temp_path
 
 
 def test_build_temp_path_keeps_directory_with_dots() -> None:
