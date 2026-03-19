@@ -51,8 +51,10 @@
 - 自动安装/检测 `uv`
 - 使用 `uv venv` 创建 `.venv`（默认 Python **3.12.10**）
 - 安装 `requirements.txt` 或（`-Dev`）安装 `requirements-dev.txt`
+- 自动将当前项目安装为 editable，并验证 `app` / `app.entrypoints` 可导入
 
 > 提示：如果你本机已存在 `.venv` 且 Python 版本不是 3.12.10，执行 `setup` 时会提示是否重建虚拟环境；可添加 `-Force` 跳过确认。
+> 说明：当前仓库源码位于 `src/app`，`main.py` 仅为薄启动器；脚本会通过 editable install 保证运行、测试、质量检查都走同一套包导入路径。
 
 常用示例：
 
@@ -87,12 +89,12 @@
 
 ---
 
-### 3.2 `run`：环境检查后启动 `main.py`
+### 3.2 `run`：环境检查后启动 `main.py`（薄启动器）
 
 功能：
 - 检查 `.venv`、关键依赖、FFmpeg、配置文件
 - `-AutoFix` 时可自动执行 `setup`、并在**用户配置目录**自动生成 `config.ini`（来自 `config.ini.example`）
-- 使用 `.venv\Scripts\python.exe` 启动 `main.py`
+- 使用 `.venv\Scripts\python.exe` 启动 `main.py`，再转发到 `app.entrypoints:main`
 
 常用示例：
 
@@ -137,6 +139,7 @@
 ```
 
 > 提示：`quality/test/coverage/ci` 需要先执行 `.\scripts\vwr.ps1 setup -Dev` 安装开发依赖。
+> 说明：脚本内置的 Black 参数已与 `.pre-commit-config.yaml` 对齐（`line-length = 100`，Black `23.12.1`）。
 
 ---
 
@@ -252,7 +255,7 @@
 
 功能：
 - 清理 `.mypy_cache`、`.pytest_cache`、`.coverage*`、`logs/*.log`
-- 递归清理 `app/` 与 `tests/` 下的 `__pycache__`、`*.pyc`、`*.pyo`
+- 递归清理 `src/app/` 与 `tests/` 下的 `__pycache__`、`*.pyc`、`*.pyo`
 
 常用示例：
 

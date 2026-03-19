@@ -10,13 +10,15 @@
 
 ---
 
-## 0) 执行状态（截至 2026-03-18）
+## 0) 执行状态（截至 2026-03-19）
 
 - [ ] Task 1：冻结现状与建立基线（未落盘目录树快照）
 - [x] Task 2：配置与分发清单对齐
 - [ ] Task 3：清理空目录/重复入口（待确认后执行）
 - [x] Task 4：测试目录重分层与归档
-- [ ] Task 5：可选的更大结构优化
+- [x] Task 5：可选的更大结构优化（已完成 `src/` 布局 + editable install + `video` 模块二次拆分 + 文档同步）
+- [ ] Task 6：调试稳定后移除 `video` 兼容层（待调用方完成迁移并通过回归后执行）
+- 备注：`app/core/video/` 已在 2026-03-19 完成一轮 `modes/`、`workers/`、`utils/`、`thread.py` + 兼容层落地；Task 6 负责在调试完成后清理过渡层，保持目录整洁。
 
 ## 1) 当前目录结构（摘要快照）
 
@@ -24,43 +26,48 @@
 
 ```text
 video_watermark_remover/
-  main.py                         # GUI/入口（pyproject scripts 指向 main:main）
+  main.py                         # 薄启动器（转发到 app.entrypoints:main）
   pyproject.toml                  # 依赖/打包/工具配置（black/mypy/pytest 等）
   requirements.txt                # 依赖清单（与 pyproject 存在重复维护）
   requirements-dev.txt
   config.ini                      # 本地配置（.gitignore 已忽略）
   config.ini.example              # 配置模板（建议用于生成“用户配置目录”的 config.ini）
   LICENSE                         # 许可证（MIT）
-  app/                            # 主 Python 包（setuptools packages=["app"]）
-    assets/
-      icons/
-    config/
-      config_manager.py
-      validators.py
-      preferences/                # 新版偏好设置包
-      styles/                     # 样式/主题
-      preferences_defaults.py     # 疑似历史遗留（与 preferences/ 重叠）
-      preferences_storage.py
-      preferences_validator.py
-      user_preferences_manager.py
-    core/
-      exceptions.py
-      ai/                         # AI 检测/修复相关（YOLO/修复器/GPU 监控等）
-      audio/                      # 音频抽取/合并/FFmpeg 处理
-      video/                      # 视频帧读写/流水线/多进程处理
-    ui/
-      main_window.py
-      signal_handler.py
-      components/                 # 控件组合（panel/widget）
-      widgets/                    # 可复用控件（含 advanced、batch 子目录）
+  src/
+    app/                          # 主 Python 包（setuptools package-dir={"": "src"}）
+      assets/
+        icons/
+      config/
+        config_manager.py
+        validators.py
+        preferences/              # 新版偏好设置包
+        styles/                   # 样式/主题
+        preferences_defaults.py   # 疑似历史遗留（与 preferences/ 重叠）
+        preferences_storage.py
+        preferences_validator.py
+        user_preferences_manager.py
+      core/
+        exceptions.py
+        ai/                       # AI 检测/修复相关（YOLO/修复器/GPU 监控等）
+        audio/                    # 音频抽取/合并/FFmpeg 处理
+        video/                    # 视频处理主模块
+          modes/                  # 单进程 / 多进程 / 流水线模式
+          workers/                # 帧读取/处理/写入、分块与音频任务
+          utils/                  # 路径与背压等工具
+          thread.py               # 线程入口（兼容导出）
+      ui/
+        main_window.py
+        signal_handler.py
+        components/               # 控件组合（panel/widget）
+        widgets/                  # 可复用控件（含 advanced、batch 子目录）
+        utils/
+        dialogs/                  # 当前为空（仅 __init__.py）
       utils/
-      dialogs/                    # 当前为空（仅 __init__.py）
-    utils/
-      logger_setup.py
-      metrics.py
-      model_downloader.py
-      utils.py
-    services/                     # 当前为空目录
+        logger_setup.py
+        metrics.py
+        model_downloader.py
+        utils.py
+      services/                   # 当前为空目录
 
   scripts/
     vwr.ps1                       # 统一的开发/运行脚本入口
@@ -95,7 +102,7 @@ video_watermark_remover/
 ## 2) 结构诊断：不一致与可优化点（按优先级）
 
 ### A. “目录存在但为空/名不副实”
-- [ ] `app/services/`、`app/ui/dialogs/` 为空：需要确认是否保留作为未来扩展点；若确认无用可删除（删除属于高风险操作，需要明确确认）。
+- [ ] `src/app/services/`、`src/app/ui/dialogs/` 为空：需要确认是否保留作为未来扩展点；若确认无用可删除（删除属于高风险操作，需要明确确认）。
 - [x] `tests/integration/` 曾仅有 `__init__.py`：已将顶层 `tests/test_*.py` 归档至 `tests/integration/`，并新增 `tests/e2e/ps1/` 承载 PowerShell 端到端脚本。
 - [ ] `screenshot/` 当前为空：若为运行产物目录，建议统一命名与 `.gitignore` 策略并明确约定。
 - [x] `test_output/` 命名/忽略不一致：已补充 `.gitignore` 忽略 `test_output/`（是否保留目录本身仍待确认）。
@@ -105,7 +112,7 @@ video_watermark_remover/
 - [x] `MANIFEST.in` 引用不存在文件：已对齐真实结构，避免 sdist 打包失败或分发包缺文件。
 
 ### C. 同一领域出现“新旧两套组织方式”的迹象
-- [ ] `app/config/preferences/` 已存在包结构，但同目录还有 `preferences_defaults.py` / `preferences_storage.py` / `preferences_validator.py` / `user_preferences_manager.py` 等：需要确认它们与 `preferences/` 的关系，避免后续维护产生重复逻辑与入口混乱。
+- [ ] `src/app/config/preferences/` 已存在包结构，但同目录还有 `preferences_defaults.py` / `preferences_storage.py` / `preferences_validator.py` / `user_preferences_manager.py` 等：需要确认它们与 `preferences/` 的关系，避免后续维护产生重复逻辑与入口混乱。
 
 ### D. 测试目录分层混杂（影响可读性与执行策略）
 - [x] 顶层 `tests/test_*.py` 及 `tests/*.ps1` 散落：已归档到 `tests/integration/` 与 `tests/e2e/ps1/`。
@@ -212,16 +219,83 @@ video_watermark_remover/
   - `python -m pytest -q`
 - 目标：单测在合理时间内完成（若超过 60s，需拆分 slow 标记或分组运行）。
 
-### Task 5：可选的更大结构优化（仅在低风险整理完成后评估）（未开始）
+### Task 5：可选的更大结构优化（仅在低风险整理完成后评估）（已完成一轮 `src/` 布局落地）
 
 **候选方向（择一或不做）：**
-- `src/` 布局：将 `app/` 移入 `src/app/`，避免“从工作目录误导入本地包”的典型坑。
+- [x] `src/` 布局：已将 `app/` 移入 `src/app/`，并同步对齐 `pyproject.toml`、`main.py`、`app.entrypoints`、`scripts/vwr.ps1`、单测烟囱校验与 README / 脚本文档。
 - 包名语义化：将 `app` 改为 `video_watermark_remover`（变更面较大，需谨慎）。
-- `app/core/video/` 进一步按职责拆分（IO、pipeline、process、utils），减少“一个目录下聚集过多概念”的维护成本。
+- [x] `src/app/core/video/` 进一步按职责拆分：新增 `modes/`、`workers/`、`utils/`、`thread.py`，旧平铺模块保留为兼容层，降低目录平铺与导入破坏面。
 
 **验证基线：**
 - GUI 冒烟：`python main.py` 能正常启动主窗口（Windows/Qt 环境）。
 - 单测：`python -m pytest -q` 通过。
+
+### Task 6：调试稳定后移除 `video` 兼容层（后置清理）（未开始）
+
+**目标：**
+- 在 `modes/`、`workers/`、`utils/`、`thread.py` 已稳定运行、调用方与测试全部切到新入口后，删除旧平铺兼容层，让 `src/app/core/video/` 保持单一职责与清晰目录边界。
+
+**Files：**
+- Potential Delete: `src/app/core/video/audio_tasks.py`
+- Potential Delete: `src/app/core/video/backpressure.py`
+- Potential Delete: `src/app/core/video/chunk_worker.py`
+- Potential Delete: `src/app/core/video/frame_processor.py`
+- Potential Delete: `src/app/core/video/frame_reader.py`
+- Potential Delete: `src/app/core/video/frame_writer.py`
+- Potential Delete: `src/app/core/video/multiprocess_processor.py`
+- Potential Delete: `src/app/core/video/path_utils.py`
+- Potential Delete: `src/app/core/video/pipeline_processor.py`
+- Potential Delete: `src/app/core/video/single_process_processor.py`
+- Potential Refactor: `src/app/core/video/video_processor.py`
+- Potential Refactor: `src/app/ui/signal_handler.py`
+- Potential Refactor: `src/app/ui/widgets/batch/batch_processor_thread.py`
+- Potential Refactor: `tests/core/ai/video/*`、`tests/integration/*video*`
+
+**执行前检查清单（全部满足后再启动 Task 6）**
+- [ ] **调用方迁移完成**：`src/` 与 `tests/` 中不再存在对 `audio_tasks.py`、`backpressure.py`、`chunk_worker.py`、`frame_processor.py`、`frame_reader.py`、`frame_writer.py`、`multiprocess_processor.py`、`path_utils.py`、`pipeline_processor.py`、`single_process_processor.py` 的业务依赖。
+- [ ] **导入扫描通过**：执行 `rg -n "from app\.core\.video\.(audio_tasks|backpressure|chunk_worker|frame_processor|frame_reader|frame_writer|multiprocess_processor|path_utils|pipeline_processor|single_process_processor)" "src" "tests"`，结果仅允许保留“迁移说明/待删除清单”，不应再有生产代码与正式测试引用。
+- [ ] **UI 入口稳定**：`src/app/ui/signal_handler.py`、`src/app/ui/widgets/batch/batch_processor_thread.py` 已全部改用 `app.core.video.thread` / `app.core.video.modes.*` / `app.core.video.workers.*` / `app.core.video.utils.*`。
+- [x] **测试入口稳定**：`tests/core/ai/video/`、`tests/integration/`、`tests/unit/test_path_utils.py` 已切换到新子包入口，不再依赖兼容层验证主流程。
+- [ ] **兼容层仅剩过渡职责**：确认旧平铺模块没有新增业务逻辑、没有独有逻辑分支，只承担转发/兼容职责。
+- [ ] **调试记录闭环**：GUI 单文件处理、批量处理、单进程、多进程、流水线模式都已完成至少一轮人工调试，并记录结果。
+- [ ] **质量链路为绿**：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick` 通过。
+- [ ] **单测链路为绿**：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" test unit -Quick` 通过。
+- [ ] **视频定向测试为绿**：`python -m pytest tests/core/ai/video -q` 与相关 `tests/integration/*video*` 已通过。
+- [ ] **回滚点已准备**：删除兼容层前，已确认当前 worktree / 分支状态清晰，可通过单次 commit 或标签快速回退。
+- [ ] **已获删除确认**：由于 Task 6 涉及批量删除文件，执行前需再次获得明确确认。
+
+**Task 6 前置迁移小清单（测试引用）**
+- [x] `tests/unit/test_path_utils.py`：已迁移为 `from app.core.video.utils.path import build_temp_path`，定向验证 `python -m pytest tests/unit/test_path_utils.py -q` 已通过。
+- [x] `tests/core/ai/video/test_video_module_split.py`：已移除旧兼容层导入段，测试收敛为“新入口结构完整、导出一致、行为一致”，并通过 PyQt6/AI/FFmpeg stub 避免收集阶段加载重依赖。
+- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.multiprocess_processor import process_video_multiprocess` 迁移为 `from app.core.video.modes.multiprocess import process_video_multiprocess`。
+- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.pipeline_processor import process_video_pipeline` 迁移为 `from app.core.video.modes.pipeline import process_video_pipeline`。
+- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.single_process_processor import process_video_singleprocess` 迁移为 `from app.core.video.modes.single_process import process_video_singleprocess`。
+- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.path_utils import build_temp_path` 迁移为 `from app.core.video.utils.path import build_temp_path`。
+- [x] `tests/core/ai/video/test_video_module_split.py`：完成迁移后，将该测试的目标从“旧新双入口兼容”收敛为“仅验证新入口结构完整、导出一致、行为一致”。
+- [x] 迁移顺序建议：先改 `tests/unit/test_path_utils.py`，再在真正执行 Task 6 前最后一轮统一改 `tests/core/ai/video/test_video_module_split.py`。
+- [x] 每迁移完一项即验证：`python -m pytest tests/unit/test_path_utils.py -q` 或 `python -m pytest tests/core/ai/video/test_video_module_split.py -q`。
+
+**Step 1：冻结迁移前置条件**
+- 要求：仅在 GUI 手工调试、定向视频链路测试、`scripts/vwr.ps1 quality -Quick`、`scripts/vwr.ps1 test unit -Quick`、相关集成测试均稳定后执行。
+
+**Step 2：扫描兼容层剩余引用**
+- Run：
+  - `rg -n "audio_tasks|backpressure|chunk_worker|frame_processor|frame_reader|frame_writer|multiprocess_processor|path_utils|pipeline_processor|single_process_processor" "src" "tests"`
+- 目标：确认仍有哪些调用点依赖旧平铺模块。
+
+**Step 3：将调用方切换到新子包入口**
+- 示例：统一改为 `app.core.video.modes.*`、`app.core.video.workers.*`、`app.core.video.utils.*`、`app.core.video.thread`。
+
+**Step 4：删除兼容层并收口导出**
+- 删除旧平铺兼容文件；同步收敛 `src/app/core/video/__init__.py` 与 `src/app/core/video/video_processor.py` 的过渡导出，避免继续扩散双入口。
+
+**Step 5：执行回归验证**
+- Run：
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" test unit -Quick`
+  - `python -m pytest tests/core/ai/video -q`
+- 目标：确认删除兼容层后功能、导入链路、测试入口全部保持稳定。
+
 
 ---
 
@@ -252,6 +326,21 @@ video_watermark_remover/
 - `scripts/vwr.ps1`：`run -AutoFix` 从 `config.ini.example` 生成配置到“用户配置目录”，并打印实际路径。
 - `README.md`、`config.ini.example`、`scripts/README.md`（原 `scripts/vwr.ps1.md`）：更新配置文件位置与生成方式说明，减少误导。
 - `tests/`：将顶层“集成/端到端脚本”归档到 `tests/integration/`、`tests/e2e/ps1/`，并同步 `scripts/vwr.ps1` 与 `tests/test_data/README.md` 的引用路径。
+
+## 6.1 已实施变更（2026-03-19）
+
+- `app/` → `src/app/`：完成 `src/` 布局迁移，降低“从工作目录误导入本地包”的风险。
+- `main.py`：改为薄启动器，实际入口转发到 `app.entrypoints:main`。
+- `pyproject.toml`：补充 `package-dir={"": "src"}`，将 `project.scripts` / `project.gui-scripts` 对齐到 `app.entrypoints:main`。
+- `MANIFEST.in`：补充 `main.py`，确保分发包仍包含根入口薄启动器。
+- `scripts/vwr.ps1`：`setup` 自动执行 editable install，并在 `run/test/quality/build` 前做项目可导入校验；同时移除对 `PYTHONPATH` 的依赖。
+- `src/app/core/ai/__init__.py`：改为惰性导入，避免 Windows 下 pytest 收集阶段触发 `torch` 的 `WinError 1114`。
+- `README.md`、`scripts/README.md`：同步 `src/app` 布局、editable install、薄启动器与脚本真实行为说明（对应本轮 Task 1.6）。
+- `pyproject.toml`、`requirements-dev.txt`、`scripts/vwr.ps1`：补齐 Black 参数与版本对齐（`23.12.1`），消除脚本质量检查与 pre-commit 钩子不一致的问题。
+- `src/app/core/video/`：完成第二轮结构化拆分，新增 `modes/`、`workers/`、`utils/`、`thread.py`；旧平铺模块保留为兼容层，降低 UI / 批处理 / 测试的迁移成本。
+- `src/app/core/video/workers/chunk.py`、`src/app/core/video/workers/frame_processor.py`、`src/app/core/video/video_processor.py`：引入 AI / FFmpeg 惰性解析，避免测试收集阶段触发 `torch` 的 `WinError 1114`。
+- `tests/core/ai/video/test_video_module_split.py`：新增视频模块拆分结构测试，验证新子包入口可用、导出一致，并通过 stub 避免收集阶段触发重依赖导入。
+- 验证：`tests/core/ai/video/test_video_modes.py`、`tests/unit/test_path_utils.py`、`scripts/vwr.ps1 quality -Quick`、`scripts/vwr.ps1 test unit -Quick` 均通过。
 
 ---
 

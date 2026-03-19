@@ -52,11 +52,12 @@ cd video_watermark_remover
 .\scripts\vwr.ps1 run
 ```
 
-> 说明：当前仓库仅提供 Windows PowerShell 脚本（`.\scripts\vwr.ps1`）。如在 Linux/macOS 使用，请按“手动安装”章节自行创建虚拟环境并运行 `python main.py`。
+> 说明：当前仓库仅提供 Windows PowerShell 脚本（`.\scripts\vwr.ps1`）。如在 Linux/macOS 使用，请按“手动安装”章节自行创建虚拟环境、将当前项目安装为 editable，再运行 `python -m app.entrypoints`（或在仓库根目录执行 `python main.py`）。
 
 **首次启动**将自动完成：
 - ✅ 使用uv创建Python 3.12.10虚拟环境
 - ✅ 使用uv安装所有依赖包
+- ✅ 将当前项目安装为 editable（源码目录：`src/app`）
 - ✅ YOLOv11x模型自动下载
 - ✅ 环境配置检查
 
@@ -137,8 +138,11 @@ uv venv --python 3.12.10
 # 4. 使用uv安装依赖
 uv pip install -r requirements.txt
 
-# 5. 运行程序
-uv run python main.py
+# 5. 将当前项目安装为 editable（推荐）
+uv pip install -e .
+
+# 6. 运行程序
+python -m app.entrypoints
 ```
 
 ### 开发环境配置
@@ -152,6 +156,13 @@ uv run python main.py
 
 # 运行测试
 .\scripts\vwr.ps1 test unit -Quick
+```
+
+如需手动搭建与脚本一致的开发环境，可执行：
+
+```bash
+uv pip install -r requirements-dev.txt
+uv pip install -e .
 ```
 
 ---
@@ -186,27 +197,28 @@ uv run python main.py
 
 ```
 video_watermark_remover/
-├── app/                    # 应用核心代码 (11,949行)
-│   ├── core/              # 核心功能模块
-│   │   ├── ai/            # AI检测与修复
-│   │   ├── audio/         # 音频处理
-│   │   └── video/         # 视频处理
-│   ├── ui/                # 用户界面
-│   ├── config/            # 配置管理
-│   └── utils/             # 工具函数
-├── tests/                 # 测试代码 (5,508行, 29个文件)
+├── src/
+│   └── app/               # 应用核心代码（editable install 的真实包目录）
+│       ├── core/          # 核心功能模块
+│       │   ├── ai/        # AI检测与修复
+│       │   ├── audio/     # 音频处理
+│       │   └── video/     # 视频处理
+│       ├── ui/            # 用户界面
+│       ├── config/        # 配置管理
+│       └── utils/         # 工具函数
+├── tests/                 # 测试代码
 ├── scripts/               # 自动化脚本（统一入口：vwr.ps1）
 ├── docs/                  # 文档
 ├── models/                # AI模型
 ├── logs/                  # 运行日志
 ├── config.ini.example     # 配置模板（复制到用户配置目录后生效）
-└── main.py                # 程序入口
+└── main.py                # 薄启动器（转发到 app.entrypoints:main）
 ```
 
 > 说明：应用运行时会在“用户配置目录”自动生成 `config.ini`（默认不纳入版本控制）。  
 > 如需确认路径，可运行：`python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"`
 
-**代码统计**: ~28,000+ 行代码，76个Python文件，79.7%代码规范率
+**补充说明**：当前仓库采用 `src/app` 布局，开发环境建议通过 `.\scripts\vwr.ps1 setup -Dev` 或 `uv pip install -e .` 建立 editable install。
 
 ---
 
