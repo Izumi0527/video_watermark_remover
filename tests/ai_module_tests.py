@@ -26,7 +26,7 @@ np = pytest.importorskip("numpy")
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test_utilities import print_test_header, print_test_result
+from tests.integration.test_utilities import print_test_header, print_test_result
 
 
 def test_ai_handler_import() -> Tuple[bool, str]:
@@ -168,7 +168,7 @@ def test_video_processor_thread_import() -> Tuple[bool, str]:
     print_test_header("测试视频处理线程导入")
 
     try:
-        from app.core.video.video_processor import VideoProcessorThread
+        from app.core.video.thread import VideoProcessorThread
 
         if VideoProcessorThread is None:
             return False, "VideoProcessorThread应该不为空"

@@ -271,7 +271,92 @@ function Resolve-UvCacheDir {
             return $candidate.Trim()
         }
     }
+    return (Join-Path $ProjectRoot ".cache/uv")
+}
+
+function Resolve-ProjectSrcDir {
+    $srcDir = Join-Path $ProjectRoot "src"
+    $appInit = Join-Path $srcDir "app/__init__.py"
+    if ((Test-Path $srcDir) -and (Test-Path $appInit)) {
+        return $srcDir
+    }
     return ""
+}
+
+function New-RunScopedDirectory {
+    param(
+        [string]$BaseDir,
+        [string]$Prefix
+    )
+
+    if (-not (Test-Path $BaseDir)) {
+        New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
+    }
+
+    $dirName = "{0}-{1}-{2}" -f $Prefix, (Get-Date -Format "yyyyMMdd-HHmmss"), $PID
+    $path = Join-Path $BaseDir $dirName
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    return $path
+}
+
+function Use-ScopedProjectRuntimeEnv {
+    param([switch]$ForPytest)
+
+    $snapshot = @{}
+    foreach ($name in @("PYTHONPATH", "UV_CACHE_DIR", "VWR_UV_CACHE_DIR", "TEMP", "TMP")) {
+        $snapshot[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+    }
+
+    $srcDir = Resolve-ProjectSrcDir
+    if ($srcDir) {
+        $currentPyPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+        if (-not $currentPyPath) {
+            [Environment]::SetEnvironmentVariable("PYTHONPATH", $srcDir, "Process")
+        } else {
+            $parts = $currentPyPath -split [IO.Path]::PathSeparator
+            if ($parts -notcontains $srcDir) {
+                [Environment]::SetEnvironmentVariable(
+                    "PYTHONPATH",
+                    ($srcDir + [IO.Path]::PathSeparator + $currentPyPath),
+                    "Process"
+                )
+            }
+        }
+    }
+
+    $uvCacheDir = Resolve-UvCacheDir
+    if ($uvCacheDir) {
+        if (-not (Test-Path $uvCacheDir)) {
+            New-Item -ItemType Directory -Path $uvCacheDir -Force | Out-Null
+        }
+        [Environment]::SetEnvironmentVariable("UV_CACHE_DIR", $uvCacheDir, "Process")
+        [Environment]::SetEnvironmentVariable("VWR_UV_CACHE_DIR", $uvCacheDir, "Process")
+    }
+
+    $tempRoot = Join-Path $ProjectRoot ".cache/tmp"
+    $runTempDir = New-RunScopedDirectory -BaseDir $tempRoot -Prefix "run"
+    [Environment]::SetEnvironmentVariable("TEMP", $runTempDir, "Process")
+    [Environment]::SetEnvironmentVariable("TMP", $runTempDir, "Process")
+
+    if ($ForPytest) {
+        $pytestRoot = Join-Path $ProjectRoot ".cache/pytest"
+        $snapshot["PYTEST_BASETEMP"] = New-RunScopedDirectory -BaseDir $pytestRoot -Prefix "pytest"
+    }
+
+    return $snapshot
+}
+
+function Restore-ScopedProjectRuntimeEnv {
+    param([hashtable]$Snapshot)
+
+    foreach ($entry in $Snapshot.GetEnumerator()) {
+        if ($entry.Key -eq "PYTEST_BASETEMP") {
+            continue
+        }
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
 }
 
 function Get-PythonSemVerFromText {
@@ -391,6 +476,7 @@ function Ensure-Venv {
     param([string]$PythonSelector)
 
     $venv = Get-VenvInfo
+
     if (Test-Path $venv.Python) {
         $currentRaw = & $venv.Python --version 2>$null
         $currentVer = Get-PythonSemVerFromText -Text $currentRaw
@@ -555,9 +641,15 @@ function Assert-ProjectImportable {
         throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
     }
 
-    $appPath = (& $venv.Python -c "import app; from app.entrypoints import main as _entrypoint; print(app.__file__)" 2>$null | Select-Object -Last 1)
+    $envSnapshot = Use-ScopedProjectRuntimeEnv
+    try {
+        $appPath = (& $venv.Python -c "import app; from app.entrypoints import main as _entrypoint; print(app.__file__)" 2>$null | Select-Object -Last 1)
+    } finally {
+        Restore-ScopedProjectRuntimeEnv -Snapshot $envSnapshot
+    }
+
     if ($LASTEXITCODE -ne 0 -or -not $appPath) {
-        throw "项目导入验证失败：无法导入 app/app.entrypoints。请重新运行：.\\scripts\\vwr.ps1 setup"
+        throw "项目导入验证失败：无法导入 app/app.entrypoints。请先清理根目录残留 app 目录或重新运行：.\\scripts\\vwr.ps1 setup"
     }
 
     return $appPath.Trim()
@@ -569,8 +661,13 @@ function Test-ProjectImportable {
         return $false
     }
 
-    & $venv.Python -c "import app; from app.entrypoints import main as _entrypoint" *> $null
-    return ($LASTEXITCODE -eq 0)
+    $envSnapshot = Use-ScopedProjectRuntimeEnv
+    try {
+        & $venv.Python -c "import app; from app.entrypoints import main as _entrypoint" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Restore-ScopedProjectRuntimeEnv -Snapshot $envSnapshot
+    }
 }
 
 function Ensure-ProjectImportable {
@@ -789,6 +886,13 @@ function Invoke-Quality {
 
     $venv = Get-VenvInfo
 
+    if (-not $env:BLACK_CACHE_DIR) {
+        $env:BLACK_CACHE_DIR = Join-Path $ProjectRoot ".cache/black"
+    }
+    if (-not (Test-Path $env:BLACK_CACHE_DIR)) {
+        New-Item -ItemType Directory -Path $env:BLACK_CACHE_DIR -Force | Out-Null
+    }
+
     $targets = @()
     if (Test-Path "src/app") { $targets += "src/app" }
     if (Test-Path "main.py") { $targets += "main.py" }
@@ -803,8 +907,14 @@ function Invoke-Quality {
     if ($Check -eq "all" -or $Check -eq "format") {
         Write-Info "Black：$(if($Fix){'格式化'}else{'检查'})"
         $blackArgs = @("--line-length", "100")
+        if ($Quick) {
+            $blackArgs += @("--workers", "1")
+        }
         if (-not $Fix) {
-            $blackArgs += @("--check", "--diff")
+            $blackArgs += "--check"
+            if (-not $Quick) {
+                $blackArgs += "--diff"
+            }
         }
         if (Is-VerboseEnabled) {
             $blackArgs += "--verbose"
@@ -826,6 +936,9 @@ function Invoke-Quality {
     if ($Check -eq "all" -or $Check -eq "style") {
         Write-Info "Flake8：检查"
         $flakeArgs = @()
+        if ($Quick) {
+            $flakeArgs += @("--jobs", "1")
+        }
         $flakeArgs += $targets
         if ($Quick) {
             $flakeArgs += @("--select=E9,F63,F7,F82")
@@ -897,23 +1010,31 @@ function Invoke-Pytest {
     param([string[]]$PytestArgs)
 
     Assert-DevTools
-    Ensure-ProjectImportable
-    $venv = Get-VenvInfo
+    $envSnapshot = Use-ScopedProjectRuntimeEnv -ForPytest
+    try {
+        Ensure-ProjectImportable
+        $venv = Get-VenvInfo
 
-    # 先做一次关键依赖探测，避免 pytest 在收集阶段抛出难以理解的 ImportError
-    $depsOk = Test-KeyPackages
-    if (-not $depsOk) {
-        Write-Err "关键依赖未安装或不完整，无法运行 pytest。请先运行：.\\scripts\\vwr.ps1 setup -Dev（可加 -TorchBackend cpu / -DefaultIndex 镜像提速）"
-        return 2
+        # 先做一次关键依赖探测，避免 pytest 在收集阶段抛出难以理解的 ImportError
+        $depsOk = Test-KeyPackages
+        if (-not $depsOk) {
+            Write-Err "关键依赖未安装或不完整，无法运行 pytest。请先运行：.\\scripts\\vwr.ps1 setup -Dev（可加 -TorchBackend cpu / -DefaultIndex 镜像提速）"
+            return 2
+        }
+
+        $finalArgs = @()
+        $finalArgs += $PytestArgs
+        if ($envSnapshot.ContainsKey("PYTEST_BASETEMP")) {
+            $finalArgs += @("--basetemp", $envSnapshot["PYTEST_BASETEMP"])
+        }
+        $finalArgs += "--color=yes"
+
+        Write-Debug ("pytest 参数：" + ($finalArgs -join " "))
+        & $venv.Python -m pytest @finalArgs | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        Restore-ScopedProjectRuntimeEnv -Snapshot $envSnapshot
     }
-
-    $finalArgs = @()
-    $finalArgs += $PytestArgs
-    $finalArgs += "--color=yes"
-
-    Write-Debug ("pytest 参数：" + ($finalArgs -join " "))
-    & $venv.Python -m pytest @finalArgs | Out-Host
-    return $LASTEXITCODE
 }
 
 function Invoke-PowerShellScriptFile {

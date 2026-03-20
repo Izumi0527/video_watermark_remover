@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # 导入视频处理线程
-from ....core.video.video_processor import VideoProcessorThread
+from ....core.video.thread import VideoProcessorThread
 
 
 class ProcessingStatus(Enum):

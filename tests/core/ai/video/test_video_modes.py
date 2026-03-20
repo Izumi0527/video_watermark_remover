@@ -1,4 +1,6 @@
 import os
+import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -6,13 +8,21 @@ import pytest
 cv2 = pytest.importorskip("cv2")
 np = pytest.importorskip("numpy")
 
-from app.core.video import (
-    chunk_worker,
-    frame_processor,
-    multiprocess_processor,
-    pipeline_processor,
-    video_processor,
-)
+from app.core.video import thread as video_thread
+from app.core.video.modes import multiprocess as multiprocess_mode
+from app.core.video.modes import pipeline as pipeline_mode
+from app.core.video.workers import chunk as chunk_worker
+from app.core.video.workers import frame_processor
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[4] / ".cache" / "tests" / "core-ai-video-modes"
+
+
+def create_runtime_dir() -> Path:
+    """创建项目内测试运行目录，避免 pytest tmp_path 清理权限波动。"""
+    RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+    runtime_dir = RUNTIME_ROOT / f"video_modes_{uuid.uuid4().hex}"
+    runtime_dir.mkdir()
+    return runtime_dir
 
 
 class DummyAIHandler:
@@ -92,29 +102,30 @@ class DummyTimer:
 @pytest.fixture(autouse=True)
 def patch_dependencies(monkeypatch):
     # 替换 AI 处理器和 FFmpeg 处理器
-    monkeypatch.setattr(video_processor, "AIHandler", DummyAIHandler)
+    monkeypatch.setattr(video_thread, "AIHandler", DummyAIHandler)
     monkeypatch.setattr(chunk_worker, "AIHandler", DummyAIHandler)
     monkeypatch.setattr(frame_processor, "AIHandler", DummyAIHandler)
-    monkeypatch.setattr(video_processor, "FFmpegAudioProcessor", DummyFFmpegAudioProcessor)
+    monkeypatch.setattr(video_thread, "FFmpegAudioProcessor", DummyFFmpegAudioProcessor)
 
     # 替换 QTimer
-    monkeypatch.setattr(video_processor, "QTimer", DummyTimer)
-    monkeypatch.setattr(multiprocess_processor, "QTimer", DummyTimer)
-    monkeypatch.setattr(pipeline_processor, "QTimer", DummyTimer)
+    monkeypatch.setattr(video_thread, "QTimer", DummyTimer)
+    monkeypatch.setattr(multiprocess_mode, "QTimer", DummyTimer)
+    monkeypatch.setattr(pipeline_mode, "QTimer", DummyTimer)
 
     # 替换多进程执行器为同步执行
-    monkeypatch.setattr(multiprocess_processor, "ProcessPoolExecutor", InlineExecutor)
-    monkeypatch.setattr(pipeline_processor, "ProcessPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(multiprocess_mode, "ProcessPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(pipeline_mode, "ProcessPoolExecutor", InlineExecutor)
 
     yield
 
 
 @pytest.fixture
-def media(tmp_path):
+def media():
     """创建极简测试图像与视频。"""
-    img_path = tmp_path / "test_image.jpg"
-    vid_path = tmp_path / "test_video.mp4"
-    out_dir = tmp_path / "outputs"
+    runtime_dir = create_runtime_dir()
+    img_path = runtime_dir / "test_image.jpg"
+    vid_path = runtime_dir / "test_video.mp4"
+    out_dir = runtime_dir / "outputs"
     out_dir.mkdir(exist_ok=True)
 
     # 生成测试图片
@@ -131,13 +142,14 @@ def media(tmp_path):
         writer.write(frame)
     writer.release()
 
-    return {"image": img_path, "video": vid_path, "out_dir": out_dir}
+    yield {"image": img_path, "video": vid_path, "out_dir": out_dir}
+    shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 def test_image_processing(media):
     """验证图片处理流程能输出文件。"""
     output_path = media["out_dir"] / "image_out.jpg"
-    processor = video_processor.VideoProcessorThread(
+    processor = video_thread.VideoProcessorThread(
         input_path=str(media["image"]),
         output_path=str(output_path),
         ai_params={},
@@ -152,7 +164,7 @@ def test_image_processing(media):
 def test_video_single_process(media):
     """验证单进程视频处理流程。"""
     output_path = media["out_dir"] / "video_single.mp4"
-    processor = video_processor.VideoProcessorThread(
+    processor = video_thread.VideoProcessorThread(
         input_path=str(media["video"]),
         output_path=str(output_path),
         ai_params={},
@@ -167,7 +179,7 @@ def test_video_single_process(media):
 def test_video_multiprocess_chunk(media):
     """验证分块多进程模式（同步执行替代）。"""
     output_path = media["out_dir"] / "video_multiprocess.mp4"
-    processor = video_processor.VideoProcessorThread(
+    processor = video_thread.VideoProcessorThread(
         input_path=str(media["video"]),
         output_path=str(output_path),
         ai_params={},
@@ -184,7 +196,7 @@ def test_video_multiprocess_chunk(media):
 def test_video_pipeline(media):
     """验证流水线模式（同步执行替代）。"""
     output_path = media["out_dir"] / "video_pipeline.mp4"
-    processor = video_processor.VideoProcessorThread(
+    processor = video_thread.VideoProcessorThread(
         input_path=str(media["video"]),
         output_path=str(output_path),
         ai_params={},

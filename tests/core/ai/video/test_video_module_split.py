@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import types
+from pathlib import Path
 
 
 def _install_pyqt6_stub() -> None:
@@ -53,6 +54,30 @@ def _install_pyqt6_stub() -> None:
     sys.modules["PyQt6.QtCore"] = qtcore
 
 
+def _install_cv2_stub() -> None:
+    if importlib.util.find_spec("cv2") is not None:
+        return
+
+    sys.modules["cv2"] = types.ModuleType("cv2")
+
+
+def _install_numpy_stub() -> None:
+    if importlib.util.find_spec("numpy") is not None:
+        return
+
+    numpy_module = types.ModuleType("numpy")
+    numpy_typing_module = types.ModuleType("numpy.typing")
+
+    class _DummyNDArray:
+        def __class_getitem__(cls, _item):
+            return object
+
+    numpy_module.uint8 = int
+    numpy_typing_module.NDArray = _DummyNDArray
+    sys.modules["numpy"] = numpy_module
+    sys.modules["numpy.typing"] = numpy_typing_module
+
+
 def _install_runtime_stubs() -> None:
     ai_handler_module = types.ModuleType("app.core.ai.ai_handler")
 
@@ -89,7 +114,24 @@ def _install_runtime_stubs() -> None:
 
 
 _install_pyqt6_stub()
+_install_cv2_stub()
+_install_numpy_stub()
 _install_runtime_stubs()
+
+
+COMPAT_LAYER_FILES = [
+    "src/app/core/video/audio_tasks.py",
+    "src/app/core/video/backpressure.py",
+    "src/app/core/video/chunk_worker.py",
+    "src/app/core/video/frame_processor.py",
+    "src/app/core/video/frame_reader.py",
+    "src/app/core/video/frame_writer.py",
+    "src/app/core/video/multiprocess_processor.py",
+    "src/app/core/video/path_utils.py",
+    "src/app/core/video/pipeline_processor.py",
+    "src/app/core/video/single_process_processor.py",
+    "src/app/core/video/video_processor.py",
+]
 
 
 def test_new_video_subpackages_expose_core_entries() -> None:
@@ -129,3 +171,12 @@ def test_video_entrypoints_are_consistent() -> None:
     assert process_video_multiprocess.__name__ == "process_video_multiprocess"
     assert process_video_pipeline.__name__ == "process_video_pipeline"
     assert build_temp_path("demo.mp4", "temp_video").endswith("demo__temp_video.mp4")
+
+
+def test_legacy_flat_compat_layers_are_removed() -> None:
+    missing_compat_files = [
+        relative_path for relative_path in COMPAT_LAYER_FILES if not Path(relative_path).exists()
+    ]
+    assert len(missing_compat_files) == len(COMPAT_LAYER_FILES), "以下旧兼容层文件仍未删除：" + ", ".join(
+        sorted(set(COMPAT_LAYER_FILES) - set(missing_compat_files))
+    )

@@ -21,11 +21,11 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # 导入配置
 from ..config.styles.colors import DEFAULT_THEME
 
-# 导入帧提取工具
-from ..core.video.frame_reader import extract_video_first_frame
-
 # 导入视频处理线程
-from ..core.video.video_processor import VideoProcessorThread
+from ..core.video.thread import VideoProcessorThread
+
+# 导入帧提取工具
+from ..core.video.workers.frame_reader import extract_video_first_frame
 
 # 导入AI参数构建器
 from .utils.ai_params_builder import AIParamsBuilder

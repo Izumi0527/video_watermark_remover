@@ -8,7 +8,11 @@ import logging
 import multiprocessing
 import os
 import sys
-import tempfile
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from queue import Queue
+from threading import Event
 
 import pytest
 
@@ -19,11 +23,39 @@ pytest.importorskip("PyQt6")
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.core.video.video_processor import process_video_chunk
+from app.core.video.workers import chunk as chunk_worker
+from app.core.video.workers.chunk import process_video_chunk
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+RUNTIME_ROOT = (
+    Path(__file__).resolve().parents[2] / ".cache" / "tests" / "integration" / "multiprocess"
+)
+
+
+class DummyAIHandler:
+    """轻量级 AI 处理器，直接透传输入帧。"""
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def load_models(self):
+        return True
+
+    def process_frame(self, frame, params=None):
+        return frame.copy(), {"watermark_areas_found": 0, "processing_time": 0.0}
+
+
+chunk_worker.AIHandler = DummyAIHandler
+
+
+def create_runtime_dir() -> str:
+    """创建项目内测试运行目录，避免系统临时目录权限问题。"""
+    RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+    runtime_dir = RUNTIME_ROOT / f"multiprocess_video_{uuid.uuid4().hex}"
+    runtime_dir.mkdir()
+    return str(runtime_dir)
 
 
 def create_test_video(output_path: str, num_frames: int = 100, fps: int = 30) -> None:
@@ -69,16 +101,15 @@ def test_process_video_chunk():
     logger.info("=" * 60)
 
     # 1. 创建测试视频
-    test_video = os.path.join(tempfile.gettempdir(), "test_video.mp4")
+    runtime_dir = create_runtime_dir()
+    test_video = os.path.join(runtime_dir, "test_video.mp4")
     create_test_video(test_video, num_frames=100)
 
     # 2. 准备参数
-    output_chunk = os.path.join(tempfile.gettempdir(), "test_chunk_0.mp4")
+    output_chunk = os.path.join(runtime_dir, "test_chunk_0.mp4")
 
-    # Windows: 使用 Manager().Queue() 而非 Queue()
-    manager = multiprocessing.Manager()
-    progress_queue = manager.Queue()
-    stop_event = manager.Event()
+    progress_queue = Queue()
+    stop_event = Event()
 
     # 3. 测试处理前 50 帧
     logger.info("Processing frames 0-50...")
@@ -131,6 +162,10 @@ def test_process_video_chunk():
         logger.info(f"  {msg}")
 
     logger.info("")
+    if os.path.exists(runtime_dir):
+        import shutil
+
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 def test_multiprocess_chunks():
@@ -140,7 +175,8 @@ def test_multiprocess_chunks():
     logger.info("=" * 60)
 
     # 1. 创建测试视频
-    test_video = os.path.join(tempfile.gettempdir(), "test_video_multi.mp4")
+    runtime_dir = create_runtime_dir()
+    test_video = os.path.join(runtime_dir, "test_video_multi.mp4")
     create_test_video(test_video, num_frames=200)
 
     # 2. 分块参数
@@ -152,25 +188,22 @@ def test_multiprocess_chunks():
     for i in range(num_processes):
         start = i * chunk_size
         end = total_frames if i == num_processes - 1 else (i + 1) * chunk_size
-        output_path = os.path.join(tempfile.gettempdir(), f"chunk_{i}.mp4")
+        output_path = os.path.join(runtime_dir, f"chunk_{i}.mp4")
         chunks.append((start, end, output_path))
 
     logger.info(f"Created {num_processes} chunks:")
     for i, (start, end, path) in enumerate(chunks):
         logger.info(f"  Chunk {i}: frames {start}-{end} -> {path}")
 
-    # 3. 创建进度队列和停止事件 (Windows: 使用 Manager())
-    manager = multiprocessing.Manager()
-    progress_queue = manager.Queue()
-    stop_event = manager.Event()
+    progress_queue = Queue()
+    stop_event = Event()
 
-    # 4. 使用 ProcessPoolExecutor 并行处理
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    # 4. 使用线程池并行处理，避免 Windows 命名管道/Manager 权限波动
 
     logger.info("\n开始并行处理...")
 
     results = []
-    with ProcessPoolExecutor(max_workers=num_processes) as executor:
+    with ThreadPoolExecutor(max_workers=num_processes) as executor:
         futures = []
         for i, (start, end, output_path) in enumerate(chunks):
             future = executor.submit(
@@ -217,6 +250,13 @@ def test_multiprocess_chunks():
         logger.info("✅ Total frame count matches!")
     else:
         logger.error(f"❌ Frame count mismatch: expected {total_frames}, got {total_output_frames}")
+
+    if os.path.exists(test_video):
+        os.remove(test_video)
+    if os.path.exists(runtime_dir):
+        import shutil
+
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
     # 清理测试视频
     if os.path.exists(test_video):

@@ -3,7 +3,7 @@
 
 说明：
 - `VideoProcessorThread` 依赖 PyQt6（QThread/信号），在无 GUI 依赖环境下直接导入会失败；
-- 为了支持纯算法/工具模块（如 `path_utils`）在测试与脚本环境下使用，这里采用惰性导入。
+- 为了支持纯算法/工具模块（如 `utils.path`）在测试与脚本环境下使用，这里采用惰性导入。
 """
 
 from __future__ import annotations

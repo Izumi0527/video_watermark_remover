@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from PyQt6.QtCore import QCoreApplication  # noqa: E402
 
-from app.core.video.video_processor import VideoProcessorThread  # noqa: E402
+from app.core.video.thread import VideoProcessorThread  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

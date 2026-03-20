@@ -31,10 +31,33 @@ np = pytest.importorskip("numpy")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config.config_manager import ConfigManager
-from app.core.video.video_processor import VideoProcessorThread
+from app.core.video import thread as video_thread_module
+from app.core.video.thread import VideoProcessorThread
 
 TEST_VIDEO_DIR = "test_videos"
 TEST_IMAGE_DIR = "test_images"
+TEST_RUNTIME_ROOT = (
+    Path(__file__).resolve().parents[2] / ".cache" / "tests" / "integration" / "video-processor"
+)
+
+
+class DummyAIHandler:
+    """轻量级 AI 处理器，避免测试阶段加载真实 torch 依赖。"""
+
+    def __init__(self, *_args, **_kwargs):
+        self.device_preference = "auto"
+
+    def load_models(self):
+        return True
+
+    def update_device(self, device):
+        self.device_preference = device
+
+    def process_frame(self, frame, params=None):
+        return frame.copy(), {"watermark_areas_found": 0, "processing_time": 0.0}
+
+
+video_thread_module.AIHandler = DummyAIHandler
 
 
 class TestVideoProcessor(unittest.TestCase):
@@ -44,7 +67,10 @@ class TestVideoProcessor(unittest.TestCase):
         设置测试类 - 创建测试目录和测试数据
         """
         print("Setting up TestVideoProcessor class...")
-        cls.temp_dir = tempfile.mkdtemp(prefix="video_processor_test_")
+        TEST_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+        cls.temp_dir = os.path.join(TEST_RUNTIME_ROOT, f"video_processor_test_{os.getpid()}")
+        if os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir, ignore_errors=True)
         cls.test_video_dir = os.path.join(cls.temp_dir, TEST_VIDEO_DIR)
         cls.test_image_dir = os.path.join(cls.temp_dir, TEST_IMAGE_DIR)
 
@@ -173,7 +199,7 @@ class TestVideoProcessor(unittest.TestCase):
 
         print("✅ Processor initialization test passed")
 
-    @patch("app.core.video.video_processor.AIHandler")
+    @patch("app.core.video.thread.AIHandler")
     def test_image_processing_success(self, mock_ai_handler_class):
         """
         测试图像处理成功流程
@@ -224,7 +250,7 @@ class TestVideoProcessor(unittest.TestCase):
 
         print("✅ Image processing success test passed")
 
-    @patch("app.core.video.video_processor.AIHandler")
+    @patch("app.core.video.thread.AIHandler")
     def test_video_processing_success(self, mock_ai_handler_class):
         """
         测试视频处理成功流程
@@ -275,7 +301,7 @@ class TestVideoProcessor(unittest.TestCase):
 
         print("✅ Video processing success test passed")
 
-    @patch("app.core.video.video_processor.AIHandler")
+    @patch("app.core.video.thread.AIHandler")
     def test_ai_handler_load_failure(self, mock_ai_handler_class):
         """
         测试AI处理器加载失败

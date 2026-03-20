@@ -17,6 +17,7 @@ AI处理功能测试模块
 import os
 import sys
 import tempfile
+from pathlib import Path
 from typing import Tuple
 
 import pytest
@@ -26,7 +27,7 @@ np = pytest.importorskip("numpy")
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test_utilities import (
+from tests.integration.test_utilities import (
     calculate_image_difference,
     create_test_image_with_watermark,
     create_test_mask,
@@ -34,6 +35,8 @@ from test_utilities import (
     print_test_result,
     validate_image_properties,
 )
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[1] / ".cache" / "tests" / "ai-processing"
 
 
 def test_watermark_detection() -> Tuple[bool, str]:
@@ -197,12 +200,13 @@ def test_video_processor_thread() -> Tuple[bool, str]:
         import cv2
 
         from app.config.config_manager import ConfigManager
-        from app.core.video.video_processor import VideoProcessorThread
+        from app.core.video.thread import VideoProcessorThread
 
         # 创建临时测试图片
         test_image = create_test_image_with_watermark()
 
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp_file:
+        RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=RUNTIME_ROOT, suffix=".jpg", delete=False) as tmp_file:
             temp_input_path = tmp_file.name
             cv2.imwrite(temp_input_path, test_image)
 

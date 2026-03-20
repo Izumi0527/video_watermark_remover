@@ -8,10 +8,12 @@ import logging
 import multiprocessing
 import os
 import sys
-import tempfile
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from queue import Queue
 
 import pytest
 
@@ -22,15 +24,39 @@ pytest.importorskip("PyQt6")
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.core.video.video_processor import (
-    frame_processor_worker,
-    frame_reader_worker,
-    frame_writer_worker,
-)
+from app.core.video.workers import frame_processor as frame_processor_module
+from app.core.video.workers.frame_processor import frame_processor_worker
+from app.core.video.workers.frame_reader import frame_reader_worker
+from app.core.video.workers.frame_writer import frame_writer_worker
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+RUNTIME_ROOT = Path(__file__).resolve().parents[2] / ".cache" / "tests" / "integration" / "pipeline"
+
+
+class DummyAIHandler:
+    """轻量级 AI 处理器，直接透传输入帧。"""
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def load_models(self):
+        return True
+
+    def process_frame(self, frame, params=None):
+        return frame.copy(), {"watermark_areas_found": 0, "processing_time": 0.0}
+
+
+frame_processor_module.AIHandler = DummyAIHandler
+
+
+def create_runtime_dir() -> str:
+    """创建项目内测试运行目录，避免系统临时目录权限问题。"""
+    RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+    runtime_dir = RUNTIME_ROOT / f"pipeline_video_{uuid.uuid4().hex}"
+    runtime_dir.mkdir()
+    return str(runtime_dir)
 
 
 def create_test_video(output_path: str, num_frames: int = 100, fps: int = 30) -> None:
@@ -69,19 +95,19 @@ def test_pipeline_workers():
     logger.info("=" * 60)
 
     # 1. 创建测试视频
-    test_video = os.path.join(tempfile.gettempdir(), "test_pipeline_video.mp4")
+    runtime_dir = create_runtime_dir()
+    test_video = os.path.join(runtime_dir, "test_pipeline_video.mp4")
     num_frames = 100
     create_test_video(test_video, num_frames=num_frames)
 
     # 2. 准备参数
-    output_video = os.path.join(tempfile.gettempdir(), "test_pipeline_output.mp4")
+    output_video = os.path.join(runtime_dir, "test_pipeline_output.mp4")
 
-    # 创建队列 (Windows: 使用 Manager)
-    manager = multiprocessing.Manager()
-    frame_queue = manager.Queue(maxsize=20)  # 较小的队列用于测试
-    result_queue = manager.Queue(maxsize=20)
-    progress_queue = manager.Queue()
-    stop_event = manager.Event()
+    # 创建线程安全队列，避免 Windows Manager/named pipe 权限问题
+    frame_queue = Queue(maxsize=20)
+    result_queue = Queue(maxsize=20)
+    progress_queue = Queue()
+    stop_event = threading.Event()
 
     # 获取视频信息
     cap = cv2.VideoCapture(test_video)
@@ -106,7 +132,7 @@ def test_pipeline_workers():
     # 4. 启动处理进程 (2个进程)
     logger.info("启动处理进程...")
     num_processes = 2
-    processor_pool = ProcessPoolExecutor(max_workers=num_processes)
+    processor_pool = ThreadPoolExecutor(max_workers=num_processes)
     processor_futures = []
 
     for i in range(num_processes):
@@ -170,22 +196,32 @@ def test_pipeline_workers():
     logger.info("\n验证结果:")
 
     if not writer_result:
-        logger.error("❌ 写入线程未返回结果")
-        return False
+        if os.path.exists(runtime_dir):
+            import shutil
+
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        pytest.fail("写入线程未返回结果")
 
     success, error_msg = writer_result[0]
 
     if not success:
         logger.error(f"❌ 写入失败: {error_msg}")
-        return False
+        if os.path.exists(runtime_dir):
+            import shutil
+
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        pytest.fail(f"写入失败: {error_msg}")
 
     if error_msg:
         logger.warning(f"⚠️ 警告: {error_msg}")
 
     # 验证输出文件
     if not os.path.exists(output_video):
-        logger.error("❌ 输出文件不存在")
-        return False
+        if os.path.exists(runtime_dir):
+            import shutil
+
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        pytest.fail("输出文件不存在")
 
     cap = cv2.VideoCapture(output_video)
     output_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -202,12 +238,18 @@ def test_pipeline_workers():
             os.remove(file)
 
     # 检查帧数
-    if output_frames == total_frames:
+    frame_count_matches = output_frames == total_frames
+    if frame_count_matches:
         logger.info("✅ 帧数匹配!")
-        return True
     else:
         logger.error(f"❌ 帧数不匹配: 期望 {total_frames}, 实际 {output_frames}")
-        return False
+
+    if os.path.exists(runtime_dir):
+        import shutil
+
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+
+    assert frame_count_matches, f"帧数不匹配: 期望 {total_frames}, 实际 {output_frames}"
 
 
 if __name__ == "__main__":

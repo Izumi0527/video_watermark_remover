@@ -80,18 +80,18 @@ def test_file_structure():
 
     required_files = [
         # 主窗口和核心组件
-        "app/ui/main_window.py",
-        "app/ui/widgets/image_selector_widget.py",
-        "app/ui/widgets/batch/batch_processing_widget.py",
-        "app/ui/widgets/advanced/advanced_parameters_widget.py",
+        "src/app/ui/main_window.py",
+        "src/app/ui/widgets/image_selector_widget.py",
+        "src/app/ui/widgets/batch/batch_processing_widget.py",
+        "src/app/ui/widgets/advanced/advanced_parameters_widget.py",
         # 配置和样式管理
-        "app/config/modern_style_manager.py",
-        "app/config/user_preferences_manager.py",
-        "app/config/config_manager.py",
+        "src/app/config/modern_style_manager.py",
+        "src/app/config/user_preferences_manager.py",
+        "src/app/config/config_manager.py",
         # AI和处理核心
-        "app/core/ai/ai_handler.py",
-        "app/core/audio/ffmpeg_audio_processor.py",
-        "app/core/video/video_processor.py",
+        "src/app/core/ai/ai_handler.py",
+        "src/app/core/audio/ffmpeg_audio_processor.py",
+        "src/app/core/video/thread.py",
         # 主入口文件
         "main.py",
         # 配置文件

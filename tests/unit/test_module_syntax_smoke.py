@@ -20,7 +20,7 @@ MODULE_PATHS = [
     "src/app/utils/utils.py",
     "src/app/core/ai/ai_handler.py",
     "src/app/core/ai/yolo_detector.py",
-    "src/app/core/video/video_processor.py",
+    "src/app/core/video/thread.py",
     "src/app/ui/main_window.py",
 ]
 

@@ -134,7 +134,7 @@ sys.path.insert(0, os.getcwd())
 
 # 检查关键模块导入
 essential_modules = [
-    'app.core.video.video_processor',
+    'app.core.video.thread',
     'app.core.ai.ai_handler',
     'app.config.config_manager',
     'app.ui.main_window'
@@ -233,25 +233,27 @@ import sys
 import os
 sys.path.insert(0, os.getcwd())
 
-from app.core.video.video_processor import VideoProcessor
+from app.core.video.thread import VideoProcessorThread
 from app.config.config_manager import ConfigManager
 
 # 创建配置管理器和视频处理器
 config_manager = ConfigManager()
 config = config_manager.get_default_config()
 
-video_processor = VideoProcessor()
+video_processor = VideoProcessorThread(
+    input_path='tests/test_data/sample.jpg',
+    output_path='tests/test_data/sample_output.jpg',
+    ai_params={},
+    config=config
+)
 
 # 测试处理器初始化
-print('✅ VideoProcessor 初始化成功')
+print('✅ VideoProcessorThread 初始化成功')
 
 # 测试处理器状态
-if hasattr(video_processor, 'is_busy'):
-    print(f'处理器忙碌状态: {video_processor.is_busy}')
-
-if hasattr(video_processor, 'get_supported_formats'):
-    formats = video_processor.get_supported_formats()
-    print(f'✅ 支持的视频格式数量: {len(formats)}')
+print(f'输入路径: {video_processor.input_path}')
+print(f'输出路径: {video_processor.output_path}')
+print(f'启用多进程: {video_processor.enable_multiprocess}')
 
 print('视频处理器初始化测试通过')
 "@
@@ -364,13 +366,18 @@ import os
 import tempfile
 sys.path.insert(0, os.getcwd())
 
-from app.core.video.video_processor import VideoProcessor
+from app.core.video.thread import VideoProcessorThread
 from app.core.ai.ai_handler import AIHandler
 from app.config.config_manager import ConfigManager
 
 # 创建所有核心组件
 config_manager = ConfigManager()
-video_processor = VideoProcessor()
+video_processor = VideoProcessorThread(
+    input_path='tests/test_data/sample.jpg',
+    output_path='tests/test_data/sample_output.jpg',
+    ai_params={},
+    config=None
+)
 ai_handler = AIHandler()
 
 print('✅ 所有核心组件创建成功')
@@ -540,12 +547,17 @@ initial_memory = process.memory_info().rss / 1024 / 1024  # MB
 print(f'初始内存使用: {initial_memory:.2f} MB')
 
 # 创建和销毁大量对象来测试内存管理
-from app.core.video.video_processor import VideoProcessor
+from app.core.video.thread import VideoProcessorThread
 from app.core.ai.ai_handler import AIHandler
 
 processors = []
 for i in range(10):
-    processor = VideoProcessor()
+    processor = VideoProcessorThread(
+        input_path='tests/test_data/sample.jpg',
+        output_path=f'tests/test_data/sample_output_{i}.jpg',
+        ai_params={},
+        config=None
+    )
     processors.append(processor)
 
 print('✅ 创建多个处理器实例成功')
