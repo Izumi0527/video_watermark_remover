@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "智能视频水印去除工具 - AI驱动的水印检测和去除应用"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "", email = "noreply@anthropic.com"}
 ]
@@ -24,7 +24,6 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Topic :: Multimedia :: Graphics :: Graphics Conversion",
     "Topic :: Multimedia :: Video :: Conversion",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",

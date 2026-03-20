@@ -129,6 +129,7 @@ Set-Location $ProjectRoot
 
 $Global:VwrLogFile = $null
 $script:DefaultIndexIsBound = $PSBoundParameters.ContainsKey("DefaultIndex")
+$script:UvExecutablePath = $null
 
 function Initialize-Log {
     if ($Global:VwrLogFile) {
@@ -215,6 +216,52 @@ function Test-CommandExists {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Resolve-UvExecutablePath {
+    # 重要：不要用 `Get-Command uv` 的默认行为，因为它可能命中用户在 Profile 里定义的 alias/function。
+    # 这里显式只接受可执行命令（Application / ExternalScript），确保不会走到被包装的 `uv` 函数，
+    # 从而避免被注入坏参数（例如 `--cache-dir` 空值）。
+    $commands = @(Get-Command "uv" -All -ErrorAction SilentlyContinue)
+    foreach ($command in $commands) {
+        $commandType = [string]$command.CommandType
+        if ($commandType -notin @("Application", "ExternalScript")) {
+            continue
+        }
+
+        foreach ($path in @($command.Source, $command.Definition)) {
+            if ($path -and ([string]$path).Trim()) {
+                return ([string]$path).Trim()
+            }
+        }
+    }
+    return $null
+}
+
+function Get-UvExecutablePath {
+    if ($script:UvExecutablePath -and (Test-Path $script:UvExecutablePath)) {
+        return $script:UvExecutablePath
+    }
+
+    $resolved = Resolve-UvExecutablePath
+    if (-not $resolved) {
+        Ensure-Uv
+        $resolved = Resolve-UvExecutablePath
+    }
+
+    if (-not $resolved) {
+        throw "未找到 uv 可执行文件。请确认已安装 uv 且 PATH 可用（例如：winget install --id=astral-sh.uv -e）。"
+    }
+
+    $script:UvExecutablePath = $resolved
+    return $resolved
+}
+
+function Invoke-UvCommand {
+    param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments)
+
+    $uvExe = Get-UvExecutablePath
+    & $uvExe @Arguments
+}
+
 function Test-IsChinaLikeEnv {
     try {
         $culture = (Get-Culture).Name
@@ -276,6 +323,131 @@ function Resolve-UvCacheDir {
     return (Join-Path $ProjectRoot ".cache/uv")
 }
 
+function Get-UvCacheArgs {
+    $cacheDir = Resolve-UvCacheDir
+    if ($cacheDir -is [array]) {
+        $cacheDir = $cacheDir | Where-Object {
+            $null -ne $_ -and ([string]$_).Trim()
+        } | Select-Object -Last 1
+    }
+
+    $cacheDir = [string]$cacheDir
+    if (-not $cacheDir -or -not $cacheDir.Trim()) {
+        Write-Warn "未解析到有效的 uv 缓存目录，将使用 uv 默认缓存。"
+        return @()
+    }
+
+    $cacheDir = $cacheDir.Trim()
+    if (-not (Test-Path $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    }
+
+    Write-Debug "uv 缓存目录：$cacheDir"
+
+    # 兼容修复：部分 PowerShell Profile/环境脚本会把 UV_CACHE_DIR 设置为“空字符串”。
+    # uv 在解析环境变量时会直接报：a value is required for '--cache-dir <CACHE_DIR>' but none was supplied。
+    # 为避免这种“坏环境”导致脚本不可用，这里强制将进程级缓存目录写成有效路径。
+    $env:UV_CACHE_DIR = $cacheDir
+    $env:VWR_UV_CACHE_DIR = $cacheDir
+    return @("--cache-dir=$cacheDir")
+}
+
+function Test-PythonDistributionInstalled {
+    param(
+        [string]$PythonPath,
+        [string]$DistributionName
+    )
+
+    if (-not $PythonPath -or -not (Test-Path $PythonPath)) {
+        return $false
+    }
+
+    $probeCode = @'
+import importlib.metadata as metadata
+import sys
+
+distribution_name = sys.argv[1]
+try:
+    metadata.version(distribution_name)
+except metadata.PackageNotFoundError:
+    raise SystemExit(1)
+except Exception:
+    raise SystemExit(2)
+raise SystemExit(0)
+'@
+
+    Write-Debug "执行命令：python -c <metadata probe> $DistributionName"
+    & $PythonPath -c $probeCode $DistributionName *> $null
+    Write-Debug "依赖探针结果：$DistributionName -> EXIT=$LASTEXITCODE"
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Get-VenvSitePackagesDir {
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Root)) {
+        throw "虚拟环境目录不存在：$($venv.Root)"
+    }
+
+    $windowsSitePackages = Join-Path $venv.Root "Lib/site-packages"
+    if (Test-Path $windowsSitePackages) {
+        return $windowsSitePackages
+    }
+
+    $posixLibRoot = Join-Path $venv.Root "lib"
+    if (Test-Path $posixLibRoot) {
+        $posixCandidates = Get-ChildItem -Path $posixLibRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "site-packages" } |
+            Where-Object { Test-Path $_ }
+        if ($posixCandidates.Count -gt 0) {
+            return $posixCandidates[0]
+        }
+    }
+
+    return $windowsSitePackages
+}
+
+function Test-IsEditablePermissionFailure {
+    param([object[]]$CommandOutput)
+
+    if (-not $CommandOutput -or $CommandOutput.Count -eq 0) {
+        return $false
+    }
+
+    $joinedOutput = (($CommandOutput | ForEach-Object { [string]$_ }) -join "`n").ToLowerInvariant()
+    $hasPermissionSignal = (
+        $joinedOutput.Contains("permissionerror") -or
+        $joinedOutput.Contains("winerror 5") -or
+        $joinedOutput.Contains("拒绝访问")
+    )
+    if (-not $hasPermissionSignal) {
+        return $false
+    }
+
+    return (
+        $joinedOutput.Contains("build_editable") -or
+        $joinedOutput.Contains("egg-info") -or
+        $joinedOutput.Contains("temporarydirectory") -or
+        $joinedOutput.Contains("tempfile")
+    )
+}
+
+function Install-EditableProjectFallback {
+    $srcDir = Resolve-ProjectSrcDir
+    if (-not $srcDir) {
+        throw "未找到 src/app/__init__.py，无法写入 editable fallback。"
+    }
+
+    $sitePackagesDir = Get-VenvSitePackagesDir
+    if (-not (Test-Path $sitePackagesDir)) {
+        New-Item -ItemType Directory -Path $sitePackagesDir -Force | Out-Null
+    }
+
+    $pthPath = Join-Path $sitePackagesDir "video_watermark_remover_local_editable.pth"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($pthPath, ($srcDir + [Environment]::NewLine), $utf8NoBom)
+    return $pthPath
+}
+
 function Resolve-ProjectSrcDir {
     $srcDir = Join-Path $ProjectRoot "src"
     $appInit = Join-Path $srcDir "app/__init__.py"
@@ -283,6 +455,219 @@ function Resolve-ProjectSrcDir {
         return $srcDir
     }
     return ""
+}
+
+function Resolve-SetupDependencyStateDir {
+    $stateDir = Join-Path $ProjectRoot ".cache/setup-state"
+    if (-not (Test-Path $stateDir)) {
+        New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+    }
+    return $stateDir
+}
+
+function Get-SetupDependencyStatePath {
+    param(
+        [ValidateSet("prod", "dev")]
+        [string]$DependencySet
+    )
+
+    $fileName = if ($DependencySet -eq "dev") { "dev.json" } else { "prod.json" }
+    return (Join-Path (Resolve-SetupDependencyStateDir) $fileName)
+}
+
+function Get-RequirementsSignature {
+    param([string]$RequirementsFile)
+
+    if (-not (Test-Path $RequirementsFile)) {
+        throw "依赖文件不存在：$RequirementsFile"
+    }
+
+    $projectRootResolved = (Resolve-Path $ProjectRoot).Path
+    $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $sections = [System.Collections.Generic.List[string]]::new()
+
+    $walk = {
+        param([string]$TargetPath)
+
+        $resolved = (Resolve-Path $TargetPath).Path
+        if ($visited.Contains($resolved)) {
+            return
+        }
+        $visited.Add($resolved) | Out-Null
+
+        $content = Get-Content -LiteralPath $resolved -Raw -Encoding UTF8
+        $relative = [System.IO.Path]::GetRelativePath($projectRootResolved, $resolved).Replace("\", "/")
+        $sections.Add(("FILE:{0}`n{1}`n" -f $relative, $content)) | Out-Null
+
+        foreach ($rawLine in ($content -split "`r?`n")) {
+            $line = $rawLine.Trim()
+            if (-not $line -or $line.StartsWith("#")) {
+                continue
+            }
+            if ($line -match "^(?:-r|--requirement)\s+(.+)$") {
+                $includePath = $Matches[1].Trim()
+                $includeFullPath = Join-Path ([System.IO.Path]::GetDirectoryName($resolved)) $includePath
+                & $walk $includeFullPath
+            }
+        }
+    }
+
+    & $walk $RequirementsFile
+
+    $payload = [string]::Join("`n---`n", $sections)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Read-SetupDependencyState {
+    param(
+        [ValidateSet("prod", "dev")]
+        [string]$DependencySet
+    )
+
+    $statePath = Get-SetupDependencyStatePath -DependencySet $DependencySet
+    if (-not (Test-Path $statePath)) {
+        return $null
+    }
+
+    try {
+        return (Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json)
+    } catch {
+        Write-Warn "依赖状态文件读取失败：$statePath，原因：$($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Write-SetupDependencyState {
+    param(
+        [string]$RequirementsFile,
+        [ValidateSet("prod", "dev")]
+        [string]$DependencySet
+    )
+
+    $venv = Get-VenvInfo
+    $pythonVersion = ""
+    if (Test-Path $venv.Python) {
+        $pythonVersion = Get-PythonSemVerFromText -Text (& $venv.Python --version 2>$null)
+    }
+
+    $payload = [ordered]@{
+        DependencySet = $DependencySet
+        RequirementsFile = $RequirementsFile
+        Signature = (Get-RequirementsSignature -RequirementsFile $RequirementsFile)
+        PythonPath = $venv.Python
+        PythonVersion = $pythonVersion
+        UpdatedAt = (Get-Date).ToString("o")
+    }
+
+    $statePath = Get-SetupDependencyStatePath -DependencySet $DependencySet
+    ($payload | ConvertTo-Json -Depth 5) | Out-File -LiteralPath $statePath -Encoding UTF8
+    Write-Debug "已刷新依赖状态：$DependencySet -> $statePath"
+}
+
+function Get-SetupDependencyProbePackages {
+    param(
+        [ValidateSet("prod", "dev")]
+        [string]$DependencySet
+    )
+
+    $packages = [ordered]@{}
+    foreach ($packageName in @("PyQt6", "numpy", "Pillow", "torch")) {
+        $packages[$packageName] = $true
+    }
+
+    if ($DependencySet -eq "dev") {
+        foreach ($packageName in @("pytest", "black", "mypy")) {
+            $packages[$packageName] = $true
+        }
+    }
+
+    return @($packages.Keys)
+}
+
+function Test-SetupDependencyProbePackages {
+    param([string[]]$PackageNames)
+
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        return [pscustomobject]@{
+            Passed = $false
+            MissingPackages = @("python")
+        }
+    }
+
+    $missingPackages = [System.Collections.Generic.List[string]]::new()
+    foreach ($packageName in $PackageNames) {
+        if (-not (Test-PythonDistributionInstalled -PythonPath $venv.Python -DistributionName $packageName)) {
+            $missingPackages.Add($packageName) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{
+        Passed = ($missingPackages.Count -eq 0)
+        MissingPackages = @($missingPackages)
+    }
+}
+
+function Test-SetupDependencyState {
+    param(
+        [string]$RequirementsFile,
+        [ValidateSet("prod", "dev")]
+        [string]$DependencySet
+    )
+
+    $result = [ordered]@{
+        Satisfied = $false
+        Reason = "state_missing"
+        MissingPackages = @()
+    }
+
+    if (-not (Test-Path $RequirementsFile)) {
+        $result["Reason"] = "requirements_missing"
+        return [pscustomobject]$result
+    }
+
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        $result["Reason"] = "venv_missing"
+        return [pscustomobject]$result
+    }
+
+    $state = Read-SetupDependencyState -DependencySet $DependencySet
+    if ($null -eq $state) {
+        return [pscustomobject]$result
+    }
+
+    $currentSignature = Get-RequirementsSignature -RequirementsFile $RequirementsFile
+    if (-not $state.Signature -or ($state.Signature -ne $currentSignature)) {
+        $result["Reason"] = "signature_mismatch"
+        return [pscustomobject]$result
+    }
+
+    if ($state.PythonPath -and ($state.PythonPath -ne $venv.Python)) {
+        $result["Reason"] = "python_mismatch"
+        return [pscustomobject]$result
+    }
+
+    $probePackages = Get-SetupDependencyProbePackages -DependencySet $DependencySet
+    if ($probePackages.Count -gt 0) {
+        $probeResult = Test-SetupDependencyProbePackages -PackageNames $probePackages
+        if (-not $probeResult.Passed) {
+            $result["Reason"] = "probe_missing"
+            $result["MissingPackages"] = @($probeResult.MissingPackages)
+            return [pscustomobject]$result
+        }
+    }
+
+    $result["Satisfied"] = $true
+    $result["Reason"] = "state_match"
+    return [pscustomobject]$result
 }
 
 function New-RunScopedDirectory {
@@ -422,8 +807,10 @@ function Test-PythonVersionMatchesSelector {
 }
 
 function Ensure-Uv {
-    if (Test-CommandExists "uv") {
-        Write-Debug "已检测到 uv：$(& uv --version 2>$null)"
+    $uvExe = Resolve-UvExecutablePath
+    if ($uvExe) {
+        $script:UvExecutablePath = $uvExe
+        Write-Debug "已检测到 uv：$(Invoke-UvCommand @('--version') 2>$null)"
         return
     }
 
@@ -440,7 +827,7 @@ function Ensure-Uv {
         Write-Debug "未检测到 winget"
     }
 
-    if (-not (Test-CommandExists "uv")) {
+    if (-not (Resolve-UvExecutablePath)) {
         # 尝试使用官方安装脚本（通常比 pip 更快，且不依赖 Python 环境）
         try {
             Write-Info "尝试使用官方安装脚本安装 uv..."
@@ -451,7 +838,7 @@ function Ensure-Uv {
         }
     }
 
-    if (-not (Test-CommandExists "uv")) {
+    if (-not (Resolve-UvExecutablePath)) {
         if (-not (Test-CommandExists "python")) {
             throw "无法安装 uv：未找到 uv 且系统中未找到 python。请先安装 uv（winget）或 python。"
         }
@@ -467,11 +854,13 @@ function Ensure-Uv {
         & python @pipArgs | Out-Host
     }
 
-    if (-not (Test-CommandExists "uv")) {
+    $uvExe = Resolve-UvExecutablePath
+    if (-not $uvExe) {
         throw "uv 安装失败。请手动安装：winget install --id=astral-sh.uv -e 或 python -m pip install uv"
     }
 
-    Write-Ok "uv 安装完成：$(& uv --version 2>$null)"
+    $script:UvExecutablePath = $uvExe
+    Write-Ok "uv 安装完成：$(Invoke-UvCommand @('--version') 2>$null)"
 }
 
 function Ensure-Venv {
@@ -522,7 +911,7 @@ function Ensure-Venv {
             Write-Info "重新创建虚拟环境：.venv (Python $PythonSelector)"
             $uvArgs = @("venv", "-c", "--python", $PythonSelector, ".venv")
             Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
-            & uv @uvArgs | Out-Host
+            Invoke-UvCommand @uvArgs | Out-Host
 
             if (-not (Test-Path $venv.Python)) {
                 throw "虚拟环境重建失败：未找到 $($venv.Python)"
@@ -556,7 +945,7 @@ function Ensure-Venv {
     }
 
     Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
-    & uv @uvArgs | Out-Host
+    Invoke-UvCommand @uvArgs | Out-Host
     if (-not (Test-Path $venv.Python)) {
         throw "虚拟环境创建失败：未找到 $($venv.Python)"
     }
@@ -596,15 +985,11 @@ function Invoke-UvPipInstall {
     }
     if ($IndexStrategyValue) { $uvArgs += @("--index-strategy", $IndexStrategyValue) }
 
-    $cacheDir = Resolve-UvCacheDir
-    if ($cacheDir) {
-        $uvArgs += @("--cache-dir", $cacheDir)
-        Write-Debug "uv 缓存目录：$cacheDir"
-    }
+    $uvArgs += @(Get-UvCacheArgs)
 
     Write-Info "开始安装依赖（uv）..."
     Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
-    & uv @uvArgs | Out-Host
+    Invoke-UvCommand @uvArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "依赖安装失败（退出码：$LASTEXITCODE）。可尝试：-TorchBackend cpu 或设置 -DefaultIndex 镜像。"
     }
@@ -626,11 +1011,19 @@ function Install-EditableProject {
     if ($NoDeps) {
         $uvArgs += "--no-deps"
     }
+    $uvArgs += @(Get-UvCacheArgs)
 
     Write-Info "开始安装当前项目（editable）..."
     Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
-    & uv @uvArgs | Out-Host
+    $editableOutput = @()
+    Invoke-UvCommand @uvArgs 2>&1 | Tee-Object -Variable editableOutput | Out-Host
     if ($LASTEXITCODE -ne 0) {
+        if (Test-IsEditablePermissionFailure -CommandOutput $editableOutput) {
+            $pthPath = Install-EditableProjectFallback
+            Write-Warn "标准 editable 安装命中已知权限异常，已切换为本地 .pth 桥接：$pthPath"
+            Write-Ok "当前项目已通过本地 .pth 桥接接入虚拟环境"
+            return
+        }
         throw "当前项目 editable 安装失败（退出码：$LASTEXITCODE）。"
     }
 
@@ -732,9 +1125,25 @@ function Invoke-Setup {
     Ensure-Venv -PythonSelector $Python
 
     $requirementsFile = if ($Dev) { "requirements-dev.txt" } else { "requirements.txt" }
+    $dependencySet = if ($Dev) { "dev" } else { "prod" }
     Write-Info "依赖清单：$requirementsFile"
 
-    Invoke-UvPipInstall -RequirementsFile $requirementsFile -TorchBackendValue $TorchBackend -DefaultIndexValue $DefaultIndex -IndexStrategyValue $IndexStrategy
+    $dependencyState = Test-SetupDependencyState -RequirementsFile $requirementsFile -DependencySet $dependencySet
+    if ($dependencyState.Satisfied) {
+        Write-Ok "检测到依赖已满足，跳过重复安装：$requirementsFile"
+    } else {
+        Write-Info "依赖状态未命中：$($dependencyState.Reason)，执行安装：$requirementsFile"
+        if ($dependencyState.MissingPackages.Count -gt 0) {
+            Write-Debug ("缺失探针包：" + ($dependencyState.MissingPackages -join ", "))
+        }
+
+        Invoke-UvPipInstall -RequirementsFile $requirementsFile -TorchBackendValue $TorchBackend -DefaultIndexValue $DefaultIndex -IndexStrategyValue $IndexStrategy
+        Write-SetupDependencyState -RequirementsFile "requirements.txt" -DependencySet "prod"
+        if ($Dev) {
+            Write-SetupDependencyState -RequirementsFile "requirements-dev.txt" -DependencySet "dev"
+        }
+    }
+
     Install-EditableProject -NoDeps
     $appPath = Assert-ProjectImportable
 
@@ -756,14 +1165,11 @@ function Test-KeyPackages {
         return $true
     }
 
-    Ensure-Uv
-
     $keyPackages = @("PyQt6", "opencv-python", "numpy", "Pillow", "torch", "ultralytics")
     $missing = @()
 
     foreach ($pkg in $keyPackages) {
-        & uv pip show --python $venv.Python $pkg *> $null
-        if ($LASTEXITCODE -ne 0) {
+        if (-not (Test-PythonDistributionInstalled -PythonPath $venv.Python -DistributionName $pkg)) {
             $missing += $pkg
         }
     }
@@ -781,8 +1187,7 @@ function Test-KeyPackages {
         Invoke-UvPipInstall -RequirementsFile "requirements.txt" -TorchBackendValue $TorchBackend -DefaultIndexValue $DefaultIndex -IndexStrategyValue $IndexStrategy
 
         foreach ($pkg in $missing) {
-            & uv pip show --python $venv.Python $pkg *> $null
-            if ($LASTEXITCODE -ne 0) {
+            if (-not (Test-PythonDistributionInstalled -PythonPath $venv.Python -DistributionName $pkg)) {
                 Write-Err "自动修复后仍缺失：$pkg"
                 return $false
             }
@@ -1377,7 +1782,10 @@ function Invoke-Build {
     Ensure-Uv
 
     Write-Info "确保 PyInstaller 已安装..."
-    & uv pip install --python $venv.Python "PyInstaller>=5.0.0" | Out-Host
+    $uvArgs = @("pip", "install", "--python", $venv.Python, "PyInstaller>=5.0.0")
+    $uvArgs += @(Get-UvCacheArgs)
+    Write-Debug ("执行命令：uv " + ($uvArgs -join " "))
+    Invoke-UvCommand @uvArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "安装 PyInstaller 失败（退出码：$LASTEXITCODE）"
     }

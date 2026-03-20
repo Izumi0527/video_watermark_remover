@@ -107,7 +107,11 @@ class DummyManager:
 
 
 def project_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    current = Path(__file__).resolve().parent
+    for candidate in (current, *current.parents):
+        if (candidate / "pyproject.toml").exists() and (candidate / "src").exists():
+            return candidate
+    raise RuntimeError("无法定位仓库根目录：未找到 pyproject.toml 与 src/")
 
 
 def ensure_import_path(root: Path) -> None:

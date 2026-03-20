@@ -120,6 +120,8 @@ cd video_watermark_remover
 ```
 
 > 说明：脚本仅支持 Windows PowerShell；Linux/macOS 请参考“手动安装”。
+> 说明：若 `.venv` 已存在且 `requirements.txt` / `requirements-dev.txt` 未变化，`setup` 会跳过重复依赖安装，但仍会刷新 editable install 与导入验证。
+> 说明：`setup` 会优先执行标准 editable install；若当前 Windows 临时构建目录触发 `build_editable` / `egg-info` 权限异常，会自动降级为本地 `.pth` 桥接，保证 `src/app` 仍能被虚拟环境导入。
 
 ### 方式二：手动安装
 
@@ -164,6 +166,8 @@ python -m app.entrypoints
 uv pip install -r requirements-dev.txt
 uv pip install -e .
 ```
+
+> 提示：`setup -Dev` 会将开发依赖视为运行依赖的超集；当 dev 环境状态有效时，重复执行 `setup` / `setup -Dev` 都会优先复用现有依赖状态，而不是再次下载。
 
 ---
 

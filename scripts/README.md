@@ -55,6 +55,8 @@
 
 > 提示：如果你本机已存在 `.venv` 且 Python 版本不是 3.12.10，执行 `setup` 时会提示是否重建虚拟环境；可添加 `-Force` 跳过确认。
 > 说明：当前仓库源码位于 `src/app`，`main.py` 仅为薄启动器；脚本会通过 editable install 保证运行、测试、质量检查都走同一套包导入路径。
+> 说明：脚本会记录 `requirements.txt` / `requirements-dev.txt` 的本地依赖状态；若 `.venv` 已满足当前依赖集，重复执行 `setup` 时会跳过 `uv pip install`，但仍执行 editable install 与导入验证。
+> 说明：`setup` 默认优先执行标准 `uv pip install -e .`；若在当前 Windows 环境命中 `build_editable` / `egg-info` / 临时目录权限异常，会自动回退为本地 `.pth` 桥接，确保 `.venv` 仍可导入 `src/app`。
 
 常用示例：
 
@@ -86,6 +88,7 @@
 - `-IndexStrategy <first-index|unsafe-first-match|unsafe-best-match>`：传给 `uv pip install --index-strategy ...`
 
 > 提示：脚本会在创建 `.venv` 前，自动删除旧的 `venv/`（不带点）目录，避免混用旧环境。
+> 提示：`setup -Dev` 成功后会同时刷新运行依赖与开发依赖状态，因此后续普通 `setup` 也能直接复用这套已安装环境。
 
 ---
 
