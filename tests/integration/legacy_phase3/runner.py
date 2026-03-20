@@ -7,12 +7,13 @@
 使用模块化架构提高代码可维护性。
 
 模块组成:
-- phase3_core_tests: 核心组件测试
-- phase3_feature_tests: 功能特性测试
-- phase3_test_utilities: 测试工具和报告
+- core_checks.py: 核心组件测试
+- feature_checks.py: 功能特性测试
+- support.py: 测试工具和报告
 
 运行方式:
-python tests/phase3_test_runner.py
+- `python tests/integration/legacy_phase3/runner.py`
+- `python -m pytest tests/integration/legacy_phase3/test_phase3.py -q`
 
 作者: Izumi0527
 创建时间: 2025-09-06
@@ -22,19 +23,29 @@ python tests/phase3_test_runner.py
 import sys
 from pathlib import Path
 
-# 添加项目根目录到路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# 添加 src 目录到路径
+project_root = Path(__file__).resolve().parents[3]
+src_root = project_root / "src"
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
 
 # 导入测试模块
-from phase3_core_tests import test_component_imports, test_file_structure, test_integration
-from phase3_feature_tests import (
+from tests.integration.legacy_phase3.core_checks import (
+    test_component_imports,
+    test_file_structure,
+    test_integration,
+)
+from tests.integration.legacy_phase3.feature_checks import (
     test_advanced_parameters,
     test_ffmpeg_audio_processor,
     test_modern_style_manager,
     test_user_preferences,
 )
-from phase3_test_utilities import generate_test_report, print_test_summary, run_test_suite
+from tests.integration.legacy_phase3.support import (
+    generate_test_report,
+    print_test_summary,
+    run_test_suite,
+)
 
 
 def main():

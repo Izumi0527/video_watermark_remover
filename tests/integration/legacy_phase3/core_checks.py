@@ -9,13 +9,14 @@
 版本: v1.0
 """
 
-import os
 import sys
 from pathlib import Path
 
-# 添加项目根目录到路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# 添加 src 目录到路径
+project_root = Path(__file__).resolve().parents[3]
+src_root = project_root / "src"
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
 
 
 def test_component_imports():
@@ -39,7 +40,7 @@ def test_component_imports():
         return False
 
     try:
-        from app.config.modern_style_manager import ModernStyleManager
+        from app.config.styles import ModernStyleManager
 
         print("[OK] 现代化样式管理器导入成功")
     except ImportError as e:
@@ -47,7 +48,7 @@ def test_component_imports():
         return False
 
     try:
-        from app.config.user_preferences_manager import UserPreferencesManager
+        from app.config.preferences import UserPreferencesManager
 
         print("[OK] 用户偏好设置管理器导入成功")
     except ImportError as e:
@@ -85,8 +86,8 @@ def test_file_structure():
         "src/app/ui/widgets/batch/batch_processing_widget.py",
         "src/app/ui/widgets/advanced/advanced_parameters_widget.py",
         # 配置和样式管理
-        "src/app/config/modern_style_manager.py",
-        "src/app/config/user_preferences_manager.py",
+        "src/app/config/styles/manager.py",
+        "src/app/config/preferences/manager.py",
         "src/app/config/config_manager.py",
         # AI和处理核心
         "src/app/core/ai/ai_handler.py",

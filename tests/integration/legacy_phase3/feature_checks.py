@@ -9,13 +9,18 @@
 版本: v1.0
 """
 
+import shutil
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 
-# 添加项目根目录到路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# 添加 src 目录到路径
+project_root = Path(__file__).resolve().parents[3]
+src_root = project_root / "src"
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
+
+RUNTIME_ROOT = project_root / ".cache" / "tests" / "legacy-phase3"
 
 
 def test_user_preferences():
@@ -23,11 +28,13 @@ def test_user_preferences():
     print("\n[测试] 用户偏好设置功能...")
 
     try:
-        from app.config.user_preferences_manager import UserPreferencesManager
+        from app.config.preferences import UserPreferencesManager
 
-        # 创建临时目录用于测试
-        with tempfile.TemporaryDirectory() as temp_dir:
-            prefs = UserPreferencesManager(temp_dir)
+        runtime_dir = RUNTIME_ROOT / f"prefs_{uuid.uuid4().hex}"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            prefs = UserPreferencesManager(str(runtime_dir))
 
             # 测试基本设置和获取
             prefs.set_preference("ui", "theme", "light")
@@ -76,6 +83,8 @@ def test_user_preferences():
                 print(f"[ERROR] 重置失败: 期望 '{expected_theme}', 得到 '{default_theme}'")
                 return False
             print("[OK] 重置为默认值测试通过")
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
 
         # 所有测试通过
         return True
@@ -90,7 +99,7 @@ def test_modern_style_manager():
     print("\n[测试] 现代化样式管理器...")
 
     try:
-        from app.config.modern_style_manager import (
+        from app.config.styles import (
             ModernStyleManager,
             get_dark_style,
             get_light_style,

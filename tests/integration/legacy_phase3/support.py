@@ -12,7 +12,8 @@
 import json
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).resolve().parents[3]
+report_root = project_root / ".cache" / "tests" / "legacy-phase3"
 
 
 def generate_test_report(results):
@@ -56,9 +57,11 @@ def generate_test_report(results):
     }
 
     try:
-        with open(project_root / "phase3_test_report.json", "w", encoding="utf-8") as f:
+        report_root.mkdir(parents=True, exist_ok=True)
+        report_path = report_root / "phase3_test_report.json"
+        with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
-        print(f"\n[INFO] 测试报告已保存到: phase3_test_report.json")
+        print(f"\n[INFO] 测试报告已保存到: {report_path}")
     except Exception as e:
         print(f"[ERROR] 测试报告保存失败: {e}")
 

@@ -78,9 +78,12 @@ video_watermark_remover/
     e2e/                          # 端到端测试目录
       ps1/                        # PowerShell 端到端脚本
     future/unit/                  # 暂挂/未来阶段单测
-    app/config/...                # 细分到 app/config 的单测
-    core/ai/video/...             # 细分到 core 的单测
-    ai_module_tests.py 等顶层文件  # 历史测试入口仍在，主分层未完全收敛
+    unit/app/config/...           # 配置相关单测（已归位到 unit）
+    unit/core/ai/video/...        # 视频模块结构类单测
+    integration/ai/...            # AI 历史集成测试
+    integration/core/ai/video/... # 视频流程集成测试
+    integration/ui/...            # UI 历史集成测试
+    integration/legacy_phase3/... # Phase 3 历史场景桥接测试
     test_data/                    # 测试素材（含 configs、视频/图片/模型样本）
 
   docs/
@@ -115,7 +118,8 @@ video_watermark_remover/
 
 ### D. 测试目录分层混杂（影响可读性与执行策略）
 - [x] 顶层 `tests/test_*.py` 及 `tests/*.ps1` 散落：已归档到 `tests/integration/` 与 `tests/e2e/ps1/`。
-- [ ] 统一一个“主分层”（unit/integration/e2e）并把“按模块细分”作为二级目录：尚未完全统一（`tests/app/...`、`tests/core/...` 以及顶层 `tests/ai_*` / `tests/phase3_*` / `tests/ui_component_tests.py` 等历史分层仍保留）。
+- [x] 统一一个“主分层”（unit/integration/e2e）并把“按模块细分”作为二级目录：已完成 `tests/app/**`、`tests/core/**`、顶层 `tests/ai_*` / `tests/phase3_*` / `tests/ui_component_tests.py` 的归位，当前活跃测试入口已收敛到 `tests/unit/**`、`tests/integration/**`、`tests/e2e/**`。
+  - 实施与回归记录见 `docs/plans/2026-03-20-test-structure-standardization.md`；其中 `legacy_phase3` 作为 `tests/integration/` 下的历史桥接分组保留。
 
 ### E. “运行产物目录”策略需要一致（避免误提交与污染仓库）
 - [x] 已明确运行产物目录约定：`__pycache__/`、`.pytest_cache/`、`.mypy_cache/`、`.cache/`、`.uv-cache*`、`logs/`、`.venv/` 视为可删除的本地运行产物；`tests/test_data/` 等保留结构/样本入口不应误删。
@@ -133,7 +137,7 @@ video_watermark_remover/
 
 ## 4) 执行计划（分阶段，可回滚；后续执行前需要确认）
 
-> 说明：本节为可执行清单与里程碑；截至 2026-03-18，Task 2 与 Task 4 已执行完成（详见第 6/7 节），其余任务保留为后续待办。
+> 说明：本节为可执行清单与里程碑；截至 2026-03-20，Task 1～4 与 Task 6 已执行完成，Task 5 的 `src/` 布局优化也已落地一轮（详见第 6/7 节）。
 
 ### Task 1：冻结现状与建立基线（可回滚点）（已完成，2026-03-20 复核）
 
@@ -253,18 +257,18 @@ video_watermark_remover/
 - Modified: `src/app/core/video/thread.py`
 - Modified: `src/app/ui/signal_handler.py`
 - Modified: `src/app/ui/widgets/batch/batch_processor_thread.py`
-- Modified: `tests/core/ai/video/*`、`tests/integration/*video*`、`tests/ai_*`、`tests/e2e/*`
+- Modified: `tests/unit/core/ai/video/*`、`tests/integration/core/ai/video/*`、`tests/integration/ai/*`、`tests/e2e/*`
 
 **执行前检查清单（全部满足后再启动 Task 6）**
-- [x] **调用方迁移完成**：UI 生产调用方与 `tests/core/ai/video/test_video_modes.py` 已切换到 `thread` / `workers.*` / `modes.*` 新入口，不再依赖旧平铺兼容层模块名。
+- [x] **调用方迁移完成**：UI 生产调用方与 `tests/integration/core/ai/video/test_video_modes.py` 已切换到 `thread` / `workers.*` / `modes.*` 新入口，不再依赖旧平铺兼容层模块名。
 - [x] **导入扫描通过**：对 `src` / `tests` 的复扫显示，正式测试调用点已不再直接引用 `app.core.video.video_processor` 或旧平铺兼容层入口；当前命中主要位于兼容层自身实现与文档说明。
 - [x] **UI 入口稳定**：`src/app/ui/signal_handler.py`、`src/app/ui/widgets/batch/batch_processor_thread.py` 已全部改用 `app.core.video.thread` / `app.core.video.modes.*` / `app.core.video.workers.*` / `app.core.video.utils.*`。
-- [x] **测试入口稳定**：`tests/core/ai/video/test_video_modes.py`、`tests/integration/test_video_processor.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_multiprocess_video.py`、`tests/e2e/test_phase5_gpu_e2e.py`、`tests/ai_processing_tests.py`、`tests/ai_module_tests.py`、`tests/e2e/ps1/test_end_to_end.ps1` 已迁移到新入口或改为新模块引用。
+- [x] **测试入口稳定**：`tests/integration/core/ai/video/test_video_modes.py`、`tests/integration/test_video_processor.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_multiprocess_video.py`、`tests/e2e/test_phase5_gpu_e2e.py`、`tests/integration/ai/test_ai_processing.py`、`tests/integration/ai/test_ai_module.py`、`tests/e2e/ps1/test_end_to_end.ps1` 已迁移到新入口或改为新模块引用。
 - [x] **兼容层仅剩过渡职责**：旧平铺兼容层 `audio_tasks.py`、`backpressure.py`、`chunk_worker.py`、`frame_processor.py`、`frame_reader.py`、`frame_writer.py`、`multiprocess_processor.py`、`path_utils.py`、`pipeline_processor.py`、`single_process_processor.py`、`video_processor.py` 已删除，正式入口已统一收敛到 `thread` / `modes.*` / `workers.*` / `utils.*`。
 - [x] **调试记录闭环**：已通过 `scripts/task6_runtime_smoke.py --keep` 完成一轮运行态 smoke，覆盖 GUI 启动、单文件图片、单文件视频（单进程 / 分块模式 / 流水线模式）与批量处理，并记录运行目录与输出文件。
 - [x] **质量链路为绿**：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick` 已在当前工作区裸跑通过；根目录残留 `app/` namespace 目录已清理。
 - [x] **单测链路为绿**：2026-03-20 复跑 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" test unit -Quick` 已通过，结果为 `95 passed, 2 deselected`。
-- [x] **视频定向测试为绿**：兼容层删除后的结构层验证 `$env:PYTHONPATH='src'; python -m pytest tests/core/ai/video/test_video_module_split.py -q` 为 `3 passed`；此前带完整视频依赖的 `tests/integration/test_multiprocess_video.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_video_processor.py` 已在依赖齐全会话通过，当前轻量沙箱仅补做结构层复核。
+- [x] **视频定向测试为绿**：兼容层删除后的结构层验证 `$env:PYTHONPATH='src'; python -m pytest tests/unit/core/ai/video/test_video_module_split.py -q` 为 `3 passed`；此前带完整视频依赖的 `tests/integration/test_multiprocess_video.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_video_processor.py` 已在依赖齐全会话通过，当前轻量沙箱仅补做结构层复核。
 - [x] **回滚点已准备**：已将 `docs/agents/` 纳入本次提交范围，Task 3/6 相关代码、测试、脚本与文档已整理为单一回滚点，可在本次提交后直接回退。
 - [x] **已获删除确认**：本轮已明确确认执行方案 A，并已据此完成 Task 3 的目录删除；Task 6 最终兼容层删除时仍需按本轮确认记录复核影响面。
 
@@ -275,22 +279,24 @@ video_watermark_remover/
 - 单文件处理：图片、单进程视频、分块模式视频、流水线模式视频均生成输出文件。
 - 批量处理：2 个样本文件（1 图 + 1 视频）均完成，状态为 `completed`。
 - 运行目录：`C:/cascadeProjects/video_watermark_remover/.cache/task6-smoke/run_20260320_093108_87dba7f9191246ff8b4e3c547d38c01d`。
-- 相关补充验证：`$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest tests/core/ai/video/test_video_modes.py -q` 为 `4 passed`。
+- 相关补充验证：`$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest tests/integration/core/ai/video/test_video_modes.py -q` 为 `4 passed`。
+- 2026-03-20 补充修复：`tests/e2e/ps1/test_audio_processing.ps1`、`tests/e2e/ps1/test_user_preferences.ps1`、`tests/e2e/ps1/test_end_to_end.ps1` 已完成运行态收口，统一改为 `Invoke-PythonSnippet` 检查 Python 子进程退出码、修复旧 API/旧导入、并统一回写为 UTF-8 BOM；定向回归 `scripts/vwr.ps1 test audio -Quick`、`scripts/vwr.ps1 test preferences -Quick`、`scripts/vwr.ps1 test e2e -Quick` 全部通过。
+- 风险备注：同日追加复跑 `scripts/vwr.ps1 test unit -Quick` 时，当前沙箱仍暴露出与本轮 PowerShell E2E 修复无关的历史问题（主要集中在 `tests/unit/app/config/preferences/*`、`tests/unit/test_config_manager.py`、`tests/unit/test_model_downloader.py` 以及 `.cache/pytest` 权限/编码问题）；该现象需单独立项处理，不应回归为本轮 E2E 运行态修复失败。
 
 **Task 6 前置迁移小清单（测试引用）**
 - [x] `tests/unit/test_path_utils.py`：已迁移为 `from app.core.video.utils.path import build_temp_path`，定向验证 `python -m pytest tests/unit/test_path_utils.py -q` 已通过。
-- [x] `tests/core/ai/video/test_video_module_split.py`：已移除旧兼容层导入段，测试收敛为“新入口结构完整、导出一致、行为一致”，并通过 PyQt6/AI/FFmpeg stub 避免收集阶段加载重依赖。
-- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.multiprocess_processor import process_video_multiprocess` 迁移为 `from app.core.video.modes.multiprocess import process_video_multiprocess`。
-- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.pipeline_processor import process_video_pipeline` 迁移为 `from app.core.video.modes.pipeline import process_video_pipeline`。
-- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.single_process_processor import process_video_singleprocess` 迁移为 `from app.core.video.modes.single_process import process_video_singleprocess`。
-- [x] `tests/core/ai/video/test_video_module_split.py`：将 `from app.core.video.path_utils import build_temp_path` 迁移为 `from app.core.video.utils.path import build_temp_path`。
-- [x] `tests/core/ai/video/test_video_module_split.py`：完成迁移后，将该测试的目标从“旧新双入口兼容”收敛为“仅验证新入口结构完整、导出一致、行为一致”。
-- [x] 迁移顺序建议：先改 `tests/unit/test_path_utils.py`，再在真正执行 Task 6 前最后一轮统一改 `tests/core/ai/video/test_video_module_split.py`。
-- [x] 每迁移完一项即验证：`python -m pytest tests/unit/test_path_utils.py -q` 或 `python -m pytest tests/core/ai/video/test_video_module_split.py -q`。
-- [x] `tests/core/ai/video/test_video_modes.py`：已改为 `app.core.video.thread` + `app.core.video.modes.*` + `app.core.video.workers.*` 新入口，定向验证 `python -m pytest tests/core/ai/video/test_video_modes.py -q` 已通过。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：已移除旧兼容层导入段，测试收敛为“新入口结构完整、导出一致、行为一致”，并通过 PyQt6/AI/FFmpeg stub 避免收集阶段加载重依赖。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：将 `from app.core.video.multiprocess_processor import process_video_multiprocess` 迁移为 `from app.core.video.modes.multiprocess import process_video_multiprocess`。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：将 `from app.core.video.pipeline_processor import process_video_pipeline` 迁移为 `from app.core.video.modes.pipeline import process_video_pipeline`。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：将 `from app.core.video.single_process_processor import process_video_singleprocess` 迁移为 `from app.core.video.modes.single_process import process_video_singleprocess`。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：将 `from app.core.video.path_utils import build_temp_path` 迁移为 `from app.core.video.utils.path import build_temp_path`。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：完成迁移后，将该测试的目标从“旧新双入口兼容”收敛为“仅验证新入口结构完整、导出一致、行为一致”。
+- [x] 迁移顺序建议：先改 `tests/unit/test_path_utils.py`，再在真正执行 Task 6 前最后一轮统一改 `tests/unit/core/ai/video/test_video_module_split.py`。
+- [x] 每迁移完一项即验证：`python -m pytest tests/unit/test_path_utils.py -q` 或 `python -m pytest tests/unit/core/ai/video/test_video_module_split.py -q`。
+- [x] `tests/integration/core/ai/video/test_video_modes.py`：已改为 `app.core.video.thread` + `app.core.video.modes.*` + `app.core.video.workers.*` 新入口，定向验证 `python -m pytest tests/integration/core/ai/video/test_video_modes.py -q` 已通过。
 - [x] `tests/integration/test_multiprocess_video.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_video_processor.py`：已迁移为 `workers.*` / `thread` 新入口，并将运行目录收敛到项目本地 `.cache/`，定向验证 `10 passed`。
-- [x] `tests/ai_module_tests.py`、`tests/ai_processing_tests.py`、`tests/e2e/test_phase5_gpu_e2e.py`、`tests/e2e/ps1/test_end_to_end.ps1`：已改用 `app.core.video.thread` 或相关新入口；其中两条轻量验证 `-k video_processor_thread_import` / `-k test_video_processor_thread` 已通过。
-- [x] `tests/core/ai/video/test_video_module_split.py`：已新增“旧平铺兼容层文件应不存在”断言，验证兼容层删除不会回退。
+- [x] `tests/integration/ai/test_ai_module.py`、`tests/integration/ai/test_ai_processing.py`、`tests/e2e/test_phase5_gpu_e2e.py`、`tests/e2e/ps1/test_end_to_end.ps1`：已改用 `app.core.video.thread` 或相关新入口；其中两条轻量验证 `-k video_processor_thread_import` / `-k test_video_processor_thread` 已通过。
+- [x] `tests/unit/core/ai/video/test_video_module_split.py`：已新增“旧平铺兼容层文件应不存在”断言，验证兼容层删除不会回退。
 
 **Step 1：冻结迁移前置条件**
 - 要求：仅在 GUI 手工调试、定向视频链路测试、`scripts/vwr.ps1 quality -Quick`、`scripts/vwr.ps1 test unit -Quick`、相关集成测试均稳定后执行。
@@ -310,7 +316,7 @@ video_watermark_remover/
 - Run：
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick`
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" test unit -Quick`
-  - `python -m pytest tests/core/ai/video -q`
+  - `python -m pytest tests/integration/core/ai/video -q`
 - 目标：确认删除兼容层后功能、导入链路、测试入口全部保持稳定。
 
 
@@ -356,14 +362,14 @@ video_watermark_remover/
 - `pyproject.toml`、`requirements-dev.txt`、`scripts/vwr.ps1`：补齐 Black 参数与版本对齐（`23.12.1`），消除脚本质量检查与 pre-commit 钩子不一致的问题。
 - `src/app/core/video/`：完成第二轮结构化拆分，正式入口已收敛到 `thread.py`、`modes/`、`workers/`、`utils/`；2026-03-20 已删除全部旧平铺兼容层文件。
 - `src/app/core/video/workers/chunk.py`、`src/app/core/video/workers/frame_processor.py`、`src/app/core/video/thread.py`：通过 AI / FFmpeg / 视频模式惰性解析，避免测试收集或轻量导入阶段过早拉起重依赖。
-- `tests/core/ai/video/test_video_module_split.py`：新增并持续增强视频模块拆分结构测试，验证新子包入口可用、导出一致、旧兼容层文件已删除，并通过 PyQt6 / AI / FFmpeg / cv2 / numpy stub 避免轻量环境误报。
+- `tests/unit/core/ai/video/test_video_module_split.py`：新增并持续增强视频模块拆分结构测试，验证新子包入口可用、导出一致、旧兼容层文件已删除，并通过 PyQt6 / AI / FFmpeg / cv2 / numpy stub 避免轻量环境误报。
 - `scripts/task6_runtime_smoke.py`：新增 Task 6 运行态 smoke 脚本，固化 GUI 启动、单文件图片、单文件视频三模式与批量处理的轻量回归入口。
 - `docs/agents/*`：纳入项目专属子代理协作基线，统一多子代理调度角色、写入边界与输出协议，避免后续会话与审计文档脱节。
-- 阶段性验证（2026-03-19 记录）：`tests/core/ai/video/test_video_modes.py`、`tests/unit/test_path_utils.py`、`scripts/vwr.ps1 quality -Quick`、`scripts/vwr.ps1 test unit -Quick` 曾在当时会话中通过。
-- 复核补充（2026-03-20）：已完成 `video_processor.py` 纯兼容入口收口、`tests/core/ai/video/test_video_modes.py` 与 `tests/integration/*video*` 的入口迁移、`tests/ai_module_tests.py` / `tests/ai_processing_tests.py` / `tests/e2e/*` 的视频入口更新，以及根目录残留 `app/`、`src/app/ui/dialogs/` 清理。
-- 最终收口（2026-03-20）：已删除 `src/app/core/video/` 下全部旧平铺兼容层文件，并新增“旧兼容层文件应不存在”的结构测试；`tests/unit/test_module_syntax_smoke.py` 与 `tests/phase3_core_tests.py` 已同步切换到新结构路径。
-- 回归补丁（2026-03-20）：`src/app/core/video/thread.py` 已恢复惰性导入边界，避免导入 `VideoProcessorThread` 时提前拉起 `cv2` 相关模块；`tests/core/ai/video/test_video_module_split.py` 已补充 `cv2` / `numpy` stub，使结构测试可在轻量依赖环境下稳定执行。
-- 验证更新（2026-03-20）：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick` 已通过；当前轻量沙箱下 `$env:PYTHONPATH='src'; python -m pytest tests/core/ai/video/test_video_module_split.py -q` 为 `3 passed`、`$env:PYTHONPATH='src'; python -m pytest tests/unit/test_module_syntax_smoke.py -q` 为 `9 passed`、`$env:PYTHONPATH='src'; python -m pytest tests/phase3_core_tests.py -q -k file_structure` 为 `1 passed`；此前带完整视频依赖的 `tests/integration/test_multiprocess_video.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_video_processor.py` 已在依赖齐全会话通过。
+- 阶段性验证（2026-03-19 记录）：`tests/integration/core/ai/video/test_video_modes.py`、`tests/unit/test_path_utils.py`、`scripts/vwr.ps1 quality -Quick`、`scripts/vwr.ps1 test unit -Quick` 曾在当时会话中通过。
+- 复核补充（2026-03-20）：已完成 `video_processor.py` 纯兼容入口收口、`tests/integration/core/ai/video/test_video_modes.py` 与 `tests/integration/*video*` 的入口迁移、`tests/integration/ai/test_ai_module.py` / `tests/integration/ai/test_ai_processing.py` / `tests/e2e/*` 的视频入口更新，以及根目录残留 `app/`、`src/app/ui/dialogs/` 清理。
+- 最终收口（2026-03-20）：已删除 `src/app/core/video/` 下全部旧平铺兼容层文件，并新增“旧兼容层文件应不存在”的结构测试；`tests/unit/test_module_syntax_smoke.py` 与 `tests/integration/legacy_phase3/core_checks.py` 已同步切换到新结构路径。
+- 回归补丁（2026-03-20）：`src/app/core/video/thread.py` 已恢复惰性导入边界，避免导入 `VideoProcessorThread` 时提前拉起 `cv2` 相关模块；`tests/unit/core/ai/video/test_video_module_split.py` 已补充 `cv2` / `numpy` stub，使结构测试可在轻量依赖环境下稳定执行。
+- 验证更新（2026-03-20）：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\vwr.ps1" quality -Quick` 已通过；当前轻量沙箱下 `$env:PYTHONPATH='src'; python -m pytest tests/unit/core/ai/video/test_video_module_split.py -q` 为 `3 passed`、`$env:PYTHONPATH='src'; python -m pytest tests/unit/test_module_syntax_smoke.py -q` 为 `9 passed`、`$env:PYTHONPATH='src'; python -m pytest tests/integration/legacy_phase3/test_phase3.py -q` 为 `1 passed`；此前带完整视频依赖的 `tests/integration/test_multiprocess_video.py`、`tests/integration/test_pipeline_video.py`、`tests/integration/test_video_processor.py` 已在依赖齐全会话通过。
 - 运行态补充（2026-03-20）：已新增 `scripts/task6_runtime_smoke.py`，并通过 `--keep` 实跑覆盖 GUI 启动、单文件图片、单文件视频（单进程 / 分块模式 / 流水线模式）与批量处理；最新运行目录为 `C:/cascadeProjects/video_watermark_remover/.cache/task6-smoke/run_20260320_092931_04c60cc639a143e4b54f61c7e376c82c`。
 
 ---

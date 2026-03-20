@@ -10,7 +10,9 @@
 #   .\scripts\vwr.ps1 help
 #   .\scripts\vwr.ps1 setup -Dev -TorchBackend cpu -DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
 #   .\scripts\vwr.ps1 run -AutoFix
-#   .\scripts\vwr.ps1 test unit -Quick
+#   .\scripts\vwr.ps1 test unit -Quick         # 对应 tests/unit
+#   .\scripts\vwr.ps1 test integration -Quick  # 对应 tests/integration
+#   .\scripts\vwr.ps1 test e2e                 # 对应 tests/e2e/ps1/*.ps1
 # ============================================================
 
 [CmdletBinding()]
@@ -718,6 +720,11 @@ function Show-Help {
     Write-Host "  clean     清理缓存（-Force 跳过确认）" -ForegroundColor White
     Write-Host "  ci        CI 模式（JSON 输出）" -ForegroundColor White
     Write-Host ""
+    Write-Host "测试主分层：" -ForegroundColor Cyan
+    Write-Host "  test unit         -> tests/unit" -ForegroundColor White
+    Write-Host "  test integration  -> tests/integration" -ForegroundColor White
+    Write-Host "  test e2e          -> tests/e2e/ps1/*.ps1" -ForegroundColor White
+    Write-Host ""
 }
 
 function Invoke-Setup {
@@ -1047,16 +1054,18 @@ function Invoke-PowerShellScriptFile {
         throw "脚本不存在：$ScriptPath"
     }
 
-    $psExe = "powershell.exe"
+    $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+    $psExe = if ($pwshCommand) { $pwshCommand.Source } else { "powershell.exe" }
     $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ScriptPath) + $ScriptArgs
 
-    Write-Debug ("执行 PowerShell 子进程：" + ($argList -join " "))
+    Write-Debug ("执行 PowerShell 子进程：{0} {1}" -f $psExe, ($argList -join " "))
     $proc = Start-Process -FilePath $psExe -ArgumentList $argList -Wait -PassThru -NoNewWindow
     return $proc.ExitCode
 }
 
 function Invoke-Test {
     Write-Section "测试执行 (test)"
+    Write-Info "测试主分层：unit → tests/unit，integration → tests/integration，e2e → tests/e2e/ps1/*.ps1"
 
     $type = if ($Arg1) { $Arg1 } else { "all" }
     $type = $type.ToLowerInvariant()

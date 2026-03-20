@@ -1,10 +1,10 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 # 智能视频水印去除工具 - 音频处理功能测试脚本
 # 专门测试音频提取、合并和FFmpeg集成功能
 
 param(
     [Parameter()]
-    [switch]$Verbose,
+    [switch]$DetailedOutput,
 
     [Parameter()]
     [switch]$Quick,
@@ -64,7 +64,7 @@ function Record-TestResult {
     } else {
         $TestResults.Failed++
         Write-Host "❌ $TestName - 失败" -ForegroundColor $Colors.Error
-        if ($Details -and $Verbose) {
+    if ($Details -and $DetailedOutput) {
             Write-Host "   详细信息: $Details" -ForegroundColor $Colors.Detail
         }
     }
@@ -77,7 +77,7 @@ function Show-TestSummary {
 
     Write-Host ""
     Write-Host "🎵 音频处理测试摘要" -ForegroundColor $Colors.Header
-    Write-Host "=" * 50 -ForegroundColor $Colors.Info
+    Write-Host ("=" * 50) -ForegroundColor $Colors.Info
     Write-Host "🕒 执行时间: $($duration.ToString('mm\:ss'))" -ForegroundColor $Colors.Info
     Write-Host "✅ 通过: $($TestResults.Passed)" -ForegroundColor $Colors.Success
     Write-Host "❌ 失败: $($TestResults.Failed)" -ForegroundColor $Colors.Error
@@ -94,8 +94,8 @@ function Show-TestSummary {
 }
 
 Write-Host "🎵 智能视频水印去除工具 - 音频处理测试" -ForegroundColor $Colors.Header
-Write-Host "模式: $(if($Quick){'快速'}else{'完整'}) | 详细输出: $(if($Verbose){'开启'}else{'关闭'})" -ForegroundColor $Colors.Info
-Write-Host "=" * 60 -ForegroundColor $Colors.Info
+Write-Host "模式: $(if($Quick){'快速'}else{'完整'}) | 详细输出: $(if($DetailedOutput){'开启'}else{'关闭'})" -ForegroundColor $Colors.Info
+Write-Host ("=" * 60) -ForegroundColor $Colors.Info
 
 # 检查虚拟环境
 if (-not (Test-Path ".venv")) {
@@ -110,7 +110,45 @@ Write-Host "🔄 激活虚拟环境..." -ForegroundColor $Colors.Progress
 # 设置环境变量
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
-$env:PYTHONPATH = (Get-Location).Path
+$projectSrc = Join-Path (Get-Location).Path "src"
+$env:PYTHONPATH = if ($env:PYTHONPATH) { "$projectSrc;$($env:PYTHONPATH)" } else { $projectSrc }
+$PythonExecutable = Join-Path (Get-Location).Path ".venv/Scripts/python.exe"
+
+function Invoke-PythonSnippet {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Code,
+
+        [int[]]$AllowedExitCodes = @(0)
+    )
+
+    if (-not (Test-Path $PythonExecutable)) {
+        throw "Python 解释器不存在: $PythonExecutable"
+    }
+
+    $output = & $PythonExecutable -c $Code 2>&1
+    $outputText = ($output | Out-String).Trim()
+
+    if ($outputText) {
+        Write-Host $outputText -ForegroundColor $Colors.Detail
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        if ($AllowedExitCodes -contains $LASTEXITCODE) {
+            return @{
+                Output = $outputText
+                ExitCode = $LASTEXITCODE
+            }
+        }
+
+        throw "Python 代码执行失败，退出码: $LASTEXITCODE"
+    }
+
+    return @{
+        Output = $outputText
+        ExitCode = 0
+    }
+}
 
 # 创建测试数据目录
 if (-not (Test-Path $TestDataPath)) {
@@ -123,7 +161,7 @@ Write-Host ""
 Write-Host "📦 音频处理模块导入测试..." -ForegroundColor $Colors.Progress
 
 try {
-    $importTest = python -c @"
+    Invoke-PythonSnippet -Code @"
 import sys
 import os
 sys.path.insert(0, os.getcwd())
@@ -153,9 +191,7 @@ except Exception as e:
     sys.exit(1)
 
 print('所有音频处理模块导入成功')
-"@
-
-    Write-Host $importTest -ForegroundColor $Colors.Detail
+"@ | Out-Null
     Record-TestResult "音频处理模块导入" $true "所有模块导入成功"
 
 } catch {
@@ -168,7 +204,7 @@ Write-Host ""
 Write-Host "🔍 FFmpeg检测测试..." -ForegroundColor $Colors.Progress
 
 try {
-    $ffmpegTest = python -c @"
+    Invoke-PythonSnippet -Code @"
 import sys
 import os
 sys.path.insert(0, os.getcwd())
@@ -184,7 +220,7 @@ if detector.is_available():
     print(f'FFmpeg路径: {detector.get_ffmpeg_path()}')
 
     # 检查FFmpeg版本
-    version = detector.get_version()
+    version = detector.get_version_info()
     if version:
         print(f'FFmpeg版本: {version}')
 
@@ -193,9 +229,7 @@ else:
     print('⚠️ FFmpeg不可用，请检查安装')
     print('FFmpeg检测测试失败')
     sys.exit(1)
-"@
-
-    Write-Host $ffmpegTest -ForegroundColor $Colors.Detail
+"@ | Out-Null
     Record-TestResult "FFmpeg检测" $true "FFmpeg检测和版本获取成功"
 
 } catch {
@@ -211,7 +245,7 @@ if (-not $Quick) {
     $testAudioPath = "$TestDataPath/test_audio.wav"
 
     try {
-        $createAudioTest = python -c @"
+        Invoke-PythonSnippet -Code @"
 import numpy as np
 import wave
 import os
@@ -236,9 +270,7 @@ with wave.open('$testAudioPath', 'wb') as wav_file:
 
 print('✅ 测试音频文件创建成功')
 print(f'音频文件路径: $testAudioPath')
-"@
-
-        Write-Host $createAudioTest -ForegroundColor $Colors.Detail
+"@ | Out-Null
         Record-TestResult "创建测试音频文件" $true "测试音频文件创建成功"
 
     } catch {
@@ -253,7 +285,7 @@ if (-not $Quick) {
     Write-Host "🎤 音频提取器功能测试..." -ForegroundColor $Colors.Progress
 
     try {
-        $extractorTest = python -c @"
+        $extractorTest = Invoke-PythonSnippet -Code @"
 import sys
 import os
 import tempfile
@@ -290,12 +322,11 @@ except Exception as e:
     sys.exit(1)
 
 print('音频提取器功能测试通过')
-"@
+"@ -AllowedExitCodes @(0, 2)
 
-        if ($LASTEXITCODE -eq 2) {
+        if ($extractorTest.ExitCode -eq 2) {
             Record-TestResult "音频提取器功能" $false "FFmpeg不可用，无法测试" $true
         } else {
-            Write-Host $extractorTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频提取器功能" $true "音频提取器初始化和参数验证成功"
         }
 
@@ -311,7 +342,7 @@ if (-not $Quick) {
     Write-Host "🔗 音频合并器功能测试..." -ForegroundColor $Colors.Progress
 
     try {
-        $mergerTest = python -c @"
+        $mergerTest = Invoke-PythonSnippet -Code @"
 import sys
 import os
 sys.path.insert(0, os.getcwd())
@@ -348,12 +379,11 @@ except Exception as e:
     sys.exit(1)
 
 print('音频合并器功能测试通过')
-"@
+"@ -AllowedExitCodes @(0, 2)
 
-        if ($LASTEXITCODE -eq 2) {
+        if ($mergerTest.ExitCode -eq 2) {
             Record-TestResult "音频合并器功能" $false "FFmpeg不可用，无法测试" $true
         } else {
-            Write-Host $mergerTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频合并器功能" $true "音频合并器初始化和参数验证成功"
         }
 
@@ -369,7 +399,7 @@ if (-not $Quick) {
     Write-Host "🎼 音频处理集成测试..." -ForegroundColor $Colors.Progress
 
     try {
-        $integrationTest = python -c @"
+        $integrationTest = Invoke-PythonSnippet -Code @"
 import sys
 import os
 import tempfile
@@ -401,12 +431,11 @@ extractor.cleanup_temp_files()
 print('✅ 临时文件清理功能正常')
 
 print('音频处理集成测试通过')
-"@
+"@ -AllowedExitCodes @(0, 2)
 
-        if ($LASTEXITCODE -eq 2) {
+        if ($integrationTest.ExitCode -eq 2) {
             Record-TestResult "音频处理集成" $false "FFmpeg不可用，无法测试" $true
         } else {
-            Write-Host $integrationTest -ForegroundColor $Colors.Detail
             Record-TestResult "音频处理集成" $true "音频处理组件集成测试成功"
         }
 
@@ -421,7 +450,7 @@ Write-Host ""
 Write-Host "⚠️ 错误处理测试..." -ForegroundColor $Colors.Progress
 
 try {
-    $errorTest = python -c @"
+    Invoke-PythonSnippet -Code @"
 import sys
 import os
 sys.path.insert(0, os.getcwd())
@@ -453,9 +482,7 @@ except Exception as e:
     print('✅ 无效参数异常处理正常')
 
 print('错误处理测试通过')
-"@
-
-    Write-Host $errorTest -ForegroundColor $Colors.Detail
+"@ | Out-Null
     Record-TestResult "错误处理" $true "音频处理错误处理机制正常"
 
 } catch {
@@ -469,7 +496,7 @@ Show-TestSummary
 # 清理临时文件
 if (Test-Path $TestDataPath) {
     $tempFiles = Get-ChildItem $TestDataPath -Filter "test_*"
-    if ($tempFiles.Count -gt 0 -and (-not $Verbose)) {
+if ($tempFiles.Count -gt 0 -and (-not $DetailedOutput)) {
         Remove-Item $tempFiles.FullName -Force
         Write-Host "🧹 清理临时测试文件" -ForegroundColor $Colors.Info
     }
