@@ -116,6 +116,7 @@ video_watermark_remover/
 ### D. 测试目录分层混杂（影响可读性与执行策略）
 - [x] 顶层 `tests/test_*.py` 及 `tests/*.ps1` 散落：已归档到 `tests/integration/` 与 `tests/e2e/ps1/`。
 - [ ] 统一一个“主分层”（unit/integration/e2e）并把“按模块细分”作为二级目录：尚未完全统一（`tests/app/...`、`tests/core/...` 以及顶层 `tests/ai_*` / `tests/phase3_*` / `tests/ui_component_tests.py` 等历史分层仍保留）。
+  - 实施拆解计划见 `docs/plans/2026-03-20-test-structure-standardization.md`，已将剩余迁移范围、目标目录、验证命令与分步提交粒度细化为 6 个任务。
 
 ### E. “运行产物目录”策略需要一致（避免误提交与污染仓库）
 - [x] 已明确运行产物目录约定：`__pycache__/`、`.pytest_cache/`、`.mypy_cache/`、`.cache/`、`.uv-cache*`、`logs/`、`.venv/` 视为可删除的本地运行产物；`tests/test_data/` 等保留结构/样本入口不应误删。
