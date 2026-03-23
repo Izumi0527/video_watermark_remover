@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import types
+from configparser import ConfigParser
 from pathlib import Path
 
 
@@ -171,6 +172,42 @@ def test_video_entrypoints_are_consistent() -> None:
     assert process_video_multiprocess.__name__ == "process_video_multiprocess"
     assert process_video_pipeline.__name__ == "process_video_pipeline"
     assert build_temp_path("demo.mp4", "temp_video").endswith("demo__temp_video.mp4")
+
+
+def test_video_processor_thread_injects_inpainting_model_path_from_config() -> None:
+    from app.core.video.thread import VideoProcessorThread
+
+    config = ConfigParser()
+    config["Models"] = {"inpainting_model_path": "models/unet-stage1.pth"}
+
+    processor = VideoProcessorThread(
+        input_path="demo.mp4",
+        output_path="out.mp4",
+        ai_params={"auto_detect": True},
+        config=config,
+    )
+
+    assert processor.ai_params["inpainting_model_path"] == "models/unet-stage1.pth"
+
+
+def test_ai_handler_refresh_check_detects_new_inpainting_model_path() -> None:
+    from app.core.video import thread as video_thread
+
+    existing_handler = types.SimpleNamespace(
+        ai_params={"auto_detect": True, "device": "auto"},
+    )
+
+    assert (
+        video_thread._ai_handler_needs_refresh(
+            existing_handler,
+            {
+                "auto_detect": True,
+                "device": "auto",
+                "inpainting_model_path": "models/unet-stage1.pth",
+            },
+        )
+        is True
+    )
 
 
 def test_legacy_flat_compat_layers_are_removed() -> None:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-watermark-remover"
-version = "0.3.0"
+version = "0.6.0"
 description = "智能视频水印去除工具 - AI驱动的水印检测和去除应用"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -58,10 +58,10 @@ dev = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/video-watermark-remover"
-"Bug Reports" = "https://github.com/yourusername/video-watermark-remover/issues"
-"Source" = "https://github.com/yourusername/video-watermark-remover"
-"Documentation" = "https://github.com/yourusername/video-watermark-remover/wiki"
+"Homepage" = "https://github.com/Izumi0527/video_watermark_remover"
+"Bug Reports" = "https://github.com/Izumi0527/video_watermark_remover/issues"
+"Source" = "https://github.com/Izumi0527/video_watermark_remover"
+"Documentation" = "https://github.com/Izumi0527/video_watermark_remover/tree/main/docs"
 
 [project.scripts]
 video-watermark-remover = "app.entrypoints:main"

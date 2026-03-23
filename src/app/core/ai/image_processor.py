@@ -10,7 +10,7 @@
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -188,8 +188,6 @@ def postprocess_smooth_edges(
     # 创建羽化掩码
     kernel = np.ones((feather_amount * 2 + 1, feather_amount * 2 + 1), np.uint8)
     dilated_mask = cv2.dilate(mask, kernel, iterations=1)
-    edge_mask = dilated_mask.astype(np.float32) - mask.astype(np.float32)
-
     # 对边缘区域应用高斯模糊
     blur_size = blur_radius * 2 + 1
     blurred_mask = cv2.GaussianBlur(dilated_mask.astype(np.float32), (blur_size, blur_size), 0)
@@ -292,8 +290,11 @@ def apply_postprocessing(
     enable_blend: bool = False,
     enable_enhance: bool = False,
     smooth_blur_radius: int = 5,
+    smooth_feather_amount: int = 3,
     blend_ratio: float = 0.8,
     enhance_contrast: float = 1.1,
+    enhance_brightness: int = 5,
+    enhance_saturation: float = 1.1,
 ) -> np.ndarray:
     """
     应用后处理管道
@@ -308,8 +309,11 @@ def apply_postprocessing(
         enable_blend: 是否启用混合
         enable_enhance: 是否启用增强
         smooth_blur_radius: 边缘平滑模糊半径
+        smooth_feather_amount: 边缘平滑羽化量
         blend_ratio: 混合比例
         enhance_contrast: 增强对比度
+        enhance_brightness: 增强亮度
+        enhance_saturation: 增强饱和度
 
     Returns:
         后处理后的图像
@@ -319,7 +323,13 @@ def apply_postprocessing(
     # 边缘平滑
     if enable_smooth:
         logger.debug("Applying edge smoothing postprocessing")
-        result = postprocess_smooth_edges(original, result, mask, blur_radius=smooth_blur_radius)
+        result = postprocess_smooth_edges(
+            original,
+            result,
+            mask,
+            blur_radius=smooth_blur_radius,
+            feather_amount=smooth_feather_amount,
+        )
 
     # 混合
     if enable_blend:
@@ -329,7 +339,13 @@ def apply_postprocessing(
     # 增强
     if enable_enhance:
         logger.debug("Applying enhancement postprocessing")
-        result = postprocess_enhance(result, mask, contrast=enhance_contrast)
+        result = postprocess_enhance(
+            result,
+            mask,
+            contrast=enhance_contrast,
+            brightness=enhance_brightness,
+            saturation=enhance_saturation,
+        )
 
     return result
 

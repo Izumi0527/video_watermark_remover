@@ -1,6 +1,7 @@
 import logging
 import sys
 
+from app import APP_NAME, __version__
 from app.config.config_manager import ConfigManager
 from app.utils.logger_setup import setup_logging
 
@@ -38,8 +39,8 @@ def main() -> None:
         from app.ui.main_window import MainWindow
 
         app = QApplication(sys.argv)
-        app.setApplicationName("智能视频水印去除工具")
-        app.setApplicationVersion("0.5.0")
+        app.setApplicationName(APP_NAME)
+        app.setApplicationVersion(__version__)
         app.setOrganizationName("VideoWatermarkRemover")
 
         window = MainWindow(config)

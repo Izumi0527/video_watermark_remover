@@ -47,6 +47,7 @@ class YOLOWatermarkDetector:
         conf_threshold: Optional[float] = None,
         iou_threshold: Optional[float] = None,
         device: Optional[str] = None,
+        min_area_pixels: Optional[int] = None,
     ):
         """
         初始化 YOLO 检测器
@@ -57,6 +58,7 @@ class YOLOWatermarkDetector:
             conf_threshold: 置信度阈值（覆盖配置文件）
             iou_threshold: IoU 阈值（覆盖配置文件）
             device: 设备 ('cuda' or 'cpu', None=自动检测)
+            min_area_pixels: 最小检测区域像素数（过滤过小检测框）
         """
         self.logger = logging.getLogger(__name__)
         self.model: Optional["YOLO"] = None
@@ -94,6 +96,11 @@ class YOLOWatermarkDetector:
         self.batch_size = config.getint("YOLO", "batch_size", fallback=8)
         self.auto_download = config.getboolean("YOLO", "auto_download_model", fallback=True)
         self.model_dir = Path(config.get("Paths", "default_model_dir", fallback="./models"))
+        configured_min_area = config.getint("YOLO", "min_area_pixels", fallback=0)
+        self.min_area_pixels = max(
+            0,
+            int(min_area_pixels if min_area_pixels is not None else configured_min_area),
+        )
         # 掩码生成参数：用于改善 C（边界不准：偏移/过大/过小）
         # 说明：当前模型输出为检测框（boxes），需要通过 bbox→mask 生成修复区域。
         # 这里将固定 padding 改为“自适应 padding + 可配置微调”，避免不同分辨率/水印尺寸下边界失真。
@@ -126,6 +133,7 @@ class YOLOWatermarkDetector:
         self.logger.info(f"  - Conf Threshold: {self.conf_threshold}")
         self.logger.info(f"  - IoU Threshold: {self.iou_threshold}")
         self.logger.info(f"  - Batch Size: {self.batch_size}")
+        self.logger.info(f"  - Min Area Pixels: {self.min_area_pixels}")
 
     def _resolve_model_path(self) -> str:  # noqa: C901
         """
@@ -539,6 +547,11 @@ class YOLOWatermarkDetector:
 
             box_w = max(0, x2 - x1)
             box_h = max(0, y2 - y1)
+
+            # 最小检测区域基于原始检测框面积判断，避免受到 padding 放大的干扰。
+            if self.min_area_pixels > 0 and (box_w * box_h) < self.min_area_pixels:
+                continue
+
             pad_x, pad_y = self._compute_box_padding(box_w, box_h)
 
             x1 = max(0, x1 - pad_x)

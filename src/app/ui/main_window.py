@@ -5,6 +5,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
 # 导入现有模块
+from .. import APP_NAME, __version__
 from ..config.config_manager import ConfigManager
 from ..config.preferences import get_preferences_manager
 from ..config.styles import ModernStyleManager
@@ -96,7 +97,7 @@ class MainWindow(QMainWindow):
         self.style_manager = ModernStyleManager(saved_theme)
 
         # 设置窗口属性
-        self.setWindowTitle("智能水印去除工具 - v0.5.0")
+        self.setWindowTitle(f"{APP_NAME} - v{__version__}")
         self._restore_window_geometry()
 
         # 初始化UI（必须在创建signal_handler之前）
@@ -210,7 +211,7 @@ class MainWindow(QMainWindow):
         subtitle_font.setPointSize(14)
         subtitle_font.setBold(False)
 
-        title_label = QLabel("智能水印去除工具 - v0.5.0")
+        title_label = QLabel(f"{APP_NAME} - v{__version__}")
         title_label.setObjectName("title_primary")
         title_label.setFont(title_font)
 

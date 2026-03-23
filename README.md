@@ -2,16 +2,17 @@
 
 <div align="center">
 
-**基于深度学习的智能视频水印检测与去除工具**
+**面向图片与视频的 AI 水印检测、修复与批处理桌面工具**
 
 [![Python](https://img.shields.io/badge/Python-3.12.10-blue.svg)](https://www.python.org/)
 [![PyQt6](https://img.shields.io/badge/PyQt6-6.6.0+-green.svg)](https://www.qt.io/qt-for-python)
+[![uv](https://img.shields.io/badge/uv-workflow-4B8BBE.svg)](https://docs.astral.sh/uv/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.5.0-orange.svg)](https://github.com/yourusername/video_watermark_remover/releases)
+[![Version](https://img.shields.io/badge/Version-v0.6.0-orange.svg)](https://github.com/Izumi0527/video_watermark_remover/releases)
 
-**v0.5.0** | 更新日期: 2025-12-07
+**v0.6.0** | 更新日期：2026-03-23 | Windows 为主要支持平台
 
-[快速开始](#快速开始) • [功能特性](#功能特性) • [安装部署](#安装部署) • [使用指南](#使用指南) • [完整文档](docs/complete-technical-documentation.md)
+[快速开始](#快速开始) • [更新重点](#更新重点) • [功能特性](#功能特性) • [安装与运行](#安装与运行) • [使用说明](#使用说明) • [测试与质量](#测试与质量) • [文档索引](#文档索引)
 
 </div>
 
@@ -19,276 +20,275 @@
 
 ## 📌 项目简介
 
-智能视频水印去除工具是一个强大的AI驱动应用程序，专为图片和视频文件的水印智能检测与高质量去除而设计。基于YOLOv11x深度学习模型和OpenCV图像处理技术，提供了直观的图形界面和专业级的处理效果。
+智能视频水印去除工具面向图片与视频场景，提供水印检测、区域修复、音频保留、批量队列和图形化预览能力。项目当前以 `PyQt6 + OpenCV + PyTorch + Ultralytics + FFmpeg + uv` 为核心技术栈，仓库代码已经收敛到 `src/app` 布局，并通过统一脚本入口 `.\scripts\vwr.ps1` 管理环境、运行、测试、质量检查与打包流程。
 
-### ✨ 核心亮点
+这个项目目前更适合以下使用场景：
 
-- 🤖 **AI智能检测** - YOLOv11x-Watermark专用模型，检测准确率>99%
-- ⚡ **GPU加速处理** - 支持CUDA加速，大幅提升处理速度
-- 🎨 **现代化UI** - 基于PyQt6的专业界面，Light/Dark双主题支持
-- 📦 **批量处理** - 智能队列管理，支持多文件并发处理
-- 🎵 **音频保留** - 完整保留视频原始音频轨道
-- 🖱️ **手动精选** - 支持鼠标框选，像素级精确控制
+- 图片或短视频的局部水印清理
+- 需要保留原始音频的视频导出
+- 需要批量处理、导出清单和追踪失败项的桌面工作流
+- 在 Windows 环境下用统一脚本快速搭好开发/运行环境
+
+---
+
+## ✨ 更新重点
+
+### v0.6.0（2026-03-23）
+
+- ✅ README 改为围绕当前可用能力、真实命令和现有文档入口组织，移除了容易过期的项目结构目录树
+- ✅ `src/app` 标准布局已经落地，`.\scripts\vwr.ps1 setup` 会自动执行 editable install，并在 Windows 权限异常时回退为本地 `.pth` 桥接
+- ✅ `setup` 新增依赖状态复用能力，环境已满足时会跳过重复下载；同时修复了 `UV_CACHE_DIR` 为空时导致的安装失败
+- ✅ 新增 `yolo11x-watermark-corzent` 模型支持，包含自动下载、SHA256 校验，以及失败时回退到默认 `yolo11x-watermark`
+- ✅ 导入文件对话框默认统一显示“图片 + 视频”联合过滤器，单文件与批处理处理中的状态文案会区分“图片/视频”
+- ✅ 批处理支持导出 JSON 清单，便于回溯队列状态、失败原因和处理参数
+- ✅ 视频处理模块完成拆分收口，测试目录已按 `unit / integration / e2e / future` 主分层整理
+
+---
+
+## 🎯 功能特性
+
+### AI 检测与修复
+
+- 支持 `YOLOv11x-Watermark` 专用模型，适合常见文字、Logo、平台角标等水印检测
+- 支持 `yolo11x-watermark-corzent` 微调模型，用于对默认模型做效果对比或特定素材增强
+- 支持 `yolo11s` 轻量模型与自定义模型路径
+- 支持自动下载缺失模型，下载后会进行文件完整性校验
+- 针对检测框到修复掩码的转换，提供 padding、腐蚀、膨胀、闭运算等参数微调
+
+### 图片 / 视频工作流
+
+- 图片格式：`JPG`、`JPEG`、`PNG`、`BMP`
+- 视频格式：`MP4`、`AVI`、`MKV`、`MOV`
+- 支持自动检测、手动框选、多区域修复
+- 支持单进程、多进程分块、流水线等视频处理策略
+- 支持保留视频原始音频，并在 FFmpeg 不可用时走保守降级路径
+
+### 批量处理与可视化反馈
+
+- 批量队列支持并发处理，当前配置层限制为 `1-8` 个并发文件
+- 导入入口默认统一展示“支持的文件（图片 + 视频）”
+- 处理中状态会按媒体类型展示“正在处理图片 / 视频”
+- 支持详细日志、阶段进度和批处理清单导出
+- 支持 Light / Dark 双主题和处理前后预览
+
+### 工程与运维体验
+
+- 统一使用 `.\scripts\vwr.ps1` 管理 `setup`、`run`、`quality`、`test`、`coverage`、`perf`、`build`、`clean`、`ci`
+- `setup` 会优先复用已满足的依赖状态，减少重复下载
+- 在部分 Windows 环境下，程序会先预加载 `torch` 再导入 `PyQt6`，降低 `WinError 1114` 风险
+- 当前仓库已适配 `src/app` editable 开发流，便于调试、测试和打包复用同一导入路径
 
 ---
 
 ## 🚀 快速开始
 
-### Windows平台（推荐）
+### Windows（推荐）
 
 ```powershell
 # 1. 克隆项目
-git clone https://github.com/yourusername/video_watermark_remover.git
+git clone https://github.com/Izumi0527/video_watermark_remover.git
 cd video_watermark_remover
 
-# 2. 初始化环境（首次运行）
-#   - 如需更快安装（CPU 版 PyTorch），可加：-TorchBackend cpu
-#   - 如需使用镜像（解决下载慢），可加：-DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
-#     或设置环境变量：$env:UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
-#   - 如需开发依赖（pytest/black 等），可加：-Dev
+# 2. 初始化环境
+# 如需 CPU 版 PyTorch，可加：-TorchBackend cpu
+# 如需镜像，可加：-DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
+# 如需开发依赖，可加：-Dev
 .\scripts\vwr.ps1 setup
 
 # 3. 启动应用
 .\scripts\vwr.ps1 run
 ```
 
-> 说明：当前仓库仅提供 Windows PowerShell 脚本（`.\scripts\vwr.ps1`）。如在 Linux/macOS 使用，请按“手动安装”章节自行创建虚拟环境、将当前项目安装为 editable，再运行 `python -m app.entrypoints`（或在仓库根目录执行 `python main.py`）。
-
-**首次启动**将自动完成：
-- ✅ 使用uv创建Python 3.12.10虚拟环境
-- ✅ 使用uv安装所有依赖包
-- ✅ 将当前项目安装为 editable（源码目录：`src/app`）
-- ✅ YOLOv11x模型自动下载
-- ✅ 环境配置检查
-
----
-
-## 🎯 功能特性
-
-### 水印检测
-
-| 检测方式 | 说明 | 推荐场景 |
-|---------|------|---------|
-| **YOLO深度学习** | 基于YOLOv11x-Watermark专用模型 | 通用水印、Logo、文字 |
-| **OpenCV算法** | Canny边缘检测 + 色彩分析 + 形态学优化 | 简单水印、半透明效果 |
-| **手动选择** | 鼠标拖拽框选，支持多区域 | 精确控制、特殊位置 |
-
-### 水印修复
-
-- **小面积水印** (<5%): 自定义插值算法
-- **中等面积** (5-15%): TELEA快速行进法
-- **大面积水印** (≥15%): Navier-Stokes方法
-- **GPU加速**: CUDA深度学习修复（可选）
-
-### 文件支持
-
-- **图片格式**: JPG, JPEG, PNG, BMP
-- **视频格式**: MP4, AVI, MKV, MOV
-- **批量处理**: 多文件队列，并发处理（1-4个文件）
-
-### 界面特性
-
-- **Light主题**（默认）: 柔和蓝灰绿配色，舒适护眼
-- **Dark主题**: 经典深色配色，夜间模式
-- **实时预览**: 处理前后对比，支持缩放平移
-- **详细日志**: 多维度进度显示，完整处理记录
-
----
-
-## 💻 系统要求
-
-| 组件 | 要求 | 说明 |
-|------|------|------|
-| **操作系统** | Windows 10/11, Linux, macOS | Windows为主要支持平台 |
-| **Python** | 3.12.10 | 推荐稳定版本 |
-| **uv** | 最新版 | Python包管理和虚拟环境工具 |
-| **CPU** | 多核处理器 | 推荐4核及以上 |
-| **内存** | 8GB+ RAM | 推荐16GB |
-| **硬盘** | 2GB+ 可用空间 | 含AI模型文件 |
-| **GPU**（可选）| NVIDIA with CUDA 11.8+ | 用于加速处理 |
-| **FFmpeg** | 最新稳定版 | 必需，用于音频处理 |
-
----
-
-## 📦 安装部署
-
-### 方式一：自动化脚本（推荐）⭐
+常见变体：
 
 ```powershell
-.\scripts\vwr.ps1 setup   # 首次运行（创建 .venv + 安装依赖）
-.\scripts\vwr.ps1 run     # 启动应用（带环境检查）
+# 国内网络常用组合：清华镜像 + CPU 版 PyTorch
+.\scripts\vwr.ps1 setup -TorchBackend cpu -DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+# 自动修复常见问题（缺 .venv / 缺依赖 / 缺配置）
+.\scripts\vwr.ps1 run -AutoFix
 ```
 
-> 说明：脚本仅支持 Windows PowerShell；Linux/macOS 请参考“手动安装”。
-> 说明：若 `.venv` 已存在且 `requirements.txt` / `requirements-dev.txt` 未变化，`setup` 会跳过重复依赖安装，但仍会刷新 editable install 与导入验证。
-> 说明：`setup` 会优先执行标准 editable install；若当前 Windows 临时构建目录触发 `build_editable` / `egg-info` 权限异常，会自动降级为本地 `.pth` 桥接，保证 `src/app` 仍能被虚拟环境导入。
+### Linux / macOS（手动路径）
 
-### 方式二：手动安装
+当前仓库只提供 Windows PowerShell 统一脚本。若在 Linux / macOS 使用，可手动执行：
 
 ```bash
-# 1. 安装uv（如果尚未安装）
-# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-# Linux/macOS: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. 使用uv创建Python 3.12.10虚拟环境
 uv venv --python 3.12.10
-
-# 3. 激活虚拟环境
-# Windows: .\.venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-
-# 4. 使用uv安装依赖
+source .venv/bin/activate
 uv pip install -r requirements.txt
-
-# 5. 将当前项目安装为 editable（推荐）
 uv pip install -e .
-
-# 6. 运行程序
-python -m app.entrypoints
+python main.py
 ```
 
-### 开发环境配置
+---
+
+## 📦 安装与运行
+
+### `setup` 会做什么
+
+- 创建或复用 `.venv`
+- 安装运行依赖，或在 `-Dev` 下安装开发依赖
+- 自动将当前项目安装为 editable
+- 验证 `app` / `app.entrypoints` 可导入
+- 在依赖状态未变化时跳过重复安装
+- 若 Windows 临时构建目录触发 `build_editable` / `egg-info` 权限异常，则自动回退为本地 `.pth` 桥接
+
+### 常用命令
 
 ```powershell
-# 使用 vwr 脚本安装开发依赖（推荐）
-.\scripts\vwr.ps1 setup -Dev
+# 运行应用
+.\scripts\vwr.ps1 run
 
-# 运行代码质量检查
+# 代码质量检查
 .\scripts\vwr.ps1 quality
+.\scripts\vwr.ps1 quality -Quick
 
-# 运行测试
+# 测试
 .\scripts\vwr.ps1 test unit -Quick
+.\scripts\vwr.ps1 test integration -Quick
+.\scripts\vwr.ps1 test all
+
+# 覆盖率 / 性能 / 构建
+.\scripts\vwr.ps1 coverage
+.\scripts\vwr.ps1 perf -Quick
+.\scripts\vwr.ps1 build
 ```
 
-如需手动搭建与脚本一致的开发环境，可执行：
+### 配置文件位置
 
-```bash
-uv pip install -r requirements-dev.txt
-uv pip install -e .
+程序运行时会优先使用用户配置目录中的 `config.ini`。如需确认实际路径，可执行：
+
+```powershell
+python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"
 ```
 
-> 提示：`setup -Dev` 会将开发依赖视为运行依赖的超集；当 dev 环境状态有效时，重复执行 `setup` / `setup -Dev` 都会优先复用现有依赖状态，而不是再次下载。
+如需快速生成配置，可直接运行：
+
+```powershell
+.\scripts\vwr.ps1 run -AutoFix
+```
 
 ---
 
-## 📖 使用指南
+## 📖 使用说明
 
-### 单文件处理流程
+### 单文件处理
 
-1. **启动应用** → 点击"📂 选择文件"
-2. **选择模式** → 自动检测 或 手动选择
-3. **调整参数**（可选）→ 检测敏感度、修复方法、输出质量
-4. **开始处理** → 点击"✨ 开始处理"
-5. **查看结果** → 实时预览、导出文件
+1. 启动应用并选择图片或视频文件
+2. 选择自动检测或手动框选模式
+3. 按需调整检测阈值、修复方式、GPU 选项和输出质量
+4. 开始处理并在预览区查看过程与结果
+5. 导出处理后的文件
 
-### 批量处理流程
+### 批量处理
 
-1. **选择多个文件** → Ctrl+点击多选
-2. **配置参数** → 统一处理参数、并发数量
-3. **开始批处理** → 监控队列进度
-4. **查看统计** → 成功/失败数量、详细日志
+1. 从同一个导入入口批量选择图片 / 视频文件
+2. 设置并发数、失败重试和输出参数
+3. 启动批处理并观察整体进度、当前文件状态和日志
+4. 需要追溯时导出批处理清单（JSON）
 
-### 高级技巧
+### 参数建议
 
-**参数优化建议**:
-- 文字水印: 检测敏感度 0.6-0.8, 修复方法 TELEA
-- Logo水印: 检测敏感度 0.5-0.7, 修复方法 自动
-- 大面积水印: 检测敏感度 0.4-0.6, 修复方法 Navier-Stokes
+- 文字水印：`conf_threshold` 可从 `0.25-0.35` 起调，修复方法优先 `TELEA`
+- Logo / 角标：优先默认 `yolo11x-watermark`，必要时切换 `corzent` 对比
+- 低配机器：可尝试 `yolo11s + batch_size=1`
+- 边界偏大或偏小：优先调 `mask_padding_px`、`mask_padding_ratio`、`mask_close_kernel`
 
 ---
 
-## 📁 项目结构
+## 🤖 模型与配置
 
+### 当前支持的模型
+
+- `yolo11x-watermark`
+  - 默认推荐模型，适合常规生产场景
+- `yolo11x-watermark-corzent`
+  - 可自动下载，带 SHA256 校验；若不可用，程序会自动回退到默认模型
+- `yolo11s`
+  - 轻量通用模型，适合 CPU 或快速验证
+- `custom`
+  - 使用自定义 `.pt` 模型文件
+
+### 配置示例
+
+```ini
+[YOLO]
+model_type = yolo11x-watermark
+auto_download_model = yes
+conf_threshold = 0.25
+iou_threshold = 0.45
+batch_size = 8
 ```
-video_watermark_remover/
-├── src/
-│   └── app/               # 应用核心代码（editable install 的真实包目录）
-│       ├── core/          # 核心功能模块
-│       │   ├── ai/        # AI检测与修复
-│       │   ├── audio/     # 音频处理
-│       │   └── video/     # 视频处理
-│       ├── ui/            # 用户界面
-│       ├── config/        # 配置管理
-│       └── utils/         # 工具函数
-├── tests/                 # 测试代码
-├── scripts/               # 自动化脚本（统一入口：vwr.ps1）
-├── docs/                  # 文档
-├── models/                # AI模型
-├── logs/                  # 运行日志
-├── config.ini.example     # 配置模板（复制到用户配置目录后生效）
-└── main.py                # 薄启动器（转发到 app.entrypoints:main）
-```
 
-> 说明：应用运行时会在“用户配置目录”自动生成 `config.ini`（默认不纳入版本控制）。  
-> 如需确认路径，可运行：`python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"`
-
-**补充说明**：当前仓库采用 `src/app` 布局，开发环境建议通过 `.\scripts\vwr.ps1 setup -Dev` 或 `uv pip install -e .` 建立 editable install。
+更完整的模型说明与手动下载方式可查看 [models/README.md](models/README.md)。
 
 ---
 
 ## 🧪 测试与质量
 
-### 测试覆盖
+当前测试体系已按主分层整理，避免 README 挂着很快过期的文件数量统计：
 
-- **测试文件**: 29个（5,508行代码）
-- **测试类型**: 单元测试 + 集成测试 + UI测试 + 性能测试
-- **覆盖率**: ≥60%（核心模块）
+- `tests/unit/`：单元测试，覆盖轻量模块、导入边界和回归点
+- `tests/integration/`：集成测试，覆盖 AI / 视频 / UI / 历史兼容场景
+- `tests/e2e/ps1/`：PowerShell 端到端脚本
+- `tests/future/unit/`：暂挂或未来阶段测试，不纳入当前默认门禁
 
-### 代码质量工具
+推荐命令：
 
-- **Black** - 代码格式化（行长100）
-- **Flake8** - 代码风格检查
-- **MyPy** - 类型注解检查
-- **Bandit** - 安全漏洞扫描
-- **pytest-cov** - 覆盖率分析
+```powershell
+.\scripts\vwr.ps1 setup -Dev
+.\scripts\vwr.ps1 test unit -Quick
+.\scripts\vwr.ps1 test integration -Quick
+.\scripts\vwr.ps1 quality
+```
+
+如果你更关心当前测试约定而不是具体命令细节，请直接看 [tests/TESTING_GUIDE.md](tests/TESTING_GUIDE.md)。
 
 ---
 
 ## 🎉 版本历史
 
-### v0.5.0 (当前版本 - 2025-12-07)
+### v0.6.0（2026-03-23）
 
-**重大更新**:
-- 🎨 Light主题设为默认，全新柔和蓝灰绿配色
-- ✅ 优化文字可读性和GroupBox标题显示
-- ✅ 统一日志面板颜色，透明背景自适应
-- 🔧 统一使用Python 3.12和uv包管理工具
+- 统一 README、程序可见版本和包元数据
+- 完成 `src/app` 布局后的运行 / 测试 / editable 安装收敛
+- `setup` 支持依赖状态跳过，并修复空 `UV_CACHE_DIR` 场景
+- 新增 `yolo11x-watermark-corzent` 自动下载、SHA256 校验与回退逻辑
+- 导入过滤器统一为图片 + 视频，处理中状态按媒体类型分流
+- 批处理支持导出 JSON 清单，测试目录完成主分层整理
 
-### v0.4.0 (2025-11-22)
+### v0.5.0（2025-12-07）
 
-- ✅ 集成YOLOv11x-Watermark专用检测模型
-- ✅ GPU加速深度学习修复
-- ✅ 多进程分块和流水线处理
-- ✅ 完善异常处理体系（13种）
-
-[查看完整版本历史](docs/complete-technical-documentation.md#版本历史)
+- Light / Dark 主题与界面细节优化
+- 统一使用 Python 3.12.10 与 `uv`
+- 文档与主窗口交互完成一轮重整
 
 ---
 
 ## 🤝 贡献指南
 
-我们欢迎所有形式的贡献！在提交代码前，请确保：
-
-1. 代码遵循PEP8规范
-2. 每个模块不超过300行
-3. 添加适当的单元测试（覆盖率≥60%）
-4. 运行代码质量检查并通过
+欢迎提交 Issue 或 Pull Request。提交前建议至少执行：
 
 ```powershell
-# 提交前检查
+.\scripts\vwr.ps1 setup -Dev
 .\scripts\vwr.ps1 quality
 .\scripts\vwr.ps1 test unit -Quick
 ```
 
+如需定位具体开发约定、脚本行为或测试入口，请优先查看下方文档索引。
+
 ---
 
-## 📚 相关文档
+## 📚 文档索引
 
-- [📘 完整技术文档](docs/complete-technical-documentation.md) - 详细的功能说明和技术架构
-- [🏗️ 架构设计](docs/architecture.md) - 系统架构和设计模式
-- [🔌 API文档](docs/api.md) - 接口说明和使用示例
-- [🧪 测试文档](docs/testing.md) - 测试策略和覆盖率
-- [🛠️ 开发指南](docs/development.md) - 开发环境配置和规范
+- [scripts/README.md](scripts/README.md) - `vwr.ps1` 统一脚本入口说明
+- [models/README.md](models/README.md) - YOLO 模型说明、下载方式与配置建议
+- [tests/TESTING_GUIDE.md](tests/TESTING_GUIDE.md) - 当前测试分层与推荐执行方式
+- [docs/yolo_model_upgrade.md](docs/yolo_model_upgrade.md) - 模型升级相关记录
+- [docs/parameters_analysis.md](docs/parameters_analysis.md) - 参数与处理策略分析
+- [docs/agents/README.md](docs/agents/README.md) - 项目专属子代理与调度说明
+- [docs/complete-technical-documentation.md](docs/complete-technical-documentation.md) - 历史归档技术文档（部分内容仍基于 v0.5.0）
 
 ---
 
@@ -300,18 +300,14 @@ video_watermark_remover/
 
 ## 🙏 致谢
 
-**核心依赖**: PyQt6, OpenCV, PyTorch, Ultralytics, FFmpeg, uv
-
-**开发工具**: pytest, Black, Flake8, MyPy, Bandit
+核心依赖包括 `PyQt6`、`OpenCV`、`PyTorch`、`Ultralytics`、`FFmpeg`、`uv`，也感谢 `pytest`、`Black`、`Flake8`、`MyPy`、`Bandit` 等工具为工程质量提供支持。
 
 ---
 
 <div align="center">
 
-**智能视频水印去除工具** - 让视频内容更纯净 ✨
+**智能视频水印去除工具** - 让图片与视频处理流程更稳定、更高效、更可追溯
 
-*如有问题或建议，欢迎提交 [Issue](https://github.com/yourusername/video_watermark_remover/issues) 或 [Pull Request](https://github.com/yourusername/video_watermark_remover/pulls)*
-
-⭐ **如果这个项目对你有帮助，请给我们一个Star！** ⭐
+如有问题或建议，欢迎提交 [Issue](https://github.com/Izumi0527/video_watermark_remover/issues) 或 [Pull Request](https://github.com/Izumi0527/video_watermark_remover/pulls)
 
 </div>

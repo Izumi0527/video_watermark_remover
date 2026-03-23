@@ -180,6 +180,70 @@ class TestImageInpainter:
         assert result is not None
         assert result.shape == mock_image.shape
 
+    def test_inpaint_frame_accepts_navier_stokes_alias(
+        self,
+        monkeypatch,
+        mock_image,
+        mock_mask,
+    ):
+        """显式传入 navier_stokes 时应走 OpenCV NS 分支。"""
+        inpainter = ImageInpainter()
+        inpainter.load_model()
+        captured = {}
+
+        def fake_inpaint(frame, mask, radius, flags):
+            captured["radius"] = radius
+            captured["flags"] = flags
+            return frame.copy()
+
+        monkeypatch.setattr(cv2, "inpaint", fake_inpaint)
+
+        result = inpainter.inpaint_frame(
+            mock_image,
+            mock_mask,
+            method="navier_stokes",
+            radius=4,
+            quality_level=3,
+        )
+
+        assert result is not None
+        assert captured["flags"] == cv2.INPAINT_NS
+        assert captured["radius"] == 4
+
+    def test_inpaint_frame_quality_level_affects_effective_radius(
+        self,
+        monkeypatch,
+        mock_image,
+        mock_mask,
+    ):
+        """高质量等级应让 OpenCV 修复半径更积极一些。"""
+        inpainter = ImageInpainter()
+        inpainter.load_model()
+        radii = []
+
+        def fake_inpaint(frame, mask, radius, flags):
+            radii.append(radius)
+            return frame.copy()
+
+        monkeypatch.setattr(cv2, "inpaint", fake_inpaint)
+
+        inpainter.inpaint_frame(
+            mock_image,
+            mock_mask,
+            method="telea",
+            radius=4,
+            quality_level=1,
+        )
+        inpainter.inpaint_frame(
+            mock_image,
+            mock_mask,
+            method="telea",
+            radius=4,
+            quality_level=5,
+        )
+
+        assert radii[0] < radii[1]
+
     def test_inpaint_frame_with_scattered_mask(self, mock_image):
         """测试分散掩码修复"""
         # Arrange

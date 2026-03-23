@@ -18,6 +18,16 @@ from ..exceptions import ModelLoadError, UnsupportedFormatError
 AIHandler = None
 FFmpegAudioProcessor = None
 
+AI_HANDLER_REFRESH_KEYS = (
+    "device",
+    "use_gpu_inpainting",
+    "inpainting_algorithm",
+    "inpaint_radius",
+    "quality_level",
+    "min_area_pixels",
+    "inpainting_model_path",
+)
+
 
 def _resolve_ai_handler_class():
     global AIHandler
@@ -37,6 +47,48 @@ def _resolve_ffmpeg_audio_processor_class():
 
         FFmpegAudioProcessor = imported_ffmpeg_audio_processor
     return FFmpegAudioProcessor
+
+
+def _get_optional_config_value(
+    config: Optional[ConfigParser], option: str, sections: tuple[str, ...]
+) -> Optional[str]:
+    if config is None:
+        return None
+
+    for section in sections:
+        try:
+            if config.has_option(section, option):
+                value = config.get(section, option).strip()
+                return value or None
+        except Exception as exc:
+            logging.getLogger(__name__).debug(
+                "读取配置项失败: section=%s option=%s error=%s",
+                section,
+                option,
+                exc,
+            )
+    return None
+
+
+def _inject_inpainting_model_path(
+    ai_params: Optional[Dict[str, Any]],
+    config: Optional[ConfigParser],
+) -> Dict[str, Any]:
+    """将配置中的 GPU 修复权重路径注入 ai_params，便于单/多进程链路共用。"""
+    merged_params = dict(ai_params or {})
+    if merged_params.get("inpainting_model_path"):
+        return merged_params
+
+    model_path = _get_optional_config_value(config, "inpainting_model_path", ("Models", "models"))
+    if model_path:
+        merged_params["inpainting_model_path"] = model_path
+    return merged_params
+
+
+def _ai_handler_needs_refresh(ai_handler: Any, ai_params: Dict[str, Any]) -> bool:
+    """判断预加载 AIHandler 是否需要因关键参数变化而重建。"""
+    existing_params = getattr(ai_handler, "ai_params", {}) or {}
+    return any(existing_params.get(key) != ai_params.get(key) for key in AI_HANDLER_REFRESH_KEYS)
 
 
 def _process_image_impl(processor) -> None:
@@ -132,7 +184,7 @@ class VideoProcessorThread(QThread):
         super().__init__(parent)
         self.input_path = input_path
         self.output_path = output_path
-        self.ai_params = ai_params or {}
+        self.ai_params = _inject_inpainting_model_path(ai_params, config)
         self.config = config
         self.ai_handler: Optional[Any] = preloaded_ai_handler
         ffmpeg_processor_class = _resolve_ffmpeg_audio_processor_class()
@@ -204,7 +256,7 @@ class VideoProcessorThread(QThread):
 
         self.detailed_progress.emit(progress_data)
 
-    def run(self) -> None:
+    def run(self) -> None:  # noqa: C901
         try:
             self._start_time = time.time()
             self.status.emit(f"🚀 开始处理文件: {os.path.basename(self.input_path)}")
@@ -219,13 +271,22 @@ class VideoProcessorThread(QThread):
                 self._emit_detailed_progress("loading_models", 1, 1)
                 self.status.emit("🤖 AI 模型加载完成")
             else:
-                new_device = self.ai_params.get("device", "auto")
-                if new_device != self.ai_handler.device_preference:
-                    self.logger.info(
-                        f"Updating device from '{self.ai_handler.device_preference}' to '{new_device}'"
-                    )
-                    self.ai_handler.update_device(new_device)
-                self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
+                if _ai_handler_needs_refresh(self.ai_handler, self.ai_params):
+                    self.logger.info("预加载 AIHandler 参数已变化，重新加载以匹配当前任务")
+                    self.status.emit("🔄 当前任务参数已变化，重新加载 AI 模型...")
+                    ai_handler_class = _resolve_ai_handler_class()
+                    self.ai_handler = ai_handler_class(self.config, self.ai_params)
+                    if not self.ai_handler.load_models():
+                        raise ModelLoadError("无法加载 AI 模型")
+                    self.status.emit("🤖 AI 模型重新加载完成")
+                else:
+                    new_device = self.ai_params.get("device", "auto")
+                    if new_device != self.ai_handler.device_preference:
+                        self.logger.info(
+                            f"Updating device from '{self.ai_handler.device_preference}' to '{new_device}'"
+                        )
+                        self.ai_handler.update_device(new_device)
+                    self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
 
             file_ext = os.path.splitext(self.input_path)[1].lower()
 

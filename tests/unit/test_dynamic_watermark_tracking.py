@@ -7,6 +7,7 @@
 2. 手动模式下，手动框选仍然保持原有静态修复行为
 """
 
+import configparser
 import importlib
 import logging
 import sys
@@ -19,18 +20,41 @@ import pytest
 def _install_ai_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     """为纯单元测试注入轻量依赖，并确保作用域限定在当前测试。"""
     torch_module = types.ModuleType("torch")
-    torch_module.cuda = types.SimpleNamespace(is_available=lambda: False)
+    torch_module.cuda = types.SimpleNamespace(
+        is_available=lambda: False,
+        get_device_name=lambda _index: "Stub GPU",
+    )
     torch_module.device = lambda name: name
     monkeypatch.setitem(sys.modules, "torch", torch_module)
 
     dl_inpainter_module = types.ModuleType("app.core.ai.dl_inpainter")
+    dl_inpainter_module.last_init_kwargs = None
+    dl_inpainter_module.last_load_model_path = None
+    dl_inpainter_module.next_load_model_result = True
+    dl_inpainter_module.last_inpaint_kwargs = None
 
     class _DummyDeepLearningInpainter:
         def __init__(self, *args, **kwargs):
-            pass
+            dl_inpainter_module.last_init_kwargs = dict(kwargs)
+            self.last_profile_used = None
 
-        def load_model(self):
-            return True
+        def load_model(self, model_path=None):
+            dl_inpainter_module.last_load_model_path = model_path
+            return dl_inpainter_module.next_load_model_result
+
+        def inpaint_frame(self, frame, mask, radius=3, quality_level=3, profile=None):
+            dl_inpainter_module.last_inpaint_kwargs = {
+                "radius": radius,
+                "quality_level": quality_level,
+                "profile": profile,
+            }
+            self.last_profile_used = {
+                "requested_radius": radius,
+                "quality_level": quality_level,
+                "mask_expand_px": radius + quality_level,
+                "mask_feather_px": quality_level,
+            }
+            return frame.copy()
 
     dl_inpainter_module.DeepLearningInpainter = _DummyDeepLearningInpainter
     monkeypatch.setitem(sys.modules, "app.core.ai.dl_inpainter", dl_inpainter_module)
@@ -44,6 +68,9 @@ def _install_ai_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
         def load_model(self):
             return True
 
+        def inpaint_frame(self, frame, mask, method=None, radius=3, quality_level=3):
+            return frame.copy()
+
     image_inpainter_module.ImageInpainter = _DummyImageInpainter
     monkeypatch.setitem(sys.modules, "app.core.ai.image_inpainter", image_inpainter_module)
 
@@ -55,9 +82,11 @@ def _install_ai_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "app.core.ai.image_processor", image_processor_module)
 
     yolo_detector_module = types.ModuleType("app.core.ai.yolo_detector")
+    yolo_detector_module.last_init_kwargs = None
 
     class _DummyYOLOWatermarkDetector:
         def __init__(self, *args, **kwargs):
+            yolo_detector_module.last_init_kwargs = dict(kwargs)
             self.model = None
             self.device = kwargs.get("device", "cpu")
 
@@ -112,13 +141,23 @@ def _build_lightweight_ai_handler(detector: _DummyDetector, ai_handler_cls: type
     """构造一个仅用于 `process_frame` 行为测试的轻量 AIHandler。"""
     handler = ai_handler_cls.__new__(ai_handler_cls)
     handler.logger = logging.getLogger(__name__)
+    handler.quality_level = 3
+    handler.inpainting_algorithm = "auto"
+    handler.inpaint_radius = 3
+    handler.last_inpainting_method_used = None
     handler.enable_blur_preprocess = False
     handler.enable_denoise_preprocess = False
     handler.enable_sharp_preprocess = False
     handler.enable_smooth_postprocess = False
     handler.enable_blend_postprocess = False
     handler.enable_enhance_postprocess = False
+    handler.requested_gpu_inpainting = False
     handler.use_gpu_inpainting = False
+    handler.gpu_inpainting_fallback_reason = None
+    handler.configured_inpainting_model_path = None
+    handler.loaded_inpainting_model_path = None
+    handler.last_inpainting_backend = None
+    handler.device = "cpu"
     handler.dl_inpainter = None
     handler.watermark_detector = detector
     handler.inpaint_frame = lambda frame, _mask: frame.copy()
@@ -133,6 +172,13 @@ def _create_detected_mask() -> np.ndarray:
     mask = np.zeros((48, 64), dtype=np.uint8)
     mask[20:30, 28:42] = 255
     return mask
+
+
+def _build_test_config(inpainting_model_path: str = "") -> configparser.ConfigParser:
+    """构造仅包含 GPU 修复权重路径的测试配置。"""
+    config = configparser.ConfigParser()
+    config["Models"] = {"inpainting_model_path": inpainting_model_path}
+    return config
 
 
 def test_ai_params_builder_auto_mode_ignores_manual_selections(
@@ -212,3 +258,258 @@ def test_ai_handler_uses_manual_mask_when_auto_detection_disabled(
     assert detector.call_count == 0
     assert info["detection_method"] == "manual_selection"
     assert info["manual_regions_count"] == 1
+
+
+def test_ai_handler_passes_min_area_pixels_to_yolo_detector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AIHandler 初始化检测器时应透传最小检测区域，确保 UI 参数真正进入后处理。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    yolo_detector_module = sys.modules["app.core.ai.yolo_detector"]
+
+    handler = ai_handler_cls(
+        config=None,
+        ai_params={
+            "conf_threshold": 0.35,
+            "device": "cpu",
+            "min_area_pixels": 321,
+        },
+    )
+
+    assert handler.watermark_detector is not None
+    assert yolo_detector_module.last_init_kwargs["min_area_pixels"] == 321
+
+
+def test_ai_handler_passes_inpainting_params_to_opencv_inpainter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AIHandler 应把修复算法、半径、质量真正透传给 OpenCV 修复器。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+
+    handler = ai_handler_cls(
+        config=None,
+        ai_params={
+            "use_gpu_inpainting": False,
+            "device": "cpu",
+            "inpainting_algorithm": "telea",
+            "inpaint_radius": 7,
+            "quality_level": 5,
+        },
+    )
+    captured = {}
+
+    def fake_inpaint(frame, mask, method=None, radius=3, quality_level=3):
+        captured["method"] = method
+        captured["radius"] = radius
+        captured["quality_level"] = quality_level
+        return frame.copy()
+
+    handler.image_inpainter.inpaint_frame = fake_inpaint
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert captured == {
+        "method": "telea",
+        "radius": 7,
+        "quality_level": 5,
+    }
+    assert info["inpainting_method"] == "telea"
+
+
+def test_ai_handler_higher_quality_strengthens_postprocess_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """更高质量等级应让后处理强度整体上升。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    ai_handler_module = sys.modules["app.core.ai.ai_handler"]
+    profiles = []
+
+    def fake_apply_postprocessing(original_frame, processed_frame, mask, **kwargs):
+        profiles.append(dict(kwargs))
+        return processed_frame
+
+    monkeypatch.setattr(ai_handler_module, "apply_postprocessing", fake_apply_postprocessing)
+
+    for quality_level in (1, 5):
+        handler = ai_handler_cls(
+            config=None,
+            ai_params={
+                "use_gpu_inpainting": False,
+                "device": "cpu",
+                "quality_level": quality_level,
+                "enable_smooth_postprocess": True,
+                "enable_blend_postprocess": True,
+                "enable_enhance_postprocess": True,
+            },
+        )
+        handler.image_inpainter.inpaint_frame = (
+            lambda frame, mask, method=None, radius=3, quality_level=3: frame.copy()
+        )
+        handler.process_frame(
+            _create_test_frame(),
+            {
+                "auto_detect": False,
+                "user_mask": [(1, 1, 10, 10)],
+            },
+        )
+
+    low_quality, high_quality = profiles
+    assert low_quality["smooth_blur_radius"] < high_quality["smooth_blur_radius"]
+    assert low_quality["blend_ratio"] < high_quality["blend_ratio"]
+    assert low_quality["enhance_contrast"] < high_quality["enhance_contrast"]
+
+
+def test_ai_handler_passes_configured_inpainting_model_path_to_dl_inpainter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """GPU 修复启用时应把配置中的权重路径真实传给深度学习修复器。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+        },
+    )
+
+    assert handler.load_models() is True
+    assert dl_inpainter_module.last_load_model_path == str(model_path)
+    assert handler.use_gpu_inpainting is True
+    assert handler.dl_inpainter is not None
+
+
+def test_ai_handler_falls_back_to_opencv_when_inpainting_model_path_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未配置 GPU 修复权重时应明确降级到 OpenCV，而不是继续走随机初始化成功路径。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
+    torch_module.cuda.is_available = lambda: True
+
+    handler = ai_handler_cls(
+        config=_build_test_config(""),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+        },
+    )
+    captured = {}
+
+    def fake_inpaint(frame, mask, method=None, radius=3, quality_level=3):
+        captured["method"] = method
+        return frame.copy()
+
+    handler.image_inpainter.inpaint_frame = fake_inpaint
+
+    assert handler.load_models() is True
+    assert dl_inpainter_module.last_load_model_path is None
+    assert handler.use_gpu_inpainting is False
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert captured["method"] == "auto"
+    assert info["inpainting_backend"] == "opencv"
+    assert info["gpu_inpainting_requested"] is True
+    assert info["gpu_inpainting_fallback_reason"] == "missing_inpainting_model_path"
+
+
+def test_ai_handler_passes_gpu_profile_params_to_dl_inpainter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """GPU 路径启用时应把修复半径和质量真实传给深度学习修复器。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "quality_level": 5,
+            "inpaint_radius": 7,
+        },
+    )
+
+    assert handler.load_models() is True
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert dl_inpainter_module.last_inpaint_kwargs["radius"] == 7
+    assert dl_inpainter_module.last_inpaint_kwargs["quality_level"] == 5
+    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    assert info["gpu_inpainting_profile"]["requested_radius"] == 7
+    assert info["gpu_inpainting_profile"]["quality_level"] == 5
+
+
+def test_ai_handler_does_not_report_gpu_success_when_dl_inpainting_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """GPU 修复执行失败时，processing_info 不应误报成功后端。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "quality_level": 4,
+            "inpaint_radius": 6,
+        },
+    )
+    assert handler.load_models() is True
+
+    def raise_inpaint_error(frame, mask, radius=3, quality_level=3, profile=None):
+        raise RuntimeError("gpu inpaint failed")
+
+    handler.dl_inpainter.inpaint_frame = raise_inpaint_error
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert info["inpainting_backend"] is None
+    assert info["inpainting_method"] is None
+    assert info["gpu_inpainting_profile"] is None
