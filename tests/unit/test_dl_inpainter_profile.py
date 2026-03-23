@@ -318,3 +318,85 @@ def test_inpaint_frame_tiled_path_keeps_single_oom_retry_semantics(
     assert inpainter.last_retry_info == {"applied": True, "count": 1, "reason": "oom"}
     assert inpainter.last_profile_used is not None
     assert inpainter.last_profile_used["resize_limit"] < initial_profile.resize_limit
+
+
+def test_run_single_inference_uses_precision_wrapper_for_non_tiled_path(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module = _load_dl_inpainter_module(monkeypatch)
+    inpainter = dl_module.DeepLearningInpainter(device="cpu")
+    inpainter.model = object()
+    frame = np.full((96, 96, 3), 127, dtype=np.uint8)
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    mask[40:56, 40:56] = 255
+    precision_calls: list[tuple[tuple[int, ...], bool]] = []
+
+    monkeypatch.setattr(inpainter, "_should_use_tiled_inference", lambda shape, profile: False)
+    monkeypatch.setattr(
+        inpainter,
+        "_preprocess",
+        lambda frame_rgb, prepared_mask: np.zeros(
+            (1, 4, frame_rgb.shape[0], frame_rgb.shape[1]),
+            dtype=np.float32,
+        ),
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_run_forward_with_precision",
+        lambda input_tensor, prefer_mixed_precision=True: (
+            precision_calls.append((tuple(input_tensor.shape), prefer_mixed_precision))
+            or np.zeros((1, 3, input_tensor.shape[2], input_tensor.shape[3]), dtype=np.float32)
+        ),
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_postprocess",
+        lambda output_tensor, original_rgb, prepared_mask, profile: original_rgb.copy(),
+    )
+
+    result = inpainter.inpaint_frame(frame, mask, radius=3, quality_level=5)
+
+    assert result.shape == frame.shape
+    assert precision_calls == [((1, 4, 96, 96), True)]
+
+
+def test_run_forward_with_precision_falls_back_to_fp32_when_amp_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module = _load_dl_inpainter_module(monkeypatch)
+    inpainter = dl_module.DeepLearningInpainter(device=types.SimpleNamespace(type="cuda"))
+    attempts: list[str] = []
+    amp_state = {"active": False}
+
+    class _AutoCast:
+        def __enter__(self):
+            amp_state["active"] = True
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            amp_state["active"] = False
+            return False
+
+    monkeypatch.setattr(
+        inpainter, "_resolve_precision_policy", lambda prefer_mixed_precision=True: True
+    )
+    monkeypatch.setattr(
+        dl_module.torch, "autocast", lambda *args, **kwargs: _AutoCast(), raising=False
+    )
+    monkeypatch.setattr(dl_module.torch, "float16", "float16", raising=False)
+
+    class _AmpFallbackModel:
+        def __call__(self, tensor):
+            attempts.append("amp" if amp_state["active"] else "fp32")
+            if amp_state["active"]:
+                raise RuntimeError("mixed precision unsupported on this operator")
+            return np.zeros((1, 3, tensor.shape[2], tensor.shape[3]), dtype=np.float32)
+
+    inpainter.model = _AmpFallbackModel()
+    output_tensor = inpainter._run_forward_with_precision(
+        np.zeros((1, 4, 32, 32), dtype=np.float32),
+        prefer_mixed_precision=True,
+    )
+
+    assert attempts == ["amp", "fp32"]
+    assert output_tensor.shape == (1, 3, 32, 32)

@@ -13,7 +13,7 @@
 import logging
 import os
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, Union, cast
+from typing import Any, Callable, Dict, Optional, Union, cast
 
 import cv2
 import numpy as np
@@ -62,6 +62,15 @@ class TileRegion:
     left: int
     bottom: int
     right: int
+
+
+@dataclass(frozen=True)
+class TilePlan:
+    """单个样本在当前推理尺寸下的 tile 计划。"""
+
+    requires_tiled_execution: bool
+    regions: tuple[TileRegion, ...]
+    inference_shape: tuple[int, ...]
 
 
 GPU_MODEL_STRIDE = 16
@@ -487,6 +496,50 @@ class DeepLearningInpainter:
         """判断单个 batch item 是否需要改走 tile 内部推理。"""
         return self._should_use_tiled_inference(item.inference_shape, item.profile)
 
+    def _resolve_tile_plan_for_item(self, item: PreparedBatchItem) -> TilePlan:
+        """为单个样本解析当前实际推理尺寸下的 tile 计划。"""
+        if not self._requires_tiled_execution(item):
+            return TilePlan(
+                requires_tiled_execution=False,
+                regions=tuple(),
+                inference_shape=item.inference_shape,
+            )
+
+        return TilePlan(
+            requires_tiled_execution=True,
+            regions=tuple(
+                self._build_tile_regions(
+                    item.inference_shape,
+                    GPU_TILE_SIZE,
+                    GPU_TILE_OVERLAP,
+                )
+            ),
+            inference_shape=item.inference_shape,
+        )
+
+    def _can_use_tile_aware_true_batch(
+        self,
+        batch_items: list[PreparedBatchItem],
+        tile_plans: list[TilePlan],
+    ) -> bool:
+        """判断当前分组是否满足 tile-aware true batch 的最小条件。"""
+        if len(batch_items) < 2 or len(tile_plans) != len(batch_items):
+            return False
+
+        first_plan = tile_plans[0]
+        if not first_plan.requires_tiled_execution or not first_plan.regions:
+            return False
+
+        for item, tile_plan in zip(batch_items, tile_plans):
+            if not np.any(item.prepared_mask):
+                return False
+            if not tile_plan.requires_tiled_execution:
+                return False
+            if tile_plan != first_plan:
+                return False
+
+        return True
+
     def _prepare_model_forward_inputs(
         self,
         frame_rgb: np.ndarray,
@@ -556,23 +609,62 @@ class DeepLearningInpainter:
             return cast(torch.Tensor, output_tensor)
         return output_array
 
+    def _resolve_precision_policy(self, prefer_mixed_precision: bool = True) -> bool:
+        """判断当前前向是否值得先尝试 mixed precision。"""
+        if not prefer_mixed_precision:
+            return False
+
+        device_type = getattr(self.device, "type", str(self.device))
+        return device_type == "cuda" and callable(getattr(torch, "autocast", None))
+
+    def _run_forward_with_precision(
+        self,
+        input_tensor: torch.Tensor,
+        prefer_mixed_precision: bool = True,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """统一封装 mixed precision 与 FP32 前向。"""
+        model = self.model
+        if model is None:
+            raise InpaintingError("Model not loaded")
+
+        def _run_fp32_forward() -> Union[torch.Tensor, np.ndarray]:
+            with torch.no_grad():
+                return model(input_tensor)
+
+        if self._resolve_precision_policy(prefer_mixed_precision=prefer_mixed_precision):
+            autocast = getattr(torch, "autocast", None)
+            amp_dtype = getattr(torch, "float16", None)
+            device_type = getattr(self.device, "type", str(self.device))
+            if callable(autocast):
+                try:
+                    autocast_kwargs: Dict[str, Any] = {"device_type": device_type}
+                    if amp_dtype is not None:
+                        autocast_kwargs["dtype"] = amp_dtype
+                    with autocast(**autocast_kwargs):
+                        return _run_fp32_forward()
+                except Exception as exc:
+                    self.logger.debug(
+                        "Mixed precision forward failed, falling back to FP32: %s",
+                        exc,
+                    )
+
+        return _run_fp32_forward()
+
     def _run_model_forward(
         self,
         inference_frame_rgb: np.ndarray,
         inference_mask: np.ndarray,
     ) -> Union[torch.Tensor, np.ndarray]:
         """执行一次共享模型前向，并裁回原始推理尺寸。"""
-        model = self.model
-        if model is None:
-            raise InpaintingError("Model not loaded")
-
         prepared_frame, prepared_mask, target_shape = self._prepare_model_forward_inputs(
             inference_frame_rgb,
             inference_mask,
         )
         frame_tensor = self._preprocess(prepared_frame, prepared_mask)
-        with torch.no_grad():
-            output_tensor = model(frame_tensor)
+        output_tensor = self._run_forward_with_precision(
+            frame_tensor,
+            prefer_mixed_precision=True,
+        )
         return self._crop_model_output(output_tensor, target_shape)
 
     def _should_use_tiled_inference(
@@ -650,24 +742,20 @@ class DeepLearningInpainter:
         x_weight = self._build_tile_axis_weight(width, overlap)
         return cast(np.ndarray, np.outer(y_weight, x_weight).astype(np.float32))
 
-    def _run_tiled_model_forward(
+    def _run_sequential_tiled_inference(
         self,
         inference_frame_rgb: np.ndarray,
         inference_mask: np.ndarray,
+        tile_plan: TilePlan,
         profile: GPUInpaintingProfile,
     ) -> Union[torch.Tensor, np.ndarray]:
-        """按 tile / overlap 执行单帧内部前向，再拼回完整输出。"""
+        """按单帧顺序 tile 执行前向，再拼回完整输出。"""
         _ = profile
         height, width = inference_frame_rgb.shape[:2]
-        tile_regions = self._build_tile_regions(
-            inference_frame_rgb.shape,
-            GPU_TILE_SIZE,
-            GPU_TILE_OVERLAP,
-        )
         merged_output = np.zeros((1, 3, height, width), dtype=np.float32)
         merged_weight = np.zeros((1, 1, height, width), dtype=np.float32)
 
-        for region in tile_regions:
+        for region in tile_plan.regions:
             tile_frame = inference_frame_rgb[region.top : region.bottom, region.left : region.right]
             tile_mask = inference_mask[region.top : region.bottom, region.left : region.right]
             tile_output = self._tensor_to_numpy(self._run_model_forward(tile_frame, tile_mask))
@@ -691,12 +779,33 @@ class DeepLearningInpainter:
         merged_output /= safe_weight
         return self._numpy_to_output_tensor(merged_output)
 
+    def _run_tiled_model_forward(
+        self,
+        inference_frame_rgb: np.ndarray,
+        inference_mask: np.ndarray,
+        profile: GPUInpaintingProfile,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """按 tile / overlap 执行单帧内部前向，再拼回完整输出。"""
+        tile_plan = TilePlan(
+            requires_tiled_execution=True,
+            regions=tuple(
+                self._build_tile_regions(
+                    inference_frame_rgb.shape,
+                    GPU_TILE_SIZE,
+                    GPU_TILE_OVERLAP,
+                )
+            ),
+            inference_shape=tuple(inference_frame_rgb.shape),
+        )
+        return self._run_sequential_tiled_inference(
+            inference_frame_rgb,
+            inference_mask,
+            tile_plan,
+            profile,
+        )
+
     def _run_true_batch(self, batch_items: list[PreparedBatchItem]) -> list[np.ndarray]:
         """对同尺寸同 profile 的批次执行一次真实 GPU 前向。"""
-        model = self.model
-        if model is None:
-            raise InpaintingError("Model not loaded")
-
         batch_tensors = [
             self._preprocess(
                 *self._prepare_model_forward_inputs(item.inference_frame_rgb, item.inference_mask)[
@@ -706,9 +815,10 @@ class DeepLearningInpainter:
             for item in batch_items
         ]
         batch_tensor = torch.cat(batch_tensors, dim=0)
-
-        with torch.no_grad():
-            output_batch = model(batch_tensor)
+        output_batch = self._run_forward_with_precision(
+            batch_tensor,
+            prefer_mixed_precision=True,
+        )
 
         results = []
         for index, item in enumerate(batch_items):
@@ -728,6 +838,147 @@ class DeepLearningInpainter:
         self.last_profile_used = batch_items[0].profile.to_dict()
         return results
 
+    def _run_tile_aware_true_batch(
+        self,
+        batch_items: list[PreparedBatchItem],
+        tile_plan: TilePlan,
+    ) -> list[np.ndarray]:
+        """对 tile 计划一致的一组样本执行按 tile 位置合批前向。"""
+        if not tile_plan.regions:
+            raise InpaintingError("Tile plan is empty")
+
+        height, width = batch_items[0].inference_shape[:2]
+        merged_outputs = [np.zeros((1, 3, height, width), dtype=np.float32) for _ in batch_items]
+        merged_weights = [np.zeros((1, 1, height, width), dtype=np.float32) for _ in batch_items]
+
+        for region in tile_plan.regions:
+            batch_tensors: list[torch.Tensor] = []
+            target_shapes: list[tuple[int, int]] = []
+            for item in batch_items:
+                tile_frame = item.inference_frame_rgb[
+                    region.top : region.bottom, region.left : region.right
+                ]
+                tile_mask = item.inference_mask[
+                    region.top : region.bottom, region.left : region.right
+                ]
+                prepared_frame, prepared_mask, target_shape = self._prepare_model_forward_inputs(
+                    tile_frame,
+                    tile_mask,
+                )
+                batch_tensors.append(self._preprocess(prepared_frame, prepared_mask))
+                target_shapes.append(target_shape)
+
+            batch_tensor = torch.cat(batch_tensors, dim=0)
+            output_batch = self._tensor_to_numpy(
+                self._run_forward_with_precision(
+                    batch_tensor,
+                    prefer_mixed_precision=True,
+                )
+            )
+
+            tile_height = region.bottom - region.top
+            tile_width = region.right - region.left
+            tile_weight = self._build_tile_weight(tile_height, tile_width, GPU_TILE_OVERLAP)
+            tile_weight_4d = tile_weight[np.newaxis, np.newaxis, :, :]
+
+            for index, target_shape in enumerate(target_shapes):
+                tile_output = output_batch[index : index + 1]
+                cropped_tile_output = self._tensor_to_numpy(
+                    self._crop_model_output(tile_output, target_shape)
+                )
+                cropped_tile_output = cropped_tile_output[:, :, :tile_height, :tile_width]
+                merged_outputs[index][
+                    :, :, region.top : region.bottom, region.left : region.right
+                ] += (cropped_tile_output * tile_weight_4d)
+                merged_weights[index][
+                    :, :, region.top : region.bottom, region.left : region.right
+                ] += tile_weight_4d
+
+        results: list[np.ndarray] = []
+        for index, item in enumerate(batch_items):
+            merged_output = merged_outputs[index] / np.maximum(merged_weights[index], 1e-6)
+            output_tensor = self._numpy_to_output_tensor(merged_output)
+            result_rgb = self._postprocess(
+                output_tensor,
+                item.original_rgb,
+                item.prepared_mask,
+                item.profile,
+            )
+            result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+            results.append(cast(np.ndarray, np.asarray(result_bgr)))
+
+        self.last_profile_used = batch_items[0].profile.to_dict()
+        return results
+
+    def _build_profiles_used(
+        self,
+        batch_items: list[PreparedBatchItem],
+    ) -> list[Optional[Dict[str, Union[int, float]]]]:
+        """把一组样本当前真正生效的 profile 统一转成可观测字典。"""
+        return [item.profile.to_dict() for item in batch_items]
+
+    def _execute_batch_mode_with_optional_retry(
+        self,
+        batch_items: list[PreparedBatchItem],
+        frames: list,
+        masks: list,
+        execution_mode: str,
+        runner: Callable[[list[PreparedBatchItem]], list[np.ndarray]],
+        can_retry_items: Callable[[list[PreparedBatchItem]], bool],
+        fail_log: str,
+        retry_fail_log: str,
+    ) -> Optional[
+        tuple[
+            list[np.ndarray],
+            str,
+            list[Optional[Dict[str, Union[int, float]]]],
+            bool,
+            int,
+            Optional[Dict[str, Union[int, float]]],
+        ]
+    ]:
+        """执行一种 batch 模式，并在 OOM 时尝试一次更保守 profile 重试。"""
+        try:
+            return (
+                runner(batch_items),
+                execution_mode,
+                self._build_profiles_used(batch_items),
+                False,
+                0,
+                None,
+            )
+        except Exception as exc:
+            if not self._is_oom_error(exc):
+                self.logger.warning(fail_log, exc)
+                return None
+
+            retry_items = self._build_oom_retry_batch_items(
+                batch_items,
+                frames,
+                masks,
+            )
+            retry_profile_used = retry_items[0].profile.to_dict() if retry_items else None
+            self._clear_cuda_cache_if_possible()
+            if not can_retry_items(retry_items):
+                self.logger.warning(
+                    retry_fail_log,
+                    "retry items are no longer eligible for this execution mode",
+                )
+                return None
+
+            try:
+                return (
+                    runner(retry_items),
+                    execution_mode,
+                    self._build_profiles_used(retry_items),
+                    True,
+                    1,
+                    retry_profile_used,
+                )
+            except Exception as retry_exc:
+                self.logger.warning(retry_fail_log, retry_exc)
+                return None
+
     def _execute_grouped_batch(
         self,
         batch_items: list[PreparedBatchItem],
@@ -740,9 +991,7 @@ class DeepLearningInpainter:
         """执行按组 batch 编排，并返回最终结果与执行模式。"""
         results = cast(list[Optional[np.ndarray]], [None] * len(batch_items))
         final_profiles: Dict[int, Optional[Dict[str, Union[int, float]]]] = {}
-        used_true_batch = False
-        used_sequential = False
-        true_batch_group_count = 0
+        group_execution_modes: list[str] = []
         used_oom_retry = False
         oom_retry_count = 0
         last_retry_profile_used: Optional[Dict[str, Union[int, float]]] = None
@@ -750,7 +999,7 @@ class DeepLearningInpainter:
         for group in self._group_batch_items(batch_items):
             (
                 grouped_results,
-                group_used_true_batch,
+                group_execution_mode,
                 group_profiles_used,
                 group_oom_retry_used,
                 group_retry_count,
@@ -763,11 +1012,7 @@ class DeepLearningInpainter:
                 quality_level=quality_level,
                 profiles=profiles,
             )
-            if group_used_true_batch:
-                used_true_batch = True
-                true_batch_group_count += 1
-            else:
-                used_sequential = True
+            group_execution_modes.append(group_execution_mode)
 
             if group_oom_retry_used:
                 used_oom_retry = True
@@ -786,11 +1031,7 @@ class DeepLearningInpainter:
         self.last_retry_profile_used = last_retry_profile_used
         if used_oom_retry:
             self.last_retry_info = {"applied": True, "count": oom_retry_count, "reason": "oom"}
-        execution_mode = self._resolve_batch_execution_mode(
-            used_true_batch,
-            used_sequential,
-            true_batch_group_count,
-        )
+        execution_mode = self._resolve_batch_execution_mode(group_execution_modes)
         last_profile_used = self._resolve_last_batch_profile(final_profiles, batch_items)
         return cast(list[np.ndarray], results), execution_mode, last_profile_used
 
@@ -804,51 +1045,48 @@ class DeepLearningInpainter:
         profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
     ) -> tuple[
         list[np.ndarray],
-        bool,
+        str,
         list[Optional[Dict[str, Union[int, float]]]],
         bool,
         int,
         Optional[Dict[str, Union[int, float]]],
     ]:
         """执行单个分组；返回结果以及是否命中真实 batch。"""
+
         if self._can_use_true_batch(batch_items):
-            try:
-                return (
-                    self._run_true_batch(batch_items),
-                    True,
-                    [item.profile.to_dict() for item in batch_items],
-                    False,
-                    0,
-                    None,
-                )
-            except Exception as exc:
-                if self._is_oom_error(exc):
-                    retry_items = self._build_oom_retry_batch_items(
-                        batch_items,
-                        frames,
-                        masks,
-                    )
-                    retry_profile_used = retry_items[0].profile.to_dict() if retry_items else None
-                    self._clear_cuda_cache_if_possible()
-                    try:
-                        return (
-                            self._run_true_batch(retry_items),
-                            True,
-                            [item.profile.to_dict() for item in retry_items],
-                            True,
-                            1,
-                            retry_profile_used,
-                        )
-                    except Exception as retry_exc:
-                        self.logger.warning(
-                            "Grouped batch OOM retry failed, falling back to sequential mode: %s",
-                            retry_exc,
-                        )
-                else:
-                    self.logger.warning(
-                        "Grouped batch inpainting failed, falling back to sequential mode: %s",
-                        exc,
-                    )
+            true_batch_result = self._execute_batch_mode_with_optional_retry(
+                batch_items=batch_items,
+                frames=frames,
+                masks=masks,
+                execution_mode="true_batch",
+                runner=self._run_true_batch,
+                can_retry_items=self._can_use_true_batch,
+                fail_log="Grouped batch inpainting failed, falling back to sequential mode: %s",
+                retry_fail_log="Grouped batch OOM retry failed, falling back to sequential mode: %s",
+            )
+            if true_batch_result is not None:
+                return true_batch_result
+
+        tile_plans = [self._resolve_tile_plan_for_item(item) for item in batch_items]
+        if self._can_use_tile_aware_true_batch(batch_items, tile_plans):
+            tile_aware_result = self._execute_batch_mode_with_optional_retry(
+                batch_items=batch_items,
+                frames=frames,
+                masks=masks,
+                execution_mode="tile_aware_true_batch",
+                runner=lambda items: self._run_tile_aware_true_batch(
+                    items,
+                    self._resolve_tile_plan_for_item(items[0]),
+                ),
+                can_retry_items=lambda items: self._can_use_tile_aware_true_batch(
+                    items,
+                    [self._resolve_tile_plan_for_item(item) for item in items],
+                ),
+                fail_log="Tile-aware grouped batch failed, falling back to sequential mode: %s",
+                retry_fail_log="Tile-aware grouped batch OOM retry failed, falling back to sequential mode: %s",
+            )
+            if tile_aware_result is not None:
+                return tile_aware_result
 
         (
             sequential_results,
@@ -865,7 +1103,7 @@ class DeepLearningInpainter:
         )
         return (
             sequential_results,
-            False,
+            "fallback_sequential",
             sequential_profiles,
             sequential_retry_count > 0,
             sequential_retry_count,
@@ -917,17 +1155,23 @@ class DeepLearningInpainter:
 
     def _resolve_batch_execution_mode(
         self,
-        used_true_batch: bool,
-        used_sequential: bool,
-        true_batch_group_count: int,
+        group_execution_modes: list[str],
     ) -> str:
         """收口当前批次的执行模式，便于日志与测试观测。"""
-        if used_true_batch and used_sequential:
-            return "mixed_grouped_batch"
-        if used_true_batch and true_batch_group_count > 1:
+        if not group_execution_modes:
+            return "fallback_sequential"
+
+        unique_modes = set(group_execution_modes)
+        if unique_modes == {"fallback_sequential"}:
+            return "fallback_sequential"
+        if unique_modes == {"tile_aware_true_batch"}:
+            return "tile_aware_true_batch"
+        if unique_modes == {"true_batch"} and len(group_execution_modes) > 1:
             return "grouped_true_batch"
-        if used_true_batch:
+        if unique_modes == {"true_batch"}:
             return "true_batch"
+        if len(unique_modes) > 1:
+            return "mixed_grouped_batch"
         return "fallback_sequential"
 
     def _resolve_last_batch_profile(

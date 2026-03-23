@@ -442,6 +442,9 @@ def test_inpaint_batch_skips_true_batch_for_group_requiring_tile(
 
     monkeypatch.setattr(inpainter, "_requires_tiled_execution", lambda item: True)
     monkeypatch.setattr(
+        inpainter, "_can_use_tile_aware_true_batch", lambda batch_items, tile_plans: False
+    )
+    monkeypatch.setattr(
         inpainter,
         "_run_true_batch",
         lambda batch_items: true_batch_calls.append(len(batch_items)) or [],
@@ -477,6 +480,9 @@ def test_inpaint_batch_uses_mixed_mode_when_large_group_requires_tile(
         "_requires_tiled_execution",
         lambda item: item.inference_shape[0] == 128,
     )
+    monkeypatch.setattr(
+        inpainter, "_can_use_tile_aware_true_batch", lambda batch_items, tile_plans: False
+    )
 
     results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
 
@@ -484,3 +490,116 @@ def test_inpaint_batch_uses_mixed_mode_when_large_group_requires_tile(
     assert model.forward_call_count == 3
     assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
     assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"
+
+
+def test_run_true_batch_uses_precision_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [_create_frame(64, 64), _create_frame(64, 64)]
+    masks = [_create_mask(64, 64), _create_mask(64, 64)]
+    batch_items = inpainter._prepare_batch_items(frames, masks, radius=3, quality_level=4)
+    precision_calls: list[tuple[tuple[int, ...], bool]] = []
+
+    monkeypatch.setattr(
+        inpainter,
+        "_run_forward_with_precision",
+        lambda batch_tensor, prefer_mixed_precision=True: (
+            precision_calls.append((tuple(batch_tensor.shape), prefer_mixed_precision))
+            or model(batch_tensor)
+        ),
+    )
+
+    results = inpainter._run_true_batch(batch_items)
+
+    assert len(results) == 2
+    assert precision_calls == [((2, 4, 64, 64), True)]
+
+
+def test_inpaint_batch_uses_tile_aware_true_batch_when_tile_plan_matches(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, _ = _build_inpainter(monkeypatch)
+    frames = [_create_frame(128, 128, fill_value=10), _create_frame(128, 128, fill_value=20)]
+    masks = [_create_mask(128, 128), _create_mask(128, 128)]
+    tile_aware_calls: list[tuple[int, object]] = []
+
+    monkeypatch.setattr(inpainter, "_requires_tiled_execution", lambda item: True)
+    monkeypatch.setattr(inpainter, "_resolve_tile_plan_for_item", lambda item: "shared-plan")
+    monkeypatch.setattr(
+        inpainter, "_can_use_tile_aware_true_batch", lambda batch_items, tile_plans: True
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_run_tile_aware_true_batch",
+        lambda batch_items, tile_plan: (
+            tile_aware_calls.append((len(batch_items), tile_plan))
+            or [
+                np.zeros((item.original_shape[0], item.original_shape[1], 3), dtype=np.uint8)
+                for item in batch_items
+            ]
+        ),
+    )
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 2
+    assert tile_aware_calls == [(2, "shared-plan")]
+    assert inpainter.last_batch_execution_mode == "tile_aware_true_batch"
+
+
+def test_inpaint_batch_falls_back_when_tile_plan_differs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [_create_frame(128, 128, fill_value=10), _create_frame(128, 128, fill_value=20)]
+    masks = [_create_mask(128, 128), _create_mask(128, 128)]
+
+    monkeypatch.setattr(inpainter, "_requires_tiled_execution", lambda item: True)
+    monkeypatch.setattr(
+        inpainter,
+        "_resolve_tile_plan_for_item",
+        lambda item: f"tile-plan-{item.index}",
+    )
+    monkeypatch.setattr(
+        inpainter, "_can_use_tile_aware_true_batch", lambda batch_items, tile_plans: False
+    )
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 2
+    assert model.forward_call_count == 2
+    assert inpainter.last_batch_execution_mode == "fallback_sequential"
+
+
+def test_inpaint_batch_tile_aware_true_batch_keeps_single_oom_retry_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, _ = _build_inpainter(monkeypatch)
+    frames = [_create_frame(128, 128, fill_value=10), _create_frame(128, 128, fill_value=20)]
+    masks = [_create_mask(128, 128), _create_mask(128, 128)]
+    tile_aware_calls: list[str] = []
+
+    monkeypatch.setattr(inpainter, "_requires_tiled_execution", lambda item: True)
+    monkeypatch.setattr(inpainter, "_resolve_tile_plan_for_item", lambda item: "shared-plan")
+    monkeypatch.setattr(
+        inpainter, "_can_use_tile_aware_true_batch", lambda batch_items, tile_plans: True
+    )
+
+    def _fake_tile_aware_runner(batch_items, tile_plan):
+        tile_aware_calls.append(tile_plan)
+        if len(tile_aware_calls) == 1:
+            raise RuntimeError("CUDA out of memory during tile aware grouped batch")
+        return [
+            np.zeros((item.original_shape[0], item.original_shape[1], 3), dtype=np.uint8)
+            for item in batch_items
+        ]
+
+    monkeypatch.setattr(inpainter, "_run_tile_aware_true_batch", _fake_tile_aware_runner)
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 2
+    assert tile_aware_calls == ["shared-plan", "shared-plan"]
+    assert inpainter.last_batch_execution_mode == "tile_aware_true_batch"
+    assert inpainter.last_retry_info == {"applied": True, "count": 1, "reason": "oom"}
