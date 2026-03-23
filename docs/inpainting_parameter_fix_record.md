@@ -385,13 +385,21 @@ DeepLearningInpainter
 
 这意味着超大图、高精细边缘和复杂内容场景，后续仍有提升空间。
 
-### 2. 还没有 OOM / GPU 异常重试分级
+### 2. 现在已补上最小 OOM 定向重试，但更高级异常分级还没做完
 
-当前已有“加载失败明确降级”的能力，但还没有更细的：
+当前已经新增了最小一层运行时自救能力：
 
-- OOM 后自动切小 profile 重试
+- 仅对 `OOM / 显存不足` 类失败做一次更保守 profile 自动重试
+- 单帧路径与 grouped batch 路径都支持同一套 OOM 重试语义
+- `processing_info` 现在可记录：
+  - `gpu_inpainting_profile`：最终成功那次真正生效的 profile
+  - `gpu_inpainting_retry`：是否发生过 OOM 重试、重试次数与原因
+
+当前仍然没有的部分：
+
 - mixed precision 档位回退
-- 推理时异常后自动切 OpenCV 并记录更完整上下文
+- 非 OOM GPU 异常的更细分级
+- 推理异常后自动切 OpenCV 的更完整运行时策略
 
 ### 3. 批量路径已经支持按组 batch，但还没做更高级吞吐优化
 
@@ -400,7 +408,8 @@ DeepLearningInpainter
 - 已支持按“同生效 profile + 同实际推理输入尺寸”分组
 - 兼容组会执行真正的 batch tensor 前向
 - 不兼容组或失败组只对该组顺序执行，继续优先保证每帧结果和单帧入口一致
-- 还没有针对 batch tensor 继续叠加 tile、mixed precision、OOM 自动重试这类更高级优化
+- 某一组命中 OOM 时，会只对该组切更保守 profile 再重试一次
+- 还没有针对 batch tensor 继续叠加 tile、mixed precision 这类更高级优化
 
 所以这一步可以视为“真实 batch 主路径已经建立”，但还不是“GPU 批量性能优化已经完全完成”。
 
@@ -433,7 +442,7 @@ GPUInpaintingProfile
   - tile_overlap
   - second_pass
   - mixed_precision
-  - oom_retry_profile
+  - 更细粒度的 oom_retry_profile 分层
 ```
 
 建议优先级：
@@ -441,7 +450,8 @@ GPUInpaintingProfile
 1. `tile_size / tile_overlap`
    - 先解决大图和高分辨率视频帧的稳定性
 2. `OOM 回退策略`
-   - 推理失败时按更保守 profile 自动重试
+   - 当前最小 OOM 定向重试已经落地
+   - 下一步重点是把 retry profile 继续细分得更稳
 3. `mixed precision`
    - 兼顾显存和性能
 4. `second_pass`

@@ -37,6 +37,7 @@ def _install_ai_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, *args, **kwargs):
             dl_inpainter_module.last_init_kwargs = dict(kwargs)
             self.last_profile_used = None
+            self.last_retry_info = None
 
         def load_model(self, model_path=None):
             dl_inpainter_module.last_load_model_path = model_path
@@ -513,3 +514,53 @@ def test_ai_handler_does_not_report_gpu_success_when_dl_inpainting_fails(
     assert info["inpainting_backend"] is None
     assert info["inpainting_method"] is None
     assert info["gpu_inpainting_profile"] is None
+
+
+def test_ai_handler_reports_gpu_oom_retry_info(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """GPU 路径发生 OOM 重试后应把重试观测真实写入 processing_info。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "quality_level": 5,
+            "inpaint_radius": 7,
+        },
+    )
+    assert handler.load_models() is True
+
+    def fake_inpaint(frame, mask, radius=3, quality_level=3, profile=None):
+        handler.dl_inpainter.last_profile_used = {
+            "requested_radius": radius,
+            "quality_level": quality_level,
+            "mask_expand_px": 8,
+            "mask_feather_px": 5,
+            "blend_ratio": 0.72,
+            "resize_limit": 768,
+        }
+        handler.dl_inpainter.last_retry_info = {"applied": True, "count": 1, "reason": "oom"}
+        return frame.copy()
+
+    handler.dl_inpainter.inpaint_frame = fake_inpaint
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    assert info["gpu_inpainting_profile"]["resize_limit"] == 768
+    assert info["gpu_inpainting_retry"] == {"applied": True, "count": 1, "reason": "oom"}

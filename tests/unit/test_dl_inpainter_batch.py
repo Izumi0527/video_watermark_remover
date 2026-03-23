@@ -89,6 +89,25 @@ class _SelectiveFailingGroupModel(_CountingModel):
         return np.zeros((batch_size, 3, height, width), dtype=np.float32)
 
 
+class _OOMRetryGroupModel(_CountingModel):
+    """指定高度的分组首次抛 OOM，第二次成功。"""
+
+    def __init__(self, failing_height: int) -> None:
+        super().__init__()
+        self.failing_height = failing_height
+        self.failed_heights: set[int] = set()
+
+    def __call__(self, tensor):
+        self.forward_call_count += 1
+        batch_size = tensor.shape[0]
+        height = tensor.shape[2]
+        width = tensor.shape[3]
+        if batch_size > 1 and height == self.failing_height and height not in self.failed_heights:
+            self.failed_heights.add(height)
+            raise RuntimeError("CUDA out of memory during grouped batch inference")
+        return np.zeros((batch_size, 3, height, width), dtype=np.float32)
+
+
 def _create_frame(height: int, width: int, fill_value: int = 127) -> "np.ndarray":
     return np.full((height, width, 3), fill_value, dtype=np.uint8)
 
@@ -383,3 +402,31 @@ def test_inpaint_batch_reports_last_valid_input_profile_in_grouped_mode(
     assert model.forward_call_count == 2
     assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"
     assert inpainter.last_profile_used == expected_profile.to_dict()
+
+
+def test_inpaint_batch_retries_group_with_conservative_profile_after_oom(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, _ = _build_inpainter(monkeypatch)
+    model = _OOMRetryGroupModel(failing_height=64)
+    inpainter.model = model
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(32, 32, fill_value=30),
+        _create_frame(32, 32, fill_value=40),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(32, 32),
+        _create_mask(32, 32),
+    ]
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 4
+    assert model.forward_call_count == 3
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
+    assert inpainter.last_batch_execution_mode == "grouped_true_batch"
+    assert inpainter.last_retry_info == {"applied": True, "count": 1, "reason": "oom"}

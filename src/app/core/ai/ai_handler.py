@@ -69,6 +69,10 @@ class AIHandler:
         self.last_inpainting_method_used: Optional[str] = None
         self.last_inpainting_backend: Optional[str] = None
         self.last_gpu_inpainting_profile_used: Optional[dict] = None
+        self.last_gpu_inpainting_retry_info: Optional[dict] = None
+        self.last_gpu_inpainting_oom_retry_used: bool = False
+        self.last_gpu_inpainting_retry_count: int = 0
+        self.last_gpu_inpainting_retry_profile_used: Optional[dict] = None
         self.gpu_inpainting_fallback_reason: Optional[str] = None
         self.configured_inpainting_model_path = self._resolve_inpainting_model_path()
         self.loaded_inpainting_model_path: Optional[str] = None
@@ -275,6 +279,10 @@ class AIHandler:
             self.last_inpainting_method_used = None
             self.last_inpainting_backend = None
             self.last_gpu_inpainting_profile_used = None
+            self.last_gpu_inpainting_retry_info = None
+            self.last_gpu_inpainting_oom_retry_used = False
+            self.last_gpu_inpainting_retry_count = 0
+            self.last_gpu_inpainting_retry_profile_used = None
             processing_info = {
                 "original_shape": frame.shape,
                 "detection_method": None,
@@ -289,6 +297,10 @@ class AIHandler:
                 "configured_inpainting_model_path": self.configured_inpainting_model_path,
                 "loaded_inpainting_model_path": self.loaded_inpainting_model_path,
                 "gpu_inpainting_profile": None,
+                "gpu_inpainting_retry": None,
+                "gpu_inpainting_oom_retry_used": False,
+                "gpu_inpainting_retry_count": 0,
+                "gpu_inpainting_retry_profile": None,
                 "device": self.device,
             }
 
@@ -412,6 +424,26 @@ class AIHandler:
                     "last_gpu_inpainting_profile_used",
                     None,
                 )
+                processing_info["gpu_inpainting_retry"] = getattr(
+                    self,
+                    "last_gpu_inpainting_retry_info",
+                    None,
+                )
+                processing_info["gpu_inpainting_oom_retry_used"] = getattr(
+                    self,
+                    "last_gpu_inpainting_oom_retry_used",
+                    False,
+                )
+                processing_info["gpu_inpainting_retry_count"] = getattr(
+                    self,
+                    "last_gpu_inpainting_retry_count",
+                    0,
+                )
+                processing_info["gpu_inpainting_retry_profile"] = getattr(
+                    self,
+                    "last_gpu_inpainting_retry_profile_used",
+                    None,
+                )
 
                 self.logger.info(
                     f"Processed frame with {len(contours)} watermark areas "
@@ -501,6 +533,10 @@ class AIHandler:
             self.last_inpainting_method_used = None
             self.last_inpainting_backend = None
             self.last_gpu_inpainting_profile_used = None
+            self.last_gpu_inpainting_retry_info = None
+            self.last_gpu_inpainting_oom_retry_used = False
+            self.last_gpu_inpainting_retry_count = 0
+            self.last_gpu_inpainting_retry_profile_used = None
 
             # 优先使用深度学习 inpainter (如果已启用)
             if self.use_gpu_inpainting and self.dl_inpainter is not None:
@@ -516,6 +552,18 @@ class AIHandler:
                 profile_used = getattr(self.dl_inpainter, "last_profile_used", None)
                 if isinstance(profile_used, dict):
                     self.last_gpu_inpainting_profile_used = dict(profile_used)
+                retry_info = getattr(self.dl_inpainter, "last_retry_info", None)
+                if isinstance(retry_info, dict):
+                    self.last_gpu_inpainting_retry_info = dict(retry_info)
+                self.last_gpu_inpainting_oom_retry_used = bool(
+                    getattr(self.dl_inpainter, "last_oom_retry_used", False)
+                )
+                self.last_gpu_inpainting_retry_count = int(
+                    getattr(self.dl_inpainter, "last_oom_retry_count", 0)
+                )
+                retry_profile_used = getattr(self.dl_inpainter, "last_retry_profile_used", None)
+                if isinstance(retry_profile_used, dict):
+                    self.last_gpu_inpainting_retry_profile_used = dict(retry_profile_used)
                 self.last_inpainting_method_used = "gpu_deep_learning_unet"
                 self.last_inpainting_backend = "gpu_deep_learning_unet"
                 typed_result = np.asarray(dl_result)

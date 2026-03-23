@@ -194,6 +194,10 @@ class DeepLearningInpainter:
 
         self.last_profile_used: Optional[Dict[str, Union[int, float]]] = None
         self.last_batch_execution_mode: Optional[str] = None
+        self.last_retry_info: Optional[Dict[str, Union[bool, int, str]]] = None
+        self.last_oom_retry_used: bool = False
+        self.last_oom_retry_count: int = 0
+        self.last_retry_profile_used: Optional[Dict[str, Union[int, float]]] = None
         self.logger.info(f"DeepLearningInpainter initialized on device: {self.device}")
 
     def load_model(self, model_path: Optional[str] = None) -> bool:
@@ -266,6 +270,7 @@ class DeepLearningInpainter:
         if self.model is None:
             raise InpaintingError("Model not loaded")
 
+        self._reset_retry_tracking()
         self.last_profile_used = None
         if mask is None or not np.any(mask):
             return frame.copy()
@@ -278,27 +283,11 @@ class DeepLearningInpainter:
                 quality_level=quality_level,
                 profile=profile,
             )
-            prepared_mask = self._prepare_mask(mask, active_profile)
-            inference_frame_rgb, inference_mask = self._resize_for_inference(
+            result_bgr = self._run_single_inference_with_retry(
                 frame_rgb,
-                prepared_mask,
+                mask,
                 active_profile,
             )
-            frame_tensor = self._preprocess(inference_frame_rgb, inference_mask)
-
-            # GPU 推理
-            with torch.no_grad():
-                output_tensor = self.model(frame_tensor)
-
-            # 后处理
-            result_rgb = self._postprocess(
-                output_tensor,
-                frame_rgb,
-                prepared_mask,
-                active_profile,
-            )
-            result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-            self.last_profile_used = active_profile.to_dict()
 
             return cast(np.ndarray, np.asarray(result_bgr))
 
@@ -334,6 +323,7 @@ class DeepLearningInpainter:
             raise ValueError("frames and masks must have same length")
 
         try:
+            self._reset_retry_tracking()
             batch_items = self._prepare_batch_items(
                 frames,
                 masks,
@@ -341,7 +331,7 @@ class DeepLearningInpainter:
                 quality_level=quality_level,
                 profiles=profiles,
             )
-            results, execution_mode = self._execute_grouped_batch(
+            results, execution_mode, last_profile_used = self._execute_grouped_batch(
                 batch_items,
                 frames,
                 masks,
@@ -350,7 +340,7 @@ class DeepLearningInpainter:
                 profiles=profiles,
             )
             self.last_batch_execution_mode = execution_mode
-            self.last_profile_used = self._resolve_last_batch_profile(batch_items)
+            self.last_profile_used = last_profile_used
             return results
 
         except Exception as e:
@@ -369,36 +359,55 @@ class DeepLearningInpainter:
         batch_items: list[PreparedBatchItem] = []
 
         for index, (frame, mask) in enumerate(zip(frames, masks)):
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             current_profile = None
             if profiles is not None and index < len(profiles):
                 current_profile = profiles[index]
-            resolved_profile = self._resolve_profile(
-                frame.shape,
-                radius=radius,
-                quality_level=quality_level,
-                profile=current_profile,
-            )
-            prepared_mask = self._prepare_mask(mask, resolved_profile)
-            inference_frame_rgb, inference_mask = self._resize_for_inference(
-                frame_rgb,
-                prepared_mask,
-                resolved_profile,
-            )
             batch_items.append(
-                PreparedBatchItem(
-                    index=index,
-                    original_rgb=frame_rgb,
-                    prepared_mask=prepared_mask,
-                    profile=resolved_profile,
-                    inference_frame_rgb=inference_frame_rgb,
-                    inference_mask=inference_mask,
-                    original_shape=tuple(frame.shape),
-                    inference_shape=tuple(inference_frame_rgb.shape),
+                self._prepare_batch_item(
+                    index,
+                    frame,
+                    mask,
+                    radius=radius,
+                    quality_level=quality_level,
+                    profile=current_profile,
                 )
             )
 
         return batch_items
+
+    def _prepare_batch_item(
+        self,
+        index: int,
+        frame: np.ndarray,
+        mask: np.ndarray,
+        radius: int = 3,
+        quality_level: int = 3,
+        profile: Optional[Union[GPUInpaintingProfile, Dict[str, Any]]] = None,
+    ) -> PreparedBatchItem:
+        """构造单个批量样本的预处理结果，便于 grouped batch 和 retry 复用。"""
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        resolved_profile = self._resolve_profile(
+            frame.shape,
+            radius=radius,
+            quality_level=quality_level,
+            profile=profile,
+        )
+        prepared_mask = self._prepare_mask(mask, resolved_profile)
+        inference_frame_rgb, inference_mask = self._resize_for_inference(
+            frame_rgb,
+            prepared_mask,
+            resolved_profile,
+        )
+        return PreparedBatchItem(
+            index=index,
+            original_rgb=frame_rgb,
+            prepared_mask=prepared_mask,
+            profile=resolved_profile,
+            inference_frame_rgb=inference_frame_rgb,
+            inference_mask=inference_mask,
+            original_shape=tuple(frame.shape),
+            inference_shape=tuple(inference_frame_rgb.shape),
+        )
 
     def _get_batch_group_key(
         self,
@@ -492,15 +501,26 @@ class DeepLearningInpainter:
         radius: int = 3,
         quality_level: int = 3,
         profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
-    ) -> tuple[list[np.ndarray], str]:
+    ) -> tuple[list[np.ndarray], str, Optional[Dict[str, Union[int, float]]]]:
         """执行按组 batch 编排，并返回最终结果与执行模式。"""
         results = cast(list[Optional[np.ndarray]], [None] * len(batch_items))
+        final_profiles: Dict[int, Optional[Dict[str, Union[int, float]]]] = {}
         used_true_batch = False
         used_sequential = False
         true_batch_group_count = 0
+        used_oom_retry = False
+        oom_retry_count = 0
+        last_retry_profile_used: Optional[Dict[str, Union[int, float]]] = None
 
         for group in self._group_batch_items(batch_items):
-            grouped_results, group_used_true_batch = self._execute_batch_group(
+            (
+                grouped_results,
+                group_used_true_batch,
+                group_profiles_used,
+                group_oom_retry_used,
+                group_retry_count,
+                group_retry_profile,
+            ) = self._execute_batch_group(
                 group,
                 frames,
                 masks,
@@ -514,18 +534,30 @@ class DeepLearningInpainter:
             else:
                 used_sequential = True
 
-            for item, result in zip(group, grouped_results):
+            if group_oom_retry_used:
+                used_oom_retry = True
+                oom_retry_count += group_retry_count
+                last_retry_profile_used = group_retry_profile
+
+            for item, result, profile_used in zip(group, grouped_results, group_profiles_used):
                 results[item.index] = result
+                final_profiles[item.index] = profile_used
 
         if any(result is None for result in results):
             raise InpaintingError("Grouped batch execution produced incomplete results")
 
+        self.last_oom_retry_used = used_oom_retry
+        self.last_oom_retry_count = oom_retry_count
+        self.last_retry_profile_used = last_retry_profile_used
+        if used_oom_retry:
+            self.last_retry_info = {"applied": True, "count": oom_retry_count, "reason": "oom"}
         execution_mode = self._resolve_batch_execution_mode(
             used_true_batch,
             used_sequential,
             true_batch_group_count,
         )
-        return cast(list[np.ndarray], results), execution_mode
+        last_profile_used = self._resolve_last_batch_profile(final_profiles, batch_items)
+        return cast(list[np.ndarray], results), execution_mode, last_profile_used
 
     def _execute_batch_group(
         self,
@@ -535,27 +567,74 @@ class DeepLearningInpainter:
         radius: int = 3,
         quality_level: int = 3,
         profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
-    ) -> tuple[list[np.ndarray], bool]:
+    ) -> tuple[
+        list[np.ndarray],
+        bool,
+        list[Optional[Dict[str, Union[int, float]]]],
+        bool,
+        int,
+        Optional[Dict[str, Union[int, float]]],
+    ]:
         """执行单个分组；返回结果以及是否命中真实 batch。"""
         if self._can_use_true_batch(batch_items):
             try:
-                return self._run_true_batch(batch_items), True
-            except Exception as exc:
-                self.logger.warning(
-                    "Grouped batch inpainting failed, falling back to sequential mode: %s",
-                    exc,
+                return (
+                    self._run_true_batch(batch_items),
+                    True,
+                    [item.profile.to_dict() for item in batch_items],
+                    False,
+                    0,
+                    None,
                 )
+            except Exception as exc:
+                if self._is_oom_error(exc):
+                    retry_items = self._build_oom_retry_batch_items(
+                        batch_items,
+                        frames,
+                        masks,
+                    )
+                    retry_profile_used = retry_items[0].profile.to_dict() if retry_items else None
+                    self._clear_cuda_cache_if_possible()
+                    try:
+                        return (
+                            self._run_true_batch(retry_items),
+                            True,
+                            [item.profile.to_dict() for item in retry_items],
+                            True,
+                            1,
+                            retry_profile_used,
+                        )
+                    except Exception as retry_exc:
+                        self.logger.warning(
+                            "Grouped batch OOM retry failed, falling back to sequential mode: %s",
+                            retry_exc,
+                        )
+                else:
+                    self.logger.warning(
+                        "Grouped batch inpainting failed, falling back to sequential mode: %s",
+                        exc,
+                    )
 
+        (
+            sequential_results,
+            sequential_profiles,
+            sequential_retry_count,
+            sequential_retry_profile,
+        ) = self._run_group_sequential(
+            batch_items,
+            frames,
+            masks,
+            radius=radius,
+            quality_level=quality_level,
+            profiles=profiles,
+        )
         return (
-            self._run_group_sequential(
-                batch_items,
-                frames,
-                masks,
-                radius=radius,
-                quality_level=quality_level,
-                profiles=profiles,
-            ),
+            sequential_results,
             False,
+            sequential_profiles,
+            sequential_retry_count > 0,
+            sequential_retry_count,
+            sequential_retry_profile,
         )
 
     def _run_group_sequential(
@@ -566,9 +645,17 @@ class DeepLearningInpainter:
         radius: int = 3,
         quality_level: int = 3,
         profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
-    ) -> list[np.ndarray]:
+    ) -> tuple[
+        list[np.ndarray],
+        list[Optional[Dict[str, Union[int, float]]]],
+        int,
+        Optional[Dict[str, Union[int, float]]],
+    ]:
         """只对当前分组顺序执行，保持结果语义与单帧路径一致。"""
         results: list[np.ndarray] = []
+        profiles_used: list[Optional[Dict[str, Union[int, float]]]] = []
+        retry_count = 0
+        retry_profile_used: Optional[Dict[str, Union[int, float]]] = None
 
         for item in batch_items:
             current_profile = None
@@ -583,8 +670,15 @@ class DeepLearningInpainter:
                     profile=current_profile,
                 )
             )
+            profiles_used.append(
+                dict(self.last_profile_used) if isinstance(self.last_profile_used, dict) else None
+            )
+            if isinstance(self.last_retry_info, dict):
+                retry_count += int(self.last_retry_info.get("count", 0))
+                if isinstance(self.last_profile_used, dict):
+                    retry_profile_used = dict(self.last_profile_used)
 
-        return results
+        return results, profiles_used, retry_count, retry_profile_used
 
     def _resolve_batch_execution_mode(
         self,
@@ -603,13 +697,136 @@ class DeepLearningInpainter:
 
     def _resolve_last_batch_profile(
         self,
+        final_profiles: Dict[int, Optional[Dict[str, Union[int, float]]]],
         batch_items: list[PreparedBatchItem],
     ) -> Optional[Dict[str, Union[int, float]]]:
         """返回最后一个有效输入样本的 profile，避免分组执行顺序污染观测。"""
         for item in reversed(batch_items):
             if np.any(item.prepared_mask):
-                return item.profile.to_dict()
+                return final_profiles.get(item.index)
         return None
+
+    def _reset_retry_tracking(self) -> None:
+        """重置当前调用的 OOM 重试观测状态。"""
+        self.last_retry_info = None
+        self.last_oom_retry_used = False
+        self.last_oom_retry_count = 0
+        self.last_retry_profile_used = None
+
+    def _is_oom_error(self, exc: Exception) -> bool:
+        """保守识别 GPU OOM 类失败，避免把普通异常误判为可重试。"""
+        message = str(exc).lower()
+        oom_markers = (
+            "out of memory",
+            "cuda out of memory",
+            "insufficient memory",
+            "cudnn_status_alloc_failed",
+            "显存不足",
+        )
+        return any(marker in message for marker in oom_markers)
+
+    def _build_oom_retry_profile(
+        self,
+        profile: GPUInpaintingProfile,
+    ) -> GPUInpaintingProfile:
+        """为 OOM 场景构造更保守的内部重试 profile。"""
+        resize_tiers = [512, 640, 768, 960, 1152]
+        lower_resize_limit = next(
+            (tier for tier in reversed(resize_tiers) if tier < profile.resize_limit),
+            max(256, int(round(profile.resize_limit * 0.75))),
+        )
+
+        return GPUInpaintingProfile(
+            requested_radius=profile.requested_radius,
+            quality_level=profile.quality_level,
+            mask_expand_px=max(1, profile.mask_expand_px - 1),
+            mask_feather_px=max(1, profile.mask_feather_px - 2),
+            blend_ratio=max(0.45, round(profile.blend_ratio - 0.1, 2)),
+            resize_limit=max(128, lower_resize_limit),
+        )
+
+    def _clear_cuda_cache_if_possible(self) -> None:
+        """在 OOM 后尽量释放 CUDA cache，帮助下一次保守 profile 重试。"""
+        device_type = getattr(self.device, "type", str(self.device))
+        empty_cache = getattr(getattr(torch, "cuda", None), "empty_cache", None)
+        if device_type == "cuda" and callable(empty_cache):
+            empty_cache()
+
+    def _run_single_inference(
+        self,
+        frame_rgb: np.ndarray,
+        prepared_mask: np.ndarray,
+        profile: GPUInpaintingProfile,
+    ) -> np.ndarray:
+        """按给定 profile 执行一次单帧 GPU 推理。"""
+        model = self.model
+        if model is None:
+            raise InpaintingError("Model not loaded")
+
+        inference_frame_rgb, inference_mask = self._resize_for_inference(
+            frame_rgb,
+            prepared_mask,
+            profile,
+        )
+        frame_tensor = self._preprocess(inference_frame_rgb, inference_mask)
+        with torch.no_grad():
+            output_tensor = model(frame_tensor)
+
+        result_rgb = self._postprocess(
+            output_tensor,
+            frame_rgb,
+            prepared_mask,
+            profile,
+        )
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        return cast(np.ndarray, np.asarray(result_bgr))
+
+    def _run_single_inference_with_retry(
+        self,
+        frame_rgb: np.ndarray,
+        original_mask: np.ndarray,
+        active_profile: GPUInpaintingProfile,
+    ) -> np.ndarray:
+        """执行单帧 GPU 推理；若命中 OOM，则按更保守 profile 自动重试一次。"""
+        prepared_mask = self._prepare_mask(original_mask, active_profile)
+        try:
+            result_bgr = self._run_single_inference(frame_rgb, prepared_mask, active_profile)
+            self.last_profile_used = active_profile.to_dict()
+            return result_bgr
+        except Exception as exc:
+            if not self._is_oom_error(exc):
+                raise
+
+            retry_profile = self._build_oom_retry_profile(active_profile)
+            self.last_retry_info = {"applied": True, "count": 1, "reason": "oom"}
+            self.last_oom_retry_used = True
+            self.last_oom_retry_count = 1
+            self.last_retry_profile_used = retry_profile.to_dict()
+            self._clear_cuda_cache_if_possible()
+            retry_mask = self._prepare_mask(original_mask, retry_profile)
+            result_bgr = self._run_single_inference(frame_rgb, retry_mask, retry_profile)
+            self.last_profile_used = retry_profile.to_dict()
+            return result_bgr
+
+    def _build_oom_retry_batch_items(
+        self,
+        batch_items: list[PreparedBatchItem],
+        frames: list,
+        masks: list,
+    ) -> list[PreparedBatchItem]:
+        """为 OOM 的 batch 分组构造一组更保守的 retry items。"""
+        retry_items: list[PreparedBatchItem] = []
+        for item in batch_items:
+            retry_profile = self._build_oom_retry_profile(item.profile)
+            retry_items.append(
+                self._prepare_batch_item(
+                    item.index,
+                    frames[item.index],
+                    masks[item.index],
+                    profile=retry_profile,
+                )
+            )
+        return retry_items
 
     def _run_sequential_batch(
         self,
