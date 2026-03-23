@@ -223,3 +223,98 @@ def test_inpaint_frame_does_not_retry_for_non_oom_error(
 
     assert model.forward_call_count == 1
     assert inpainter.last_retry_info is None
+
+
+def test_inpaint_frame_uses_tiled_path_when_inference_shape_requires_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module = _load_dl_inpainter_module(monkeypatch)
+    inpainter = dl_module.DeepLearningInpainter(device="cpu")
+    inpainter.model = object()
+    frame = np.full((96, 96, 3), 127, dtype=np.uint8)
+    mask = _create_mask()
+    tiled_calls: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    direct_calls: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+
+    monkeypatch.setattr(inpainter, "_should_use_tiled_inference", lambda shape, profile: True)
+    monkeypatch.setattr(
+        inpainter,
+        "_run_tiled_model_forward",
+        lambda inference_frame_rgb, inference_mask, profile: (
+            tiled_calls.append((inference_frame_rgb.shape, inference_mask.shape))
+            or np.zeros(
+                (1, 3, inference_frame_rgb.shape[0], inference_frame_rgb.shape[1]),
+                dtype=np.float32,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_run_model_forward",
+        lambda inference_frame_rgb, inference_mask: (
+            direct_calls.append((inference_frame_rgb.shape, inference_mask.shape))
+            or np.zeros(
+                (1, 3, inference_frame_rgb.shape[0], inference_frame_rgb.shape[1]),
+                dtype=np.float32,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_postprocess",
+        lambda output_tensor, original_rgb, prepared_mask, profile: original_rgb.copy(),
+    )
+
+    result = inpainter.inpaint_frame(frame, mask, radius=3, quality_level=5)
+    expected_profile = inpainter._resolve_profile(frame.shape, radius=3, quality_level=5)
+
+    assert result.shape == frame.shape
+    assert len(tiled_calls) == 1
+    assert len(direct_calls) == 0
+    assert inpainter.last_profile_used == expected_profile.to_dict()
+
+
+def test_inpaint_frame_tiled_path_keeps_single_oom_retry_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module = _load_dl_inpainter_module(monkeypatch)
+    inpainter = dl_module.DeepLearningInpainter(device="cpu")
+    inpainter.model = object()
+    frame = np.full((96, 96, 3), 127, dtype=np.uint8)
+    mask = _create_mask()
+    tiled_profiles: list[dict[str, float | int]] = []
+
+    monkeypatch.setattr(inpainter, "_should_use_tiled_inference", lambda shape, profile: True)
+
+    def _fake_tiled_forward(inference_frame_rgb, inference_mask, profile):
+        tiled_profiles.append(profile.to_dict())
+        if len(tiled_profiles) == 1:
+            raise RuntimeError("CUDA out of memory during tiled inference")
+        return np.zeros(
+            (1, 3, inference_frame_rgb.shape[0], inference_frame_rgb.shape[1]),
+            dtype=np.float32,
+        )
+
+    monkeypatch.setattr(inpainter, "_run_tiled_model_forward", _fake_tiled_forward)
+    monkeypatch.setattr(
+        inpainter,
+        "_run_model_forward",
+        lambda inference_frame_rgb, inference_mask: np.zeros(
+            (1, 3, inference_frame_rgb.shape[0], inference_frame_rgb.shape[1]),
+            dtype=np.float32,
+        ),
+    )
+    monkeypatch.setattr(
+        inpainter,
+        "_postprocess",
+        lambda output_tensor, original_rgb, prepared_mask, profile: original_rgb.copy(),
+    )
+
+    result = inpainter.inpaint_frame(frame, mask, radius=3, quality_level=5)
+    initial_profile = inpainter._resolve_profile(frame.shape, radius=3, quality_level=5)
+
+    assert result.shape == frame.shape
+    assert len(tiled_profiles) == 2
+    assert inpainter.last_retry_info == {"applied": True, "count": 1, "reason": "oom"}
+    assert inpainter.last_profile_used is not None
+    assert inpainter.last_profile_used["resize_limit"] < initial_profile.resize_limit

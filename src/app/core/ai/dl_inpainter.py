@@ -54,6 +54,23 @@ class PreparedBatchItem:
     inference_shape: tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class TileRegion:
+    """单个 tile 在推理图上的覆盖区域。"""
+
+    top: int
+    left: int
+    bottom: int
+    right: int
+
+
+GPU_MODEL_STRIDE = 16
+GPU_TILE_TRIGGER_MAX_DIM = 1024
+GPU_TILE_TRIGGER_MAX_PIXELS = 1024 * 1024
+GPU_TILE_SIZE = 768
+GPU_TILE_OVERLAP = 96
+
+
 class UNetInpaintingModel(nn.Module):
     """
     轻量级 U-Net 架构的 Inpainting 模型
@@ -459,10 +476,220 @@ class DeepLearningInpainter:
                 return False
             if item.inference_shape != expected_inference_shape:
                 return False
+            if self._requires_tiled_execution(item):
+                return False
             if not np.any(item.prepared_mask):
                 return False
 
         return True
+
+    def _requires_tiled_execution(self, item: PreparedBatchItem) -> bool:
+        """判断单个 batch item 是否需要改走 tile 内部推理。"""
+        return self._should_use_tiled_inference(item.inference_shape, item.profile)
+
+    def _prepare_model_forward_inputs(
+        self,
+        frame_rgb: np.ndarray,
+        mask: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
+        """把模型输入 pad 到稳定步幅，并记录裁回尺寸。"""
+        height, width = frame_rgb.shape[:2]
+        padded_height = max(
+            GPU_MODEL_STRIDE, int(np.ceil(height / GPU_MODEL_STRIDE)) * GPU_MODEL_STRIDE
+        )
+        padded_width = max(
+            GPU_MODEL_STRIDE, int(np.ceil(width / GPU_MODEL_STRIDE)) * GPU_MODEL_STRIDE
+        )
+
+        if padded_height == height and padded_width == width:
+            return frame_rgb, mask, (height, width)
+
+        pad_bottom = padded_height - height
+        pad_right = padded_width - width
+        padded_frame = cv2.copyMakeBorder(
+            frame_rgb,
+            0,
+            pad_bottom,
+            0,
+            pad_right,
+            cv2.BORDER_REFLECT_101,
+        )
+        padded_mask = cv2.copyMakeBorder(
+            mask,
+            0,
+            pad_bottom,
+            0,
+            pad_right,
+            cv2.BORDER_REPLICATE,
+        )
+        return padded_frame, padded_mask, (height, width)
+
+    def _crop_model_output(
+        self,
+        output_tensor: Union[torch.Tensor, np.ndarray],
+        target_shape: tuple[int, int],
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """把模型输出裁回 pad 前尺寸。"""
+        target_height, target_width = target_shape
+        return output_tensor[:, :, :target_height, :target_width]
+
+    def _tensor_to_numpy(self, output_tensor: Union[torch.Tensor, np.ndarray]) -> np.ndarray:
+        """把模型输出统一转成 numpy，便于 tile 融合。"""
+        if hasattr(output_tensor, "detach"):
+            output_np = output_tensor.detach().cpu().numpy()
+        else:
+            output_np = np.asarray(output_tensor)
+        return cast(np.ndarray, np.asarray(output_np, dtype=np.float32))
+
+    def _numpy_to_output_tensor(
+        self,
+        output_array: np.ndarray,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """把 numpy 输出还原成 postprocess 可接受的张量形态。"""
+        output_array = cast(np.ndarray, np.asarray(output_array, dtype=np.float32))
+        from_numpy = getattr(torch, "from_numpy", None)
+        if callable(from_numpy):
+            output_tensor = from_numpy(output_array)
+            to_method = getattr(output_tensor, "to", None)
+            if callable(to_method):
+                return cast(torch.Tensor, to_method(self.device))
+            return cast(torch.Tensor, output_tensor)
+        return output_array
+
+    def _run_model_forward(
+        self,
+        inference_frame_rgb: np.ndarray,
+        inference_mask: np.ndarray,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """执行一次共享模型前向，并裁回原始推理尺寸。"""
+        model = self.model
+        if model is None:
+            raise InpaintingError("Model not loaded")
+
+        prepared_frame, prepared_mask, target_shape = self._prepare_model_forward_inputs(
+            inference_frame_rgb,
+            inference_mask,
+        )
+        frame_tensor = self._preprocess(prepared_frame, prepared_mask)
+        with torch.no_grad():
+            output_tensor = model(frame_tensor)
+        return self._crop_model_output(output_tensor, target_shape)
+
+    def _should_use_tiled_inference(
+        self,
+        inference_shape: tuple[int, ...],
+        profile: GPUInpaintingProfile,
+    ) -> bool:
+        """根据实际推理尺寸判断是否需要切到 tile 模式。"""
+        _ = profile
+        height, width = inference_shape[:2]
+        pixel_count = height * width
+        return (
+            max(height, width) > GPU_TILE_TRIGGER_MAX_DIM
+            or pixel_count > GPU_TILE_TRIGGER_MAX_PIXELS
+        )
+
+    def _build_tile_starts(self, length: int, tile_size: int, overlap: int) -> list[int]:
+        """为单个轴生成 tile 起点，确保最后一块兜住边界。"""
+        if length <= tile_size:
+            return [0]
+
+        step = max(1, tile_size - overlap)
+        starts = list(range(0, max(1, length - tile_size + 1), step))
+        last_start = max(0, length - tile_size)
+        if not starts or starts[-1] != last_start:
+            starts.append(last_start)
+
+        deduped_starts: list[int] = []
+        for start in starts:
+            if not deduped_starts or deduped_starts[-1] != start:
+                deduped_starts.append(start)
+        return deduped_starts
+
+    def _build_tile_regions(
+        self,
+        image_shape: tuple[int, ...],
+        tile_size: int,
+        overlap: int,
+    ) -> list[TileRegion]:
+        """为推理图生成稳定的 tile 区域列表。"""
+        height, width = image_shape[:2]
+        effective_tile_size = max(GPU_MODEL_STRIDE, min(tile_size, height, width))
+        effective_overlap = max(0, min(overlap, effective_tile_size - 1))
+        y_starts = self._build_tile_starts(height, effective_tile_size, effective_overlap)
+        x_starts = self._build_tile_starts(width, effective_tile_size, effective_overlap)
+
+        regions: list[TileRegion] = []
+        for top in y_starts:
+            for left in x_starts:
+                regions.append(
+                    TileRegion(
+                        top=top,
+                        left=left,
+                        bottom=min(height, top + effective_tile_size),
+                        right=min(width, left + effective_tile_size),
+                    )
+                )
+        return regions
+
+    def _build_tile_axis_weight(self, length: int, overlap: int) -> np.ndarray:
+        """构造单轴 overlap 融合权重。"""
+        weights = np.ones(length, dtype=np.float32)
+        feather = min(overlap, max(1, length // 2))
+        if feather <= 0:
+            return weights
+
+        ramp = np.linspace(0.25, 1.0, feather, dtype=np.float32)
+        weights[:feather] = np.minimum(weights[:feather], ramp)
+        weights[-feather:] = np.minimum(weights[-feather:], ramp[::-1])
+        return weights
+
+    def _build_tile_weight(self, height: int, width: int, overlap: int) -> np.ndarray:
+        """构造二维 tile overlap 融合权重。"""
+        y_weight = self._build_tile_axis_weight(height, overlap)
+        x_weight = self._build_tile_axis_weight(width, overlap)
+        return cast(np.ndarray, np.outer(y_weight, x_weight).astype(np.float32))
+
+    def _run_tiled_model_forward(
+        self,
+        inference_frame_rgb: np.ndarray,
+        inference_mask: np.ndarray,
+        profile: GPUInpaintingProfile,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """按 tile / overlap 执行单帧内部前向，再拼回完整输出。"""
+        _ = profile
+        height, width = inference_frame_rgb.shape[:2]
+        tile_regions = self._build_tile_regions(
+            inference_frame_rgb.shape,
+            GPU_TILE_SIZE,
+            GPU_TILE_OVERLAP,
+        )
+        merged_output = np.zeros((1, 3, height, width), dtype=np.float32)
+        merged_weight = np.zeros((1, 1, height, width), dtype=np.float32)
+
+        for region in tile_regions:
+            tile_frame = inference_frame_rgb[region.top : region.bottom, region.left : region.right]
+            tile_mask = inference_mask[region.top : region.bottom, region.left : region.right]
+            tile_output = self._tensor_to_numpy(self._run_model_forward(tile_frame, tile_mask))
+            if tile_output.ndim == 3:
+                tile_output = tile_output[np.newaxis, ...]
+
+            tile_height = region.bottom - region.top
+            tile_width = region.right - region.left
+            tile_output = tile_output[:, :, :tile_height, :tile_width]
+            tile_weight = self._build_tile_weight(tile_height, tile_width, GPU_TILE_OVERLAP)
+            tile_weight_4d = tile_weight[np.newaxis, np.newaxis, :, :]
+
+            merged_output[:, :, region.top : region.bottom, region.left : region.right] += (
+                tile_output * tile_weight_4d
+            )
+            merged_weight[
+                :, :, region.top : region.bottom, region.left : region.right
+            ] += tile_weight_4d
+
+        safe_weight = np.maximum(merged_weight, 1e-6)
+        merged_output /= safe_weight
+        return self._numpy_to_output_tensor(merged_output)
 
     def _run_true_batch(self, batch_items: list[PreparedBatchItem]) -> list[np.ndarray]:
         """对同尺寸同 profile 的批次执行一次真实 GPU 前向。"""
@@ -471,7 +698,12 @@ class DeepLearningInpainter:
             raise InpaintingError("Model not loaded")
 
         batch_tensors = [
-            self._preprocess(item.inference_frame_rgb, item.inference_mask) for item in batch_items
+            self._preprocess(
+                *self._prepare_model_forward_inputs(item.inference_frame_rgb, item.inference_mask)[
+                    :2
+                ]
+            )
+            for item in batch_items
         ]
         batch_tensor = torch.cat(batch_tensors, dim=0)
 
@@ -480,7 +712,10 @@ class DeepLearningInpainter:
 
         results = []
         for index, item in enumerate(batch_items):
-            output_tensor = output_batch[index : index + 1]
+            output_tensor = self._crop_model_output(
+                output_batch[index : index + 1],
+                (item.inference_shape[0], item.inference_shape[1]),
+            )
             result_rgb = self._postprocess(
                 output_tensor,
                 item.original_rgb,
@@ -768,9 +1003,14 @@ class DeepLearningInpainter:
             prepared_mask,
             profile,
         )
-        frame_tensor = self._preprocess(inference_frame_rgb, inference_mask)
-        with torch.no_grad():
-            output_tensor = model(frame_tensor)
+        if self._should_use_tiled_inference(inference_frame_rgb.shape, profile):
+            output_tensor = self._run_tiled_model_forward(
+                inference_frame_rgb,
+                inference_mask,
+                profile,
+            )
+        else:
+            output_tensor = self._run_model_forward(inference_frame_rgb, inference_mask)
 
         result_rgb = self._postprocess(
             output_tensor,

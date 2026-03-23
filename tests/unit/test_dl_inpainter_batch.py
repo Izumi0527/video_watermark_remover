@@ -239,7 +239,7 @@ def test_inpaint_batch_keeps_original_output_shapes_after_true_batch(
     monkeypatch.setattr(
         inpainter,
         "_postprocess",
-        lambda output_tensor, original_rgb, prepared_mask, profile: np.zeros_like(original_rgb),
+        lambda output_tensor, original_rgb, prepared_mask, profile: original_rgb,
     )
 
     results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=4)
@@ -430,3 +430,57 @@ def test_inpaint_batch_retries_group_with_conservative_profile_after_oom(
     assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
     assert inpainter.last_batch_execution_mode == "grouped_true_batch"
     assert inpainter.last_retry_info == {"applied": True, "count": 1, "reason": "oom"}
+
+
+def test_inpaint_batch_skips_true_batch_for_group_requiring_tile(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [_create_frame(64, 64, fill_value=10), _create_frame(64, 64, fill_value=20)]
+    masks = [_create_mask(64, 64), _create_mask(64, 64)]
+    true_batch_calls: list[int] = []
+
+    monkeypatch.setattr(inpainter, "_requires_tiled_execution", lambda item: True)
+    monkeypatch.setattr(
+        inpainter,
+        "_run_true_batch",
+        lambda batch_items: true_batch_calls.append(len(batch_items)) or [],
+    )
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 2
+    assert model.forward_call_count == 2
+    assert true_batch_calls == []
+    assert inpainter.last_batch_execution_mode == "fallback_sequential"
+
+
+def test_inpaint_batch_uses_mixed_mode_when_large_group_requires_tile(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(128, 128, fill_value=30),
+        _create_frame(128, 128, fill_value=40),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(128, 128),
+        _create_mask(128, 128),
+    ]
+
+    monkeypatch.setattr(
+        inpainter,
+        "_requires_tiled_execution",
+        lambda item: item.inference_shape[0] == 128,
+    )
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=5)
+
+    assert len(results) == 4
+    assert model.forward_call_count == 3
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
+    assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"

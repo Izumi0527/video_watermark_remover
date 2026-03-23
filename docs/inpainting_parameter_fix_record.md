@@ -232,11 +232,13 @@
 ### 仍然不能误以为“已经打通”的部分
 
 - `修复算法` 在 GPU 路径里仍不是“多种 GPU 修复算法切换器”
-- `GPU U-Net` 目前还没有：
-  - tile / overlap
-  - second pass
-  - OOM 自动降级重试
-  - mixed precision 档位
+- `GPU U-Net` 目前虽然已经支持：
+  - 单帧内部 `tile / overlap`
+  - 最小 OOM 自动降级重试
+- 但仍然还没有：
+  - `second pass`
+  - `mixed precision` 档位
+  - tile-aware true batch
 - `inpaint_batch()` 当前仍复用单帧 profile 流程，优先保证行为一致性，不代表已经完成真正的批量推理优化
 
 ---
@@ -329,6 +331,10 @@ DeepLearningInpainter
   - 兼容组走真实 batch 前向
   - 不兼容组只对该组顺序执行，不再整批退化
   - 某一组真实 batch 前向失败时，也只回退该组，优先保证结果语义一致
+- `tile / overlap`
+  - 当实际推理输入尺寸达到内部阈值时，单帧路径会自动切到内部切块推理
+  - grouped batch 中需要 tile 的组，当前会回退到顺序单帧执行
+  - 这项能力只影响 `DeepLearningInpainter` 内部执行策略，不改上层参数结构
 
 #### 当前仍保持简单的部分
 
@@ -362,13 +368,19 @@ DeepLearningInpainter
 3. 最终混合强度
 4. 推理输入分辨率
 
+需要额外强调的是：
+
+- 当前 `tile / overlap` 不是 `GPUInpaintingProfile` 的公开字段
+- `gpu_inpainting_profile / last_profile_used` 仍只表示最终成功那次真正生效的修复 profile
+- tile 目前只是 `DeepLearningInpainter` 内部的执行策略
+
 ---
 
 ## 当前 GPU U-Net 路径仍然不算完整生产形态的原因
 
 虽然阶段一和阶段二已经把主链路打通，但下面这些能力仍然没有完成：
 
-### 1. 还没有 tile / overlap / second pass
+### 1. 已补单帧 tile / overlap，但还没有 second pass 与 tile-aware true batch
 
 当前 GPU profile 只落地了最小字段：
 
@@ -377,13 +389,20 @@ DeepLearningInpainter
 - `blend_ratio`
 - `resize_limit`
 
-还没有：
+当前已经补上的部分：
 
-- `tile_size`
-- `tile_overlap`
+- 大图或高分辨率推理输入，单帧路径会自动切到内部 `tile / overlap`
+- `tile / overlap` 只发生在 `DeepLearningInpainter` 内部，不影响 `GPUInpaintingProfile.to_dict()`
+- grouped batch 中，若某一组需要 tile，该组会回退到顺序单帧执行
+- tile 路径继续复用现有“整帧级一次性更保守 profile 重试”语义
+
+当前仍然没有的部分：
+
 - `second_pass`
+- tile-aware true batch
+- 可配置的 `tile_size / tile_overlap` 外部参数
 
-这意味着超大图、高精细边缘和复杂内容场景，后续仍有提升空间。
+这意味着大图稳定性已经明显前进了一步，但高阶吞吐优化和最高质量档能力还没有完成。
 
 ### 2. 现在已补上最小 OOM 定向重试，但更高级异常分级还没做完
 
@@ -409,7 +428,8 @@ DeepLearningInpainter
 - 兼容组会执行真正的 batch tensor 前向
 - 不兼容组或失败组只对该组顺序执行，继续优先保证每帧结果和单帧入口一致
 - 某一组命中 OOM 时，会只对该组切更保守 profile 再重试一次
-- 还没有针对 batch tensor 继续叠加 tile、mixed precision 这类更高级优化
+- 某一组如果需要 tile，也只会对该组回退到顺序单帧 tile 执行
+- 还没有针对 batch tensor 继续叠加 tile-aware batch、mixed precision 这类更高级优化
 
 所以这一步可以视为“真实 batch 主路径已经建立”，但还不是“GPU 批量性能优化已经完全完成”。
 
@@ -432,14 +452,12 @@ DeepLearningInpainter
 
 下面给出当前推荐的下一阶段方案，目标是从“最小真实可调”继续推进到“更稳的生产级 GPU 路径”。
 
-### 阶段三：补 GPU 推理稳定性与高级 profile
+### 阶段四：继续补 GPU 推理稳定性与高级 profile
 
 建议新增：
 
 ```text
 GPUInpaintingProfile
-  - tile_size
-  - tile_overlap
   - second_pass
   - mixed_precision
   - 更细粒度的 oom_retry_profile 分层
@@ -447,15 +465,14 @@ GPUInpaintingProfile
 
 建议优先级：
 
-1. `tile_size / tile_overlap`
-   - 先解决大图和高分辨率视频帧的稳定性
-2. `OOM 回退策略`
-   - 当前最小 OOM 定向重试已经落地
-   - 下一步重点是把 retry profile 继续细分得更稳
-3. `mixed precision`
+1. tile-aware true batch
+   - 解决“大图组只能顺序 tile”的吞吐瓶颈
+2. `mixed precision`
    - 兼顾显存和性能
-4. `second_pass`
+3. `second_pass`
    - 作为最高质量档的可选增强
+4. 更细粒度的 OOM 分层回退
+   - 在现有一次性保守 profile 重试之上继续细化
 
 ### 阶段四：补模型与观测能力
 
@@ -476,15 +493,15 @@ GPUInpaintingProfile
 如果后续继续做，我建议按下面顺序推进：
 
 1. 保持当前阶段一 + 阶段二结果稳定
-2. 先补 `tile / overlap / OOM 降级`
-3. 再补 `mixed precision / second pass`
+2. 先稳定当前单帧 `tile / overlap + OOM` 结果
+3. 再补 `tile-aware true batch / mixed precision`
 4. 最后再做更激进的 GPU 高质量档位
 
 原因是：
 
 - 现在最重要的不是继续加字段，而是让 GPU 路径在真实样本上更稳
 - 当前用户已经能真实调 `修复半径 / 修复质量`
-- 下一步最值得投入的是“大图稳定性”和“异常回退能力”
+- 下一步最值得投入的是“大图组吞吐”和“更高质量档位”
 
 ---
 
