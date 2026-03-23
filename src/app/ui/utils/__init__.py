@@ -6,8 +6,10 @@ UI实用工具模块
 
 模块：
 - ai_params_builder: AI参数构建器
+- file_dialog_filters: 文件对话框过滤器
 """
 
 from .ai_params_builder import AIParamsBuilder
+from .file_dialog_filters import MEDIA_IMPORT_FILTER
 
-__all__ = ["AIParamsBuilder"]
+__all__ = ["AIParamsBuilder", "MEDIA_IMPORT_FILTER"]

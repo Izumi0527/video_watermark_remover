@@ -452,9 +452,9 @@ class PreviewPanel(QWidget):
         # 使用属性选择器设置成功状态
         self._set_comparison_state("success")
 
-    def show_processing_progress(self):
+    def show_processing_progress(self, message: str = "⏳ 正在处理文件，请稍候..."):
         """显示处理中的进度状态"""
-        self.comparison_info_label.setText("⏳ 正在处理图像，请稍候...")
+        self.comparison_info_label.setText(message)
         # 使用属性选择器设置处理中状态
         self._set_comparison_state("processing")
 

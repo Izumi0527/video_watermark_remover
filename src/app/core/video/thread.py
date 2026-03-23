@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
+from ...utils import IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 from ..exceptions import ModelLoadError, UnsupportedFormatError
 
 AIHandler = None
@@ -228,9 +229,9 @@ class VideoProcessorThread(QThread):
 
             file_ext = os.path.splitext(self.input_path)[1].lower()
 
-            if file_ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+            if file_ext in IMAGE_FILE_EXTENSIONS:
                 self._process_image()
-            elif file_ext in [".mp4", ".avi", ".mkv", ".mov"]:
+            elif file_ext in VIDEO_FILE_EXTENSIONS:
                 if self.enable_multiprocess:
                     if self.use_pipeline:
                         self.logger.info(f"Using pipeline mode with {self.num_processes} processes")

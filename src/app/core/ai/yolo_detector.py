@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, List, Optional, Sequence
 
 import cv2
 import numpy as np
-import torch
 from numpy.typing import NDArray
 
 from ...config.config_manager import ConfigManager
@@ -36,7 +35,7 @@ class YOLOWatermarkDetector:
     - 纯 GPU pipeline（预处理 → 推理 → 后处理）
     - 支持批处理检测
     - 自动 boxes → mask 转换
-    - 多模型支持（yolo11s/yolo11x-watermark/custom）
+    - 多模型支持（yolo11s/yolo11x-watermark/yolo11x-watermark-corzent/custom）
     - 自动模型下载功能
     - 配置文件驱动
     """
@@ -67,7 +66,15 @@ class YOLOWatermarkDetector:
 
         # 设备检测
         if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            # 说明：避免在模块导入阶段强依赖 torch，降低在部分 Windows/Qt 环境下触发
+            # WinError 1114（DLL 初始化失败）的概率；仅在确需自动检测时再尝试导入。
+            try:
+                import torch
+
+                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"PyTorch 初始化失败，默认使用 CPU: {e}")
+                self.device = "cpu"
         else:
             self.device = device
 
@@ -87,6 +94,21 @@ class YOLOWatermarkDetector:
         self.batch_size = config.getint("YOLO", "batch_size", fallback=8)
         self.auto_download = config.getboolean("YOLO", "auto_download_model", fallback=True)
         self.model_dir = Path(config.get("Paths", "default_model_dir", fallback="./models"))
+        # 掩码生成参数：用于改善 C（边界不准：偏移/过大/过小）
+        # 说明：当前模型输出为检测框（boxes），需要通过 bbox→mask 生成修复区域。
+        # 这里将固定 padding 改为“自适应 padding + 可配置微调”，避免不同分辨率/水印尺寸下边界失真。
+        self.mask_padding_px = max(0, config.getint("YOLO", "mask_padding_px", fallback=4))
+        self.mask_padding_ratio = max(
+            0.0, config.getfloat("YOLO", "mask_padding_ratio", fallback=0.02)
+        )
+        self.mask_padding_max = max(0, config.getint("YOLO", "mask_padding_max", fallback=24))
+        self.mask_erode_iterations = max(
+            0, config.getint("YOLO", "mask_erode_iterations", fallback=0)
+        )
+        self.mask_dilate_iterations = max(
+            0, config.getint("YOLO", "mask_dilate_iterations", fallback=0)
+        )
+        self.mask_close_kernel = max(0, config.getint("YOLO", "mask_close_kernel", fallback=5))
 
         # 确定模型路径（优先级：参数 > 配置 > 自动选择）
         if model_path:
@@ -105,7 +127,7 @@ class YOLOWatermarkDetector:
         self.logger.info(f"  - IoU Threshold: {self.iou_threshold}")
         self.logger.info(f"  - Batch Size: {self.batch_size}")
 
-    def _resolve_model_path(self) -> str:
+    def _resolve_model_path(self) -> str:  # noqa: C901
         """
         根据配置解析模型路径
 
@@ -126,10 +148,11 @@ class YOLOWatermarkDetector:
             else:
                 raise DetectionError(f"自定义模型文件不存在: {self.custom_model_path}")
 
-        # 情况2：使用预定义模型（yolo11s / yolo11x-watermark）
-        if self.model_type not in ["yolo11s", "yolo11x-watermark"]:
+        # 情况2：使用预定义模型（yolo11s / yolo11x-watermark / yolo11x-watermark-corzent）
+        if self.model_type not in ["yolo11s", "yolo11x-watermark", "yolo11x-watermark-corzent"]:
             raise DetectionError(
-                f"未知的model_type: {self.model_type}，" f"支持的类型: yolo11s, yolo11x-watermark, custom"
+                f"未知的model_type: {self.model_type}，"
+                f"支持的类型: yolo11s, yolo11x-watermark, yolo11x-watermark-corzent, custom"
             )
 
         # 获取模型文件名
@@ -149,11 +172,20 @@ class YOLOWatermarkDetector:
                 # 自动下载模型
                 downloaded_path = downloader.download_model(self.model_type, force=False)
                 if not downloaded_path:
+                    if self.model_type == "yolo11x-watermark-corzent":
+                        self.logger.warning("corzent 版本模型下载失败，自动降级到默认模型 yolo11x-watermark")
+                        self.model_type = "yolo11x-watermark"
+                        return self._resolve_model_path()
                     raise DetectionError(f"模型下载失败: {self.model_type}")
 
                 self.logger.info(f"✅ 模型下载成功: {downloaded_path}")
                 return str(downloaded_path)
             else:
+                if self.model_type == "yolo11x-watermark-corzent":
+                    self.logger.warning(f"corzent 版本模型文件不存在且自动下载已禁用：{model_file}")
+                    self.logger.info("自动降级到默认模型 yolo11x-watermark")
+                    self.model_type = "yolo11x-watermark"
+                    return self._resolve_model_path()
                 raise DetectionError(
                     f"模型文件不存在且自动下载已禁用: {model_file}\n" f"请手动下载或设置 auto_download_model=yes"
                 )
@@ -192,7 +224,10 @@ class YOLOWatermarkDetector:
             self.logger.error(f"❌ Model file not found: {self.model_path}")
 
             # 如果是预定义模型且auto_download开启，尝试下载
-            if self.model_type in ["yolo11s", "yolo11x-watermark"] and self.auto_download:
+            if (
+                self.model_type in ["yolo11s", "yolo11x-watermark", "yolo11x-watermark-corzent"]
+                and self.auto_download
+            ):
                 self.logger.info("Attempting to download missing model...")
                 try:
                     downloader = ModelDownloader(str(self.model_dir))
@@ -251,8 +286,8 @@ class YOLOWatermarkDetector:
                 device=self.device,
             )
 
-            # Boxes → Mask 转换
-            mask = self._boxes_to_mask(results[0].boxes, frame.shape)
+            # Results → Mask 转换（优先使用分割 masks，若无则回退到 boxes）
+            mask = self._result_to_mask(results[0], frame.shape)
 
             return mask
 
@@ -310,7 +345,7 @@ class YOLOWatermarkDetector:
 
                         # 转换掩码
                         for j, result in enumerate(results):
-                            mask = self._boxes_to_mask(result.boxes, batch[j].shape)
+                            mask = self._result_to_mask(result, batch[j].shape)
                             all_masks.append(mask)
 
                     return all_masks
@@ -327,7 +362,7 @@ class YOLOWatermarkDetector:
             # 批量转换 Boxes → Mask
             masks = []
             for i, result in enumerate(results):
-                mask = self._boxes_to_mask(result.boxes, frames[i].shape)
+                mask = self._result_to_mask(result, frames[i].shape)
                 masks.append(mask)
 
             return masks
@@ -336,7 +371,116 @@ class YOLOWatermarkDetector:
             self.logger.error(f"Batch detection failed: {e}")
             raise DetectionError(f"批量检测失败: {e}")
 
-    def _boxes_to_mask(self, boxes: Any, frame_shape: Sequence[int]) -> NDArray[np.uint8]:
+    def _compute_axis_padding(self, axis_len: int) -> int:
+        """
+        计算单个轴方向的自适应 padding。
+
+        规则：
+        - 最小 padding：mask_padding_px
+        - 动态 padding：axis_len * mask_padding_ratio
+        - 最大 padding：mask_padding_max
+        """
+        dynamic_pad = int(round(axis_len * self.mask_padding_ratio))
+        pad = max(self.mask_padding_px, dynamic_pad)
+        if self.mask_padding_max > 0:
+            pad = min(pad, self.mask_padding_max)
+        return max(0, pad)
+
+    def _compute_box_padding(self, box_w: int, box_h: int) -> tuple[int, int]:
+        """
+        计算检测框在 x/y 两个方向的 padding（避免长条框在短边方向被过度扩张）。
+        """
+        return self._compute_axis_padding(box_w), self._compute_axis_padding(box_h)
+
+    def _postprocess_mask(self, mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        """
+        对掩码做轻量后处理，用于微调边界与连接断裂区域。
+        """
+        if mask is None or not np.any(mask):
+            return mask
+
+        # 细粒度膨胀/腐蚀（可用于“略扩大/略收缩”边界）
+        fine_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        if self.mask_erode_iterations > 0:
+            mask = np.asarray(cv2.erode(mask, fine_kernel, iterations=self.mask_erode_iterations))
+        if self.mask_dilate_iterations > 0:
+            mask = np.asarray(cv2.dilate(mask, fine_kernel, iterations=self.mask_dilate_iterations))
+
+        # 闭运算：连接近邻区域、填补小孔洞（kernel 尺寸应为奇数）
+        k = int(self.mask_close_kernel)
+        if k > 0:
+            if k % 2 == 0:
+                k += 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+            mask = np.asarray(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel))
+
+        return mask
+
+    def _masks_to_mask(  # noqa: C901
+        self, masks: Any, frame_shape: Sequence[int]
+    ) -> Optional[NDArray[np.uint8]]:
+        """
+        将 YOLO 分割 masks 转换为二值 mask（若模型为 segmentation，则边界更精准）。
+        """
+        h, w = frame_shape[:2]
+        out: NDArray[np.uint8] = np.zeros((h, w), dtype=np.uint8)
+
+        if masks is None:
+            return None
+
+        # 优先尝试使用 masks.data（通常为 (N, H, W) 的张量）
+        data = getattr(masks, "data", None)
+        if data is not None:
+            try:
+                arr = data.detach().cpu().numpy()
+            except Exception:  # noqa: BLE001
+                try:
+                    arr = np.asarray(data)
+                except Exception:  # noqa: BLE001
+                    arr = None
+
+            if arr is not None:
+                if arr.ndim == 3:
+                    merged = (np.sum(arr, axis=0) > 0).astype(np.uint8) * 255
+                elif arr.ndim == 2:
+                    merged = (arr > 0).astype(np.uint8) * 255
+                else:
+                    merged = None
+
+                if merged is not None:
+                    if merged.shape != (h, w):
+                        merged = cv2.resize(merged, (w, h), interpolation=cv2.INTER_NEAREST)
+                    return self._postprocess_mask(np.asarray(merged, dtype=np.uint8))
+
+        # 兜底：使用 masks.xy（多边形点集，坐标通常为原图像素坐标）
+        polys = getattr(masks, "xy", None)
+        if polys:
+            for poly in polys:
+                if poly is None or len(poly) == 0:
+                    continue
+                pts = np.round(np.asarray(poly)).astype(np.int32)
+                if pts.ndim != 2 or pts.shape[1] != 2:
+                    continue
+                cv2.fillPoly(out, [pts], 255)
+            return self._postprocess_mask(out)
+
+        return None
+
+    def _result_to_mask(self, result: Any, frame_shape: Sequence[int]) -> NDArray[np.uint8]:
+        """
+        将单帧推理结果转换为二值 mask：
+        - 若存在 segmentation masks，优先使用（边界更准）
+        - 否则使用检测框 boxes，并做自适应 padding 与后处理
+        """
+        masks = getattr(result, "masks", None)
+        seg_mask = self._masks_to_mask(masks, frame_shape)
+        if seg_mask is not None and np.any(seg_mask):
+            return seg_mask
+        return self._boxes_to_mask(getattr(result, "boxes", None), frame_shape)
+
+    def _boxes_to_mask(  # noqa: C901
+        self, boxes: Any, frame_shape: Sequence[int]
+    ) -> NDArray[np.uint8]:
         """
         将 YOLO bounding boxes 转换为二值 mask
 
@@ -353,34 +497,75 @@ class YOLOWatermarkDetector:
         if boxes is None or len(boxes) == 0:
             return mask
 
-        # 遍历所有检测框
-        for box in boxes:
-            # 获取坐标 (xyxy 格式)
-            coords = box.xyxy[0].cpu().numpy().astype(int)
-            x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
+        # 兼容 ultralytics Boxes：优先一次性取出 xyxy，避免循环中频繁 cpu() 开销
+        xyxy_arr = None
+        try:
+            xyxy_arr = boxes.xyxy.detach().cpu().numpy()
+        except Exception:  # noqa: BLE001
+            xyxy_arr = None
 
-            # 扩展边界框（确保完全覆盖水印）
-            padding = 10
-            x1 = max(0, x1 - padding)
-            y1 = max(0, y1 - padding)
-            x2 = min(w, x2 + padding)
-            y2 = min(h, y2 + padding)
+        if xyxy_arr is None:
+            # 兜底：逐个 box 读取
+            coords_list = []
+            for box in boxes:
+                coords = None
+                try:
+                    coords = box.xyxy[0].detach().cpu().numpy()
+                except Exception:  # noqa: BLE001
+                    coords = None
+                if coords is None or len(coords) < 4:
+                    continue
+                coords_list.append(coords[:4])
+            if coords_list:
+                xyxy_arr = np.asarray(coords_list, dtype=np.float32)
 
-            # 填充矩形区域
+        if xyxy_arr is None or xyxy_arr.size == 0:
+            return mask
+
+        # 遍历所有检测框，生成 mask
+        for coord in xyxy_arr:
+            x1_f, y1_f, x2_f, y2_f = (
+                float(coord[0]),
+                float(coord[1]),
+                float(coord[2]),
+                float(coord[3]),
+            )
+
+            # 起点用 floor，终点用 ceil，确保覆盖完整目标
+            x1 = int(np.floor(x1_f))
+            y1 = int(np.floor(y1_f))
+            x2 = int(np.ceil(x2_f))
+            y2 = int(np.ceil(y2_f))
+
+            box_w = max(0, x2 - x1)
+            box_h = max(0, y2 - y1)
+            pad_x, pad_y = self._compute_box_padding(box_w, box_h)
+
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(w - 1, x2 + pad_x)
+            y2 = min(h - 1, y2 + pad_y)
+
+            if x2 <= x1 or y2 <= y1:
+                continue
+
             cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
 
-        # 形态学操作平滑边缘
-        if np.any(mask):
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = np.asarray(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel))
-
-        return mask
+        return self._postprocess_mask(mask)
 
     def cleanup(self):
         """清理 GPU 内存"""
-        if self.device == "cuda" and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            self.logger.debug("GPU memory cache cleared")
+        if self.device != "cuda":
+            return
+
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                self.logger.debug("GPU memory cache cleared")
+        except Exception as e:  # noqa: BLE001
+            self.logger.debug(f"GPU cleanup skipped: {e}")
 
 
 # ==================== 测试代码 ====================

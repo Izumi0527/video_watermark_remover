@@ -596,11 +596,16 @@ YOLO模型推理
     ├── conf_threshold (置信度阈值)
     └── iou_threshold (NMS阈值)
     ↓
-检测框 (xyxy 格式)
+推理结果 (Results)
+    ├── [可选] 分割 masks（若模型为 segmentation，边界更准）
+    └── 检测框 boxes (xyxy 格式)
     ↓
-_boxes_to_mask() 转换
-    ├── 边界框扩展 (padding=10px)
-    └── 形态学平滑 (去除锯齿)
+_result_to_mask() 转换
+    ├── 优先 masks→mask（如存在）
+    └── 否则 boxes→mask（自适应 padding + 形态学精修）
+        ├── mask_padding_px / mask_padding_ratio / mask_padding_max
+        ├── mask_erode_iterations / mask_dilate_iterations
+        └── mask_close_kernel
     ↓
 输出: 水印区域mask (uint8, 0/255)
 ```
@@ -609,8 +614,9 @@ _boxes_to_mask() 转换
 
 | 模型 | 文件大小 | 准确率 | 速度 | 推荐场景 |
 |------|---------|--------|------|----------|
-| `yolo11x` | 19MB | 70-80% | 快 | CPU模式/资源受限 |
+| `yolo11s` | 19MB | 70-80% | 快 | CPU模式/资源受限 |
 | `yolo11x-watermark` | 114MB | >99% | 中等 | GPU模式（推荐） |
+| `yolo11x-watermark-corzent` | ~109MB | 视素材而定 | 中等 | 对比验证/特定场景增强 |
 
 ---
 

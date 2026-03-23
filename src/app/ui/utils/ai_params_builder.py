@@ -56,7 +56,8 @@ class AIParamsBuilder:
         ai_params = {}
 
         # 1. 基础设置（从Preferences）
-        ai_params["auto_detect"] = preferences.get_preference("processing", "auto_mode", True)
+        auto_detect_enabled = preferences.get_preference("processing", "auto_mode", True)
+        ai_params["auto_detect"] = auto_detect_enabled
 
         # 2. 检测参数
         detection_params = self._build_detection_params(advanced_params)
@@ -75,8 +76,14 @@ class AIParamsBuilder:
         ai_params.update(output_params)
 
         # 6. 手动选择区域转换
-        user_mask = self._convert_manual_selections(manual_selections, input_file_path)
-        ai_params["user_mask"] = user_mask
+        # 自动检测模式下必须忽略历史手动框，避免视频动态水印被静态区域短路
+        if auto_detect_enabled:
+            if manual_selections:
+                self.logger.info(f"[参数构建] 当前为自动检测模式，忽略 {len(manual_selections)} 个手动选择区域")
+            ai_params["user_mask"] = None
+        else:
+            user_mask = self._convert_manual_selections(manual_selections, input_file_path)
+            ai_params["user_mask"] = user_mask
 
         self.logger.info(f"[参数构建] 成功构建AI参数，共 {len(ai_params)} 个参数")
         self.logger.debug(f"[参数详情] {ai_params}")

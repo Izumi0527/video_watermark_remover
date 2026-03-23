@@ -124,6 +124,43 @@ class ConfigManager:
             "delete_temp_files": "yes",
             "show_progress_details": "yes",
         },
+        "YOLO": {
+            # 模型类型：yolo11s / yolo11x-watermark / yolo11x-watermark-corzent / custom
+            "model_type": "yolo11x-watermark",
+            # 仅当 model_type=custom 时有效
+            "custom_model_path": "",
+            # 检测阈值
+            "conf_threshold": "0.25",
+            "iou_threshold": "0.45",
+            # 推理批大小
+            "batch_size": "8",
+            # 是否自动下载缺失模型（yes/no）
+            "auto_download_model": "yes",
+            # 记录下载源（huggingface/github），便于排障与文档一致性
+            "model_download_source": "huggingface",
+            # 掩码生成（bbox→mask）微调参数：用于改善边界不准
+            "mask_padding_px": "4",
+            "mask_padding_ratio": "0.02",
+            "mask_padding_max": "24",
+            "mask_erode_iterations": "0",
+            "mask_dilate_iterations": "0",
+            "mask_close_kernel": "5",
+        },
+        "yolo": {
+            "model_type": "yolo11x-watermark",
+            "custom_model_path": "",
+            "conf_threshold": "0.25",
+            "iou_threshold": "0.45",
+            "batch_size": "8",
+            "auto_download_model": "yes",
+            "model_download_source": "huggingface",
+            "mask_padding_px": "4",
+            "mask_padding_ratio": "0.02",
+            "mask_padding_max": "24",
+            "mask_erode_iterations": "0",
+            "mask_dilate_iterations": "0",
+            "mask_close_kernel": "5",
+        },
     }
 
     @staticmethod

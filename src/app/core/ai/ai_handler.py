@@ -66,7 +66,7 @@ class AIHandler:
         self._setup_device()
 
         # 初始化 YOLO 检测器(在设置 device 之后) - 使用ai_params中的参数
-        # 从配置对象读取模型类型(默认: yolo11x-watermark)
+        # 从配置对象读取模型类型(默认: yolo11x-watermark-corzent)
         self.watermark_detector = YOLOWatermarkDetector(
             config=self.config,  # 使用配置对象驱动
             conf_threshold=self.conf_threshold,  # 使用参数而非硬编码
@@ -300,10 +300,16 @@ class AIHandler:
             # ====================================================================
             # 步骤1: 确定水印区域
             # ====================================================================
-            if watermark_selection_params.get("user_mask") is not None:
-                # 处理用户提供的掩码（可能是区域列表或实际掩码）
-                user_mask_data = watermark_selection_params["user_mask"]
+            auto_detect_enabled = bool(watermark_selection_params.get("auto_detect", False))
+            user_mask_data = (
+                None if auto_detect_enabled else watermark_selection_params.get("user_mask")
+            )
 
+            if auto_detect_enabled and watermark_selection_params.get("user_mask") is not None:
+                self.logger.debug("自动检测模式已启用，忽略静态 user_mask 以支持动态水印逐帧跟随")
+
+            if user_mask_data is not None:
+                # 处理用户提供的掩码（可能是区域列表或实际掩码）
                 if isinstance(user_mask_data, list) and len(user_mask_data) > 0:
                     # (x, y, width, height)矩形列表
                     mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
@@ -334,7 +340,7 @@ class AIHandler:
                     self.logger.warning("Invalid user_mask format")
                     return frame, {"error": "Invalid user_mask format"}
 
-            elif watermark_selection_params.get("auto_detect", False):
+            elif auto_detect_enabled:
                 # 使用水印检测器进行自动检测
                 if self.watermark_detector is None:
                     self.logger.error("Watermark detector not initialized")

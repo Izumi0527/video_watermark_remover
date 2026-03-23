@@ -69,6 +69,15 @@ class ModelDownloader:
             "description": "YOLOv11x专用水印检测模型（>99%准确率）",
             "sha256": None,  # 可选：添加SHA256校验
         },
+        "yolo11x-watermark-corzent": {
+            # 来源：https://huggingface.co/corzent/yolo11x_watermark_detection
+            "url": "https://huggingface.co/corzent/yolo11x_watermark_detection/resolve/main/best.pt",
+            "filename": "yolo11x-watermark-corzent.pt",
+            "size_mb": 109,
+            "description": "YOLOv11x水印检测模型（corzent 微调版本，MIT许可）",
+            # Git LFS oid（SHA256）来自 Hugging Face tree API 的 lfs.oid 字段
+            "sha256": "6ac71b6ab8db27ec7928b5176e60a359c65e1579a5c1d58cf2f98df30cf3085e",
+        },
         "yolo11s": {
             "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt",
             "filename": "yolo11s.pt",
@@ -132,7 +141,7 @@ class ModelDownloader:
         下载指定模型（带自动重试）
 
         Args:
-            model_key: 模型标识 (yolo11x-watermark/yolo11s)
+            model_key: 模型标识 (yolo11x-watermark/yolo11x-watermark-corzent/yolo11s)
             force: 是否强制重新下载
             progress_callback: 进度回调函数
 
@@ -183,7 +192,18 @@ class ModelDownloader:
                 )
 
                 if result:
-                    return model_path
+                    # 下载完成后校验文件完整性（如提供 sha256）
+                    if self._verify_model(model_path, model_info.get("sha256")):
+                        return model_path
+
+                    last_error = OSError("模型 SHA256 校验失败")
+                    self.logger.error("❌ 模型下载完成但校验失败，将删除文件并尝试重试")
+
+                    if model_path.exists():
+                        try:
+                            model_path.unlink()
+                        except OSError:
+                            pass
 
             except (urllib.error.URLError, socket.timeout, OSError) as e:
                 last_error = e
@@ -345,7 +365,11 @@ if __name__ == "__main__":
         choices=["download", "list", "remove"],
         help="操作类型: download(下载), list(列表), remove(删除)",
     )
-    parser.add_argument("model", nargs="?", help="模型标识 (yolo11x-watermark/yolo11s)")
+    parser.add_argument(
+        "model",
+        nargs="?",
+        help="模型标识 (yolo11x-watermark/yolo11x-watermark-corzent/yolo11s)",
+    )
     parser.add_argument("--force", action="store_true", help="强制重新下载")
     parser.add_argument("--model-dir", default="./models", help="模型保存目录")
 

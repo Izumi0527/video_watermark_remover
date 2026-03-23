@@ -201,7 +201,7 @@ class YOLOWatermarkDetector:
 
 ```ini
 [YOLO]
-# 模型类型选择（yolo11s/yolo11x-watermark/custom）
+# 模型类型选择（yolo11s/yolo11x-watermark/yolo11x-watermark-corzent/custom）
 model_type = yolo11x-watermark
 
 # 自定义模型路径（仅当model_type=custom时使用）

@@ -34,7 +34,25 @@ iou_threshold = 0.45
 batch_size = 8-12      # 16GB VRAM GPU
 ```
 
-### 2. YOLOv11s（可选轻量方案）
+### 2. YOLOv11x-Watermark（corzent 微调版本）
+
+**专用水印检测模型** - 基于 YOLOv11x 的水印检测权重（社区微调版本，便于与默认模型做效果对比）
+
+| 属性 | 详情 |
+|------|------|
+| **文件名** | `yolo11x-watermark-corzent.pt` |
+| **大小** | ~109 MB |
+| **许可** | MIT |
+| **适用场景** | 对默认模型漏检/误检较多的素材做对比验证；某些场景可能更稳 |
+| **下载源** | [Hugging Face - corzent/yolo11x_watermark_detection](https://huggingface.co/corzent/yolo11x_watermark_detection) |
+
+**使用方式：**
+```ini
+[YOLO]
+model_type = yolo11x-watermark-corzent
+```
+
+### 3. YOLOv11s（可选轻量方案）
 
 **通用目标检测模型** - 在COCO数据集上预训练（适合低端硬件或快速测试）
 
@@ -70,7 +88,7 @@ batch_size = 1-4       # CPU或低端GPU
 ```ini
 # config.ini
 [YOLO]
-model_type = yolo11x-watermark  # 或 yolo11s
+model_type = yolo11x-watermark  # 或 yolo11x-watermark-corzent / yolo11s
 auto_download_model = yes
 model_download_source = huggingface
 ```
@@ -92,6 +110,9 @@ python -m app.utils.model_downloader list
 # 下载YOLOv11x-Watermark模型
 python -m app.utils.model_downloader download yolo11x-watermark
 
+# 下载YOLOv11x-Watermark corzent 微调版本
+python -m app.utils.model_downloader download yolo11x-watermark-corzent
+
 # 下载YOLOv11s模型
 python -m app.utils.model_downloader download yolo11s
 
@@ -105,6 +126,12 @@ python -m app.utils.model_downloader download yolo11x-watermark --force
 1. 访问：https://huggingface.co/spaces/fancyfeast/joycaption-watermark-detection/tree/main
 2. 下载 `yolo11x-train28-best.pt`
 3. 重命名为 `yolo11x-watermark.pt`
+4. 放置到本目录（`models/`）
+
+**YOLOv11x-Watermark (corzent):**
+1. 访问：https://huggingface.co/corzent/yolo11x_watermark_detection
+2. 下载 `best.pt`
+3. 重命名为 `yolo11x-watermark-corzent.pt`
 4. 放置到本目录（`models/`）
 
 **YOLOv11s:**

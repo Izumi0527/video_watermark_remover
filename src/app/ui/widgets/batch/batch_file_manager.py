@@ -16,6 +16,7 @@ from typing import List
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QLabel, QListWidget, QListWidgetItem, QMessageBox, QWidget
 
+from ...utils import MEDIA_IMPORT_FILTER
 from .batch_processor_thread import FileQueueManager, ProcessingStatus
 
 
@@ -41,11 +42,7 @@ class BatchFileManager:
         """
         file_dialog = QFileDialog(self.parent)
         file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-        file_dialog.setNameFilter(
-            "支持的文件 (*.mp4 *.avi *.mkv *.mov *.jpg *.jpeg *.png *.bmp);;"
-            "视频文件 (*.mp4 *.avi *.mkv *.mov);;"
-            "图片文件 (*.jpg *.jpeg *.png *.bmp)"
-        )
+        file_dialog.setNameFilter(MEDIA_IMPORT_FILTER)
 
         if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
             selected_files = list(file_dialog.selectedFiles())

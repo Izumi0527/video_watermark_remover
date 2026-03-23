@@ -26,9 +26,10 @@ from ..core.video.thread import VideoProcessorThread
 
 # 导入帧提取工具
 from ..core.video.workers.frame_reader import extract_video_first_frame
+from ..utils import IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 
 # 导入AI参数构建器
-from .utils.ai_params_builder import AIParamsBuilder
+from .utils import MEDIA_IMPORT_FILTER, AIParamsBuilder
 
 # 导入批处理组件
 from .widgets.batch.batch_processor_thread import (
@@ -114,7 +115,7 @@ class SignalHandler(QObject):
             file_paths = self._show_multi_file_dialog(
                 parent_widget,
                 "选择图片或视频文件",
-                "图片文件 (*.jpg *.jpeg *.png *.bmp);;视频文件 (*.mp4 *.avi *.mkv *.mov);;所有文件 (*)",
+                MEDIA_IMPORT_FILTER,
             )
 
             if not file_paths:
@@ -219,6 +220,12 @@ class SignalHandler(QObject):
             enabled: 是否启用自动模式
         """
         self.preferences.set_preference("processing", "auto_mode", enabled)
+
+        if enabled:
+            if hasattr(self.preview_panel, "clear_manual_selections"):
+                self.preview_panel.clear_manual_selections()
+            self.manual_selections = []
+
         mode_text = "自动检测" if enabled else "手动选择"
         status_msg = f"处理模式切换为: {mode_text}"
         self.status_updated.emit(status_msg)
@@ -232,8 +239,10 @@ class SignalHandler(QObject):
             enabled: 是否启用手动模式
         """
         self.preferences.set_preference("processing", "auto_mode", not enabled)
-        mode_text = "手动选择" if enabled else "自动检测"
-        status_msg = f"处理模式切换为: {mode_text}"
+        if enabled:
+            status_msg = "已进入手动模式，请重新框选水印区域"
+        else:
+            status_msg = "处理模式切换为: 自动检测"
         self.status_updated.emit(status_msg)
 
         # 如果启用手动模式且有已加载的图像，切换到手动选择标签页
@@ -270,7 +279,9 @@ class SignalHandler(QObject):
 
         try:
             self.control_panel.set_processing_state(True)
-            self.preview_panel.show_processing_progress()
+            self.preview_panel.show_processing_progress(
+                self._build_processing_progress_message(self.input_file_path)
+            )
             self.output_file_path = None
             self.file_panel.set_export_enabled(False)
 
@@ -280,7 +291,9 @@ class SignalHandler(QObject):
                 return
 
             # 单文件模式 - 保持原有逻辑
-            self.status_updated.emit("开始处理文件...")
+            self.status_updated.emit(
+                self._build_start_processing_status_message(self.input_file_path)
+            )
 
             # 准备输出路径
             import os
@@ -411,6 +424,30 @@ class SignalHandler(QObject):
         self.control_panel.update_progress(value)
         self.log_panel.add_progress_message(f"处理进度: {value}%")
 
+    def _get_media_type_label(self, file_path_or_name: str) -> str:
+        """根据文件扩展名返回媒体类型文案。"""
+        file_ext = os.path.splitext(str(file_path_or_name or ""))[1].lower()
+        if file_ext in IMAGE_FILE_EXTENSIONS:
+            return "图片"
+        if file_ext in VIDEO_FILE_EXTENSIONS:
+            return "视频"
+        return "文件"
+
+    def _build_processing_progress_message(self, file_path_or_name: str) -> str:
+        """构建处理中预览文案。"""
+        media_type = self._get_media_type_label(file_path_or_name)
+        return f"⏳ 正在处理{media_type}，请稍候..."
+
+    def _build_start_processing_status_message(self, file_path_or_name: str) -> str:
+        """构建开始处理状态文案。"""
+        media_type = self._get_media_type_label(file_path_or_name)
+        return f"开始处理{media_type}..."
+
+    def _build_batch_processing_status_message(self, filename: str) -> str:
+        """构建批处理当前文件状态文案。"""
+        media_type = self._get_media_type_label(filename)
+        return f"正在处理{media_type}: {filename}"
+
     # ==================== 工具方法 ====================
 
     def _extract_video_first_frame(self, video_path: str):
@@ -436,10 +473,8 @@ class SignalHandler(QObject):
             from PyQt6.QtGui import QImage, QPixmap
 
             file_ext = os.path.splitext(output_path)[1].lower()
-            video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
-            image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
 
-            if file_ext in image_exts:
+            if file_ext in IMAGE_FILE_EXTENSIONS:
                 # 图片文件：直接加载
                 pixmap = QPixmap(output_path)
                 if not pixmap.isNull():
@@ -454,7 +489,7 @@ class SignalHandler(QObject):
                 else:
                     self.logger.warning(f"Failed to load processed image: {output_path}")
 
-            elif file_ext in video_exts:
+            elif file_ext in VIDEO_FILE_EXTENSIONS:
                 # 视频文件：提取第一帧作为预览
                 first_frame = self._extract_video_first_frame(output_path)
                 if first_frame is not None:
@@ -566,17 +601,15 @@ class SignalHandler(QObject):
 
         # 获取文件扩展名判断文件类型
         file_ext = os.path.splitext(file_path)[1].lower()
-        video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
-        image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
 
-        if file_ext in image_exts:
+        if file_ext in IMAGE_FILE_EXTENSIONS:
             # 图片文件
             self.preview_panel.set_image(file_path)
             self.preview_panel.set_manual_selection_image(file_path)
             status_msg = f"✅ 已选择图片: {os.path.basename(file_path)}"
             self.log_panel.add_status_message(f"图片文件已加载: {os.path.basename(file_path)}")
 
-        elif file_ext in video_exts:
+        elif file_ext in VIDEO_FILE_EXTENSIONS:
             # 视频文件
             first_frame = self._extract_video_first_frame(file_path)
             if first_frame is not None:
@@ -628,12 +661,10 @@ class SignalHandler(QObject):
 
         # 预览第一个文件
         file_ext = os.path.splitext(file_paths[0])[1].lower()
-        video_exts = [".mp4", ".avi", ".mkv", ".mov", ".flv", ".wmv"]
-        image_exts = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
 
-        if file_ext in image_exts:
+        if file_ext in IMAGE_FILE_EXTENSIONS:
             self.preview_panel.set_image(file_paths[0])
-        elif file_ext in video_exts:
+        elif file_ext in VIDEO_FILE_EXTENSIONS:
             first_frame = self._extract_video_first_frame(file_paths[0])
             if first_frame is not None:
                 self.preview_panel.set_image_from_array(first_frame)
@@ -737,7 +768,10 @@ class SignalHandler(QObject):
             return
         self.file_queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
         self._update_file_queue_display()
-        self.status_updated.emit(f"正在处理: {filename}")
+        self.preview_panel.show_processing_progress(
+            self._build_processing_progress_message(filename)
+        )
+        self.status_updated.emit(self._build_batch_processing_status_message(filename))
 
     def _on_batch_file_progress(self, progress: int, file_index: int):
         """批处理文件进度更新"""

@@ -134,11 +134,12 @@ show_progress_details = yes
 [YOLO]
 # YOLO水印检测模型配置（Phase 6+）
 #
-# 模型类型选择（选项：yolo11s/yolo11x-watermark/custom）
+# 模型类型选择（选项：yolo11s/yolo11x-watermark/yolo11x-watermark-corzent/custom）
 # - yolo11s: 通用COCO模型（19MB，适合CPU，检测准确率~70-80%）
 # - yolo11x-watermark: 专用水印模型（114MB，推荐GPU，检测准确率>99%）⭐ 推荐
+# - yolo11x-watermark-corzent: corzent 微调版本（约109MB，MIT许可，适合对比验证/特定场景增强）
 # - custom: 使用自定义模型路径
-model_type = yolo11x-watermark
+  model_type = yolo11x-watermark
 
 # 自定义模型路径（仅当model_type=custom时使用）
 custom_model_path =
@@ -164,3 +165,19 @@ auto_download_model = yes
 # huggingface: fancyfeast/joycaption-watermark-detection
 # github: ultralytics官方仓库
 model_download_source = huggingface
+
+# ==================== 掩码精修（解决边界不准） ====================
+# 说明：当前水印模型多为检测框输出（boxes），需要 bbox→mask 生成修复区域。
+# 下面参数用于减少“偏移/过大/过小”等边界问题，可按素材类型微调。
+#
+# bbox→mask 自适应 padding（像素 + 比例）
+mask_padding_px = 4
+mask_padding_ratio = 0.02
+mask_padding_max = 24
+#
+# 掩码后处理：腐蚀/膨胀迭代次数（0=关闭；增大可分别收缩/扩大掩码）
+mask_erode_iterations = 0
+mask_dilate_iterations = 0
+#
+# 闭运算 kernel（奇数，0=关闭）：连接近邻区域、填补小孔洞
+mask_close_kernel = 5

@@ -75,6 +75,7 @@ class TestModelDownloader:
     def test_models_available(self, downloader):
         """测试可用模型配置"""
         assert "yolo11x-watermark" in downloader.MODELS
+        assert "yolo11x-watermark-corzent" in downloader.MODELS
         assert "yolo11s" in downloader.MODELS
 
         yolo11x = downloader.MODELS["yolo11x-watermark"]
@@ -83,11 +84,19 @@ class TestModelDownloader:
         assert "url" in yolo11x
         assert "description" in yolo11x
 
+        corzent = downloader.MODELS["yolo11x-watermark-corzent"]
+        assert corzent["filename"] == "yolo11x-watermark-corzent.pt"
+        assert corzent["size_mb"] > 0
+        assert "url" in corzent
+        assert "description" in corzent
+        assert "sha256" in corzent
+
     def test_list_available_models(self, downloader):
         """测试列出可用模型"""
         models = downloader.list_available_models()
 
         assert "yolo11x-watermark" in models
+        assert "yolo11x-watermark-corzent" in models
         assert "yolo11s" in models
 
         yolo11x = models["yolo11x-watermark"]
@@ -95,6 +104,12 @@ class TestModelDownloader:
         assert yolo11x["size_mb"] == 114
         assert yolo11x["filename"] == "yolo11x-watermark.pt"
         assert yolo11x["downloaded"] is False  # 初始状态未下载
+
+        corzent = models["yolo11x-watermark-corzent"]
+        assert "corzent" in corzent["description"].lower()
+        assert corzent["size_mb"] > 0
+        assert corzent["filename"] == "yolo11x-watermark-corzent.pt"
+        assert corzent["downloaded"] is False  # 初始状态未下载
 
     def test_list_available_models_with_downloaded(self, downloader):
         """测试列出模型（包含已下载状态）"""
@@ -127,6 +142,27 @@ class TestModelDownloader:
         assert result.exists()
         assert result.name == "yolo11s.pt"
         assert result.read_bytes() == b"fake model content"
+
+    @patch("urllib.request.urlretrieve")
+    def test_download_model_verifies_sha256_after_download(self, mock_urlretrieve, temp_model_dir):
+        """
+        测试：下载完成后会进行 SHA256 校验
+
+        说明：
+        - 使用 `yolo11x-watermark-corzent` 作为带 sha256 的示例模型。
+        - 写入假内容必然导致校验失败，期望返回 None 且清理文件。
+        """
+
+        def mock_download(url, path, reporthook=None):
+            Path(path).write_bytes(b"fake model content")
+
+        mock_urlretrieve.side_effect = mock_download
+
+        downloader = ModelDownloader(str(temp_model_dir), max_retries=0)
+        result = downloader.download_model("yolo11x-watermark-corzent")
+
+        assert result is None
+        assert not (downloader.model_dir / "yolo11x-watermark-corzent.pt").exists()
 
     def test_download_model_invalid_key(self, downloader):
         """测试下载无效模型"""
