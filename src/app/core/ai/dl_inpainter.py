@@ -40,6 +40,19 @@ class GPUInpaintingProfile:
         return asdict(self)
 
 
+@dataclass
+class PreparedBatchItem:
+    """真实 batch 前向前的中间准备数据。"""
+
+    original_rgb: np.ndarray
+    prepared_mask: np.ndarray
+    profile: GPUInpaintingProfile
+    inference_frame_rgb: np.ndarray
+    inference_mask: np.ndarray
+    original_shape: tuple[int, ...]
+    inference_shape: tuple[int, ...]
+
+
 class UNetInpaintingModel(nn.Module):
     """
     轻量级 U-Net 架构的 Inpainting 模型
@@ -179,6 +192,7 @@ class DeepLearningInpainter:
             self.device = device
 
         self.last_profile_used: Optional[Dict[str, Union[int, float]]] = None
+        self.last_batch_execution_mode: Optional[str] = None
         self.logger.info(f"DeepLearningInpainter initialized on device: {self.device}")
 
     def load_model(self, model_path: Optional[str] = None) -> bool:
@@ -319,25 +333,151 @@ class DeepLearningInpainter:
             raise ValueError("frames and masks must have same length")
 
         try:
-            results = []
-            for index, (frame, mask) in enumerate(zip(frames, masks)):
-                current_profile = None
-                if profiles is not None and index < len(profiles):
-                    current_profile = profiles[index]
-                results.append(
-                    self.inpaint_frame(
-                        frame,
-                        mask,
-                        radius=radius,
-                        quality_level=quality_level,
-                        profile=current_profile,
+            batch_items = self._prepare_batch_items(
+                frames,
+                masks,
+                radius=radius,
+                quality_level=quality_level,
+                profiles=profiles,
+            )
+            if self._can_use_true_batch(batch_items):
+                try:
+                    results = self._run_true_batch(batch_items)
+                    self.last_batch_execution_mode = "true_batch"
+                    return results
+                except Exception as exc:
+                    self.logger.warning(
+                        "True batch inpainting failed, falling back to sequential mode: %s",
+                        exc,
                     )
-                )
-            return results
+
+            self.last_batch_execution_mode = "fallback_sequential"
+            return self._run_sequential_batch(
+                frames,
+                masks,
+                radius=radius,
+                quality_level=quality_level,
+                profiles=profiles,
+            )
 
         except Exception as e:
             self.logger.error(f"Error in batch inpainting: {e}")
             raise InpaintingError(f"Batch inpainting failed: {e}")
+
+    def _prepare_batch_items(
+        self,
+        frames: list,
+        masks: list,
+        radius: int = 3,
+        quality_level: int = 3,
+        profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
+    ) -> list[PreparedBatchItem]:
+        """为批量推理预先计算每帧的 profile、掩码和推理输入尺寸。"""
+        batch_items: list[PreparedBatchItem] = []
+
+        for index, (frame, mask) in enumerate(zip(frames, masks)):
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            current_profile = None
+            if profiles is not None and index < len(profiles):
+                current_profile = profiles[index]
+            resolved_profile = self._resolve_profile(
+                frame.shape,
+                radius=radius,
+                quality_level=quality_level,
+                profile=current_profile,
+            )
+            prepared_mask = self._prepare_mask(mask, resolved_profile)
+            inference_frame_rgb, inference_mask = self._resize_for_inference(
+                frame_rgb,
+                prepared_mask,
+                resolved_profile,
+            )
+            batch_items.append(
+                PreparedBatchItem(
+                    original_rgb=frame_rgb,
+                    prepared_mask=prepared_mask,
+                    profile=resolved_profile,
+                    inference_frame_rgb=inference_frame_rgb,
+                    inference_mask=inference_mask,
+                    original_shape=tuple(frame.shape),
+                    inference_shape=tuple(inference_frame_rgb.shape),
+                )
+            )
+
+        return batch_items
+
+    def _can_use_true_batch(self, batch_items: list[PreparedBatchItem]) -> bool:
+        """判断一批样本是否满足真实 GPU batch 前向条件。"""
+        if not batch_items:
+            return False
+
+        first_item = batch_items[0]
+        expected_profile = first_item.profile.to_dict()
+        expected_inference_shape = first_item.inference_shape
+
+        for item in batch_items:
+            if item.profile.to_dict() != expected_profile:
+                return False
+            if item.inference_shape != expected_inference_shape:
+                return False
+            if not np.any(item.prepared_mask):
+                return False
+
+        return True
+
+    def _run_true_batch(self, batch_items: list[PreparedBatchItem]) -> list[np.ndarray]:
+        """对同尺寸同 profile 的批次执行一次真实 GPU 前向。"""
+        model = self.model
+        if model is None:
+            raise InpaintingError("Model not loaded")
+
+        batch_tensors = [
+            self._preprocess(item.inference_frame_rgb, item.inference_mask) for item in batch_items
+        ]
+        batch_tensor = torch.cat(batch_tensors, dim=0)
+
+        with torch.no_grad():
+            output_batch = model(batch_tensor)
+
+        results = []
+        for index, item in enumerate(batch_items):
+            output_tensor = output_batch[index : index + 1]
+            result_rgb = self._postprocess(
+                output_tensor,
+                item.original_rgb,
+                item.prepared_mask,
+                item.profile,
+            )
+            result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+            results.append(cast(np.ndarray, np.asarray(result_bgr)))
+
+        self.last_profile_used = batch_items[0].profile.to_dict()
+        return results
+
+    def _run_sequential_batch(
+        self,
+        frames: list,
+        masks: list,
+        radius: int = 3,
+        quality_level: int = 3,
+        profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
+    ) -> list[np.ndarray]:
+        """按当前稳定的单帧流程逐帧执行整批样本。"""
+        results = []
+        for index, (frame, mask) in enumerate(zip(frames, masks)):
+            current_profile = None
+            if profiles is not None and index < len(profiles):
+                current_profile = profiles[index]
+            results.append(
+                self.inpaint_frame(
+                    frame,
+                    mask,
+                    radius=radius,
+                    quality_level=quality_level,
+                    profile=current_profile,
+                )
+            )
+        return results
 
     def _normalize_quality_level(self, quality_level: Optional[int]) -> int:
         """把质量等级收敛到 GPU profile 支持的范围。"""

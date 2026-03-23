@@ -324,6 +324,9 @@ DeepLearningInpainter
   - 映射到 `resize_limit`
   - 映射到 `blend_ratio`
   - 映射到 `mask_feather_px`
+- `GPU batch`
+  - 当同一批样本的**生效 profile 一致**且**实际推理输入尺寸一致**时，走真实 batch 前向
+  - 不满足条件时，整批回退逐帧，优先保证结果语义一致
 
 #### 当前仍保持简单的部分
 

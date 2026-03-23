@@ -6,6 +6,7 @@
 
 import logging
 import os
+import subprocess
 import sys
 import time
 
@@ -13,22 +14,44 @@ import pytest
 
 pytest.importorskip("cv2")
 pytest.importorskip("numpy")
-pytest.importorskip("torch")
+
+
+def _probe_torch_import() -> tuple[bool, str]:
+    """在子进程中探测 torch 是否可导入，避免当前 pytest 进程被 DLL 错误拖崩。"""
+    command = [sys.executable, "-c", "import torch"]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        return True, ""
+    return False, (result.stderr or result.stdout or "torch import failed").strip()
+
 
 import cv2
 import numpy as np
-import torch
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from app.core.ai.dl_inpainter import DeepLearningInpainter  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
+def test_torch_runtime_probe():
+    """探测当前环境是否具备运行 GPU 集成脚本所需的 torch 运行时。"""
+    torch_available, torch_probe_error = _probe_torch_import()
+    if not torch_available:
+        pytest.skip(f"torch 不可用，跳过 GPU 集成测试：{torch_probe_error}")
+    assert torch_available
+
+
 def main():
+    torch_available, torch_probe_error = _probe_torch_import()
+    if not torch_available:
+        raise RuntimeError(f"torch 不可用，无法执行 GPU 集成脚本：{torch_probe_error}")
+
+    import torch
+
+    from app.core.ai.dl_inpainter import DeepLearningInpainter
+
     print("=" * 60)
     print("深度学习 Inpainter GPU 性能测试")
     print("=" * 60)
