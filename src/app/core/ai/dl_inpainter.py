@@ -44,6 +44,7 @@ class GPUInpaintingProfile:
 class PreparedBatchItem:
     """真实 batch 前向前的中间准备数据。"""
 
+    index: int
     original_rgb: np.ndarray
     prepared_mask: np.ndarray
     profile: GPUInpaintingProfile
@@ -340,25 +341,17 @@ class DeepLearningInpainter:
                 quality_level=quality_level,
                 profiles=profiles,
             )
-            if self._can_use_true_batch(batch_items):
-                try:
-                    results = self._run_true_batch(batch_items)
-                    self.last_batch_execution_mode = "true_batch"
-                    return results
-                except Exception as exc:
-                    self.logger.warning(
-                        "True batch inpainting failed, falling back to sequential mode: %s",
-                        exc,
-                    )
-
-            self.last_batch_execution_mode = "fallback_sequential"
-            return self._run_sequential_batch(
+            results, execution_mode = self._execute_grouped_batch(
+                batch_items,
                 frames,
                 masks,
                 radius=radius,
                 quality_level=quality_level,
                 profiles=profiles,
             )
+            self.last_batch_execution_mode = execution_mode
+            self.last_profile_used = self._resolve_last_batch_profile(batch_items)
+            return results
 
         except Exception as e:
             self.logger.error(f"Error in batch inpainting: {e}")
@@ -394,6 +387,7 @@ class DeepLearningInpainter:
             )
             batch_items.append(
                 PreparedBatchItem(
+                    index=index,
                     original_rgb=frame_rgb,
                     prepared_mask=prepared_mask,
                     profile=resolved_profile,
@@ -406,9 +400,45 @@ class DeepLearningInpainter:
 
         return batch_items
 
+    def _get_batch_group_key(
+        self,
+        item: PreparedBatchItem,
+    ) -> Optional[tuple[tuple[tuple[str, Union[int, float]], ...], tuple[int, ...]]]:
+        """生成可用于真实 batch 的分组 key；空掩码帧不进入真实 batch。"""
+        if not np.any(item.prepared_mask):
+            return None
+
+        profile_key = tuple(sorted(item.profile.to_dict().items()))
+        return profile_key, item.inference_shape
+
+    def _group_batch_items(
+        self, batch_items: list[PreparedBatchItem]
+    ) -> list[list[PreparedBatchItem]]:
+        """按生效 profile 和实际推理输入尺寸对样本分组。"""
+        grouped_items: list[list[PreparedBatchItem]] = []
+        grouped_map: Dict[
+            tuple[tuple[tuple[str, Union[int, float]], ...], tuple[int, ...]],
+            list[PreparedBatchItem],
+        ] = {}
+
+        for item in batch_items:
+            group_key = self._get_batch_group_key(item)
+            if group_key is None:
+                grouped_items.append([item])
+                continue
+
+            existing_group = grouped_map.get(group_key)
+            if existing_group is None:
+                existing_group = []
+                grouped_map[group_key] = existing_group
+                grouped_items.append(existing_group)
+            existing_group.append(item)
+
+        return grouped_items
+
     def _can_use_true_batch(self, batch_items: list[PreparedBatchItem]) -> bool:
         """判断一批样本是否满足真实 GPU batch 前向条件。"""
-        if not batch_items:
+        if len(batch_items) < 2:
             return False
 
         first_item = batch_items[0]
@@ -453,6 +483,133 @@ class DeepLearningInpainter:
 
         self.last_profile_used = batch_items[0].profile.to_dict()
         return results
+
+    def _execute_grouped_batch(
+        self,
+        batch_items: list[PreparedBatchItem],
+        frames: list,
+        masks: list,
+        radius: int = 3,
+        quality_level: int = 3,
+        profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
+    ) -> tuple[list[np.ndarray], str]:
+        """执行按组 batch 编排，并返回最终结果与执行模式。"""
+        results = cast(list[Optional[np.ndarray]], [None] * len(batch_items))
+        used_true_batch = False
+        used_sequential = False
+        true_batch_group_count = 0
+
+        for group in self._group_batch_items(batch_items):
+            grouped_results, group_used_true_batch = self._execute_batch_group(
+                group,
+                frames,
+                masks,
+                radius=radius,
+                quality_level=quality_level,
+                profiles=profiles,
+            )
+            if group_used_true_batch:
+                used_true_batch = True
+                true_batch_group_count += 1
+            else:
+                used_sequential = True
+
+            for item, result in zip(group, grouped_results):
+                results[item.index] = result
+
+        if any(result is None for result in results):
+            raise InpaintingError("Grouped batch execution produced incomplete results")
+
+        execution_mode = self._resolve_batch_execution_mode(
+            used_true_batch,
+            used_sequential,
+            true_batch_group_count,
+        )
+        return cast(list[np.ndarray], results), execution_mode
+
+    def _execute_batch_group(
+        self,
+        batch_items: list[PreparedBatchItem],
+        frames: list,
+        masks: list,
+        radius: int = 3,
+        quality_level: int = 3,
+        profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
+    ) -> tuple[list[np.ndarray], bool]:
+        """执行单个分组；返回结果以及是否命中真实 batch。"""
+        if self._can_use_true_batch(batch_items):
+            try:
+                return self._run_true_batch(batch_items), True
+            except Exception as exc:
+                self.logger.warning(
+                    "Grouped batch inpainting failed, falling back to sequential mode: %s",
+                    exc,
+                )
+
+        return (
+            self._run_group_sequential(
+                batch_items,
+                frames,
+                masks,
+                radius=radius,
+                quality_level=quality_level,
+                profiles=profiles,
+            ),
+            False,
+        )
+
+    def _run_group_sequential(
+        self,
+        batch_items: list[PreparedBatchItem],
+        frames: list,
+        masks: list,
+        radius: int = 3,
+        quality_level: int = 3,
+        profiles: Optional[list[Optional[Union[GPUInpaintingProfile, Dict[str, Any]]]]] = None,
+    ) -> list[np.ndarray]:
+        """只对当前分组顺序执行，保持结果语义与单帧路径一致。"""
+        results: list[np.ndarray] = []
+
+        for item in batch_items:
+            current_profile = None
+            if profiles is not None and item.index < len(profiles):
+                current_profile = profiles[item.index]
+            results.append(
+                self.inpaint_frame(
+                    frames[item.index],
+                    masks[item.index],
+                    radius=radius,
+                    quality_level=quality_level,
+                    profile=current_profile,
+                )
+            )
+
+        return results
+
+    def _resolve_batch_execution_mode(
+        self,
+        used_true_batch: bool,
+        used_sequential: bool,
+        true_batch_group_count: int,
+    ) -> str:
+        """收口当前批次的执行模式，便于日志与测试观测。"""
+        if used_true_batch and used_sequential:
+            return "mixed_grouped_batch"
+        if used_true_batch and true_batch_group_count > 1:
+            return "grouped_true_batch"
+        if used_true_batch:
+            return "true_batch"
+        return "fallback_sequential"
+
+    def _resolve_last_batch_profile(
+        self,
+        batch_items: list[PreparedBatchItem],
+    ) -> Optional[Dict[str, Union[int, float]]]:
+        """返回最后一个有效输入样本的 profile，避免分组执行顺序污染观测。"""
+        for item in reversed(batch_items):
+            if np.any(item.prepared_mask):
+                return item.profile.to_dict()
+        return None
 
     def _run_sequential_batch(
         self,

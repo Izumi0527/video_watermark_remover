@@ -72,14 +72,35 @@ class _FailingBatchModel(_CountingModel):
         return np.zeros((1, 3, tensor.shape[2], tensor.shape[3]), dtype=np.float32)
 
 
-def _create_frame(height: int, width: int) -> "np.ndarray":
-    return np.full((height, width, 3), 127, dtype=np.uint8)
+class _SelectiveFailingGroupModel(_CountingModel):
+    """只让指定推理尺寸的 batch 组失败，便于验证逐组回退。"""
+
+    def __init__(self, failing_height: int) -> None:
+        super().__init__()
+        self.failing_height = failing_height
+
+    def __call__(self, tensor):
+        self.forward_call_count += 1
+        batch_size = tensor.shape[0]
+        height = tensor.shape[2]
+        width = tensor.shape[3]
+        if batch_size > 1 and height == self.failing_height:
+            raise RuntimeError("group batch forward failed")
+        return np.zeros((batch_size, 3, height, width), dtype=np.float32)
+
+
+def _create_frame(height: int, width: int, fill_value: int = 127) -> "np.ndarray":
+    return np.full((height, width, 3), fill_value, dtype=np.uint8)
 
 
 def _create_mask(height: int, width: int) -> "np.ndarray":
     mask = np.zeros((height, width), dtype=np.uint8)
     mask[height // 4 : height // 2, width // 4 : width // 2] = 255
     return mask
+
+
+def _create_empty_mask(height: int, width: int) -> "np.ndarray":
+    return np.zeros((height, width), dtype=np.uint8)
 
 
 def _build_inpainter(monkeypatch: pytest.MonkeyPatch):
@@ -207,3 +228,158 @@ def test_inpaint_batch_keeps_original_output_shapes_after_true_batch(
     assert model.forward_call_count == 1
     assert results[0].shape == frames[0].shape
     assert results[1].shape == frames[1].shape
+
+
+def test_inpaint_batch_groups_compatible_items_by_inference_shape(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(32, 32, fill_value=30),
+        _create_frame(32, 32, fill_value=40),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(32, 32),
+        _create_mask(32, 32),
+    ]
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=4)
+
+    assert len(results) == 4
+    assert model.forward_call_count == 2
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
+    assert inpainter.last_batch_execution_mode == "grouped_true_batch"
+
+
+def test_inpaint_batch_groups_compatible_items_by_effective_profile(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(64, 64, fill_value=30),
+        _create_frame(64, 64, fill_value=40),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+    ]
+    higher_profile = dl_module.GPUInpaintingProfile(
+        requested_radius=7,
+        quality_level=5,
+        mask_expand_px=11,
+        mask_feather_px=8,
+        blend_ratio=0.92,
+        resize_limit=1152,
+    )
+
+    results = inpainter.inpaint_batch(
+        frames,
+        masks,
+        radius=3,
+        quality_level=4,
+        profiles=[None, None, higher_profile, higher_profile],
+    )
+
+    assert len(results) == 4
+    assert model.forward_call_count == 2
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
+    assert inpainter.last_batch_execution_mode == "grouped_true_batch"
+
+
+def test_inpaint_batch_uses_mixed_mode_when_empty_mask_blocks_one_group(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, model = _build_inpainter(monkeypatch)
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(64, 64, fill_value=30),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_empty_mask(64, 64),
+        _create_mask(64, 64),
+    ]
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=4)
+
+    assert len(results) == 3
+    assert model.forward_call_count == 1
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30]
+    assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"
+
+
+def test_inpaint_batch_falls_back_only_for_failed_group(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, inpainter, _ = _build_inpainter(monkeypatch)
+    model = _SelectiveFailingGroupModel(failing_height=64)
+    inpainter.model = model
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(64, 64, fill_value=20),
+        _create_frame(32, 32, fill_value=30),
+        _create_frame(32, 32, fill_value=40),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(64, 64),
+        _create_mask(32, 32),
+        _create_mask(32, 32),
+    ]
+
+    results = inpainter.inpaint_batch(frames, masks, radius=3, quality_level=4)
+
+    assert len(results) == 4
+    assert model.forward_call_count == 4
+    assert [int(result[0, 0, 0]) for result in results] == [10, 20, 30, 40]
+    assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"
+
+
+def test_inpaint_batch_reports_last_valid_input_profile_in_grouped_mode(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module, inpainter, model = _build_inpainter(monkeypatch)
+    later_profile = dl_module.GPUInpaintingProfile(
+        requested_radius=7,
+        quality_level=5,
+        mask_expand_px=11,
+        mask_feather_px=8,
+        blend_ratio=0.92,
+        resize_limit=1152,
+    )
+    frames = [
+        _create_frame(64, 64, fill_value=10),
+        _create_frame(32, 32, fill_value=20),
+        _create_frame(64, 64, fill_value=30),
+    ]
+    masks = [
+        _create_mask(64, 64),
+        _create_mask(32, 32),
+        _create_mask(64, 64),
+    ]
+
+    results = inpainter.inpaint_batch(
+        frames,
+        masks,
+        radius=3,
+        quality_level=4,
+        profiles=[None, later_profile, None],
+    )
+
+    expected_profile = inpainter._resolve_profile(
+        (64, 64, 3), radius=3, quality_level=4, profile=None
+    )
+
+    assert len(results) == 3
+    assert model.forward_call_count == 2
+    assert inpainter.last_batch_execution_mode == "mixed_grouped_batch"
+    assert inpainter.last_profile_used == expected_profile.to_dict()
