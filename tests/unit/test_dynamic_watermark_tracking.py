@@ -218,6 +218,59 @@ def test_ai_params_builder_manual_mode_keeps_manual_selections(
     assert ai_params["user_mask"] == [(10, 12, 20, 8)]
 
 
+def test_ai_params_builder_opencv_method_disables_gpu_inpainting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """选择 OpenCV 修复算法时应禁用 GPU 深度学习修复，避免算法选择被覆盖。"""
+    _, ai_params_builder_cls = _load_test_targets(monkeypatch)
+    builder = ai_params_builder_cls()
+
+    ai_params = builder.build_from_ui(
+        preferences=_DummyPreferences(auto_mode=True),
+        advanced_params={
+            "inpainting_method": "TELEA 快速修复 (OpenCV)",
+            "enable_gpu": True,
+        },
+        manual_selections=None,
+        input_file_path=None,
+    )
+
+    assert ai_params["inpainting_algorithm"] == "telea"
+    assert ai_params["use_gpu_inpainting"] is False
+
+
+def test_ai_params_builder_gpu_unet_respects_enable_gpu_toggle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """选择 GPU U-Net 时，enable_gpu 复选框应决定是否启用 GPU 深度学习修复。"""
+    _, ai_params_builder_cls = _load_test_targets(monkeypatch)
+    builder = ai_params_builder_cls()
+
+    enabled_params = builder.build_from_ui(
+        preferences=_DummyPreferences(auto_mode=True),
+        advanced_params={
+            "inpainting_method": "GPU 深度学习 U-Net (推荐)",
+            "enable_gpu": True,
+        },
+        manual_selections=None,
+        input_file_path=None,
+    )
+    assert enabled_params["inpainting_algorithm"] == "gpu_dl"
+    assert enabled_params["use_gpu_inpainting"] is True
+
+    disabled_params = builder.build_from_ui(
+        preferences=_DummyPreferences(auto_mode=True),
+        advanced_params={
+            "inpainting_method": "GPU 深度学习 U-Net (推荐)",
+            "enable_gpu": False,
+        },
+        manual_selections=None,
+        input_file_path=None,
+    )
+    assert disabled_params["inpainting_algorithm"] == "gpu_dl"
+    assert disabled_params["use_gpu_inpainting"] is False
+
+
 def test_ai_handler_prefers_auto_detection_when_conflicting_params_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -250,19 +250,34 @@ class BatchProcessingWidget(QWidget):
         """总体进度更新"""
         self.ui_components["overall_progress_bar"].setValue(progress)
 
-    def _on_file_completed(self, index: int, output_path: str, status: object):
+    def _on_file_completed(
+        self,
+        index: int,
+        output_path: str,
+        status: object,
+        error_message: str,
+        processing_details: object,
+    ) -> None:
         """文件处理完成 (Phase 4 Stage 1.4 - 增强版)"""
         final_status = status if isinstance(status, ProcessingStatus) else ProcessingStatus.FAILED
         queue_manager = self.file_manager.get_queue_manager()
+        safe_error = str(error_message or "").strip()
+
+        if processing_details is not None:
+            queue_manager.update_file_processing_details(index, processing_details)
 
         if final_status == ProcessingStatus.CANCELLED:
             current = queue_manager.get_file_info(index) or {}
             current_progress = int(current.get("progress", 0) or 0)
             queue_manager.update_file_status(
-                index, ProcessingStatus.CANCELLED, current_progress, "用户取消"
+                index, ProcessingStatus.CANCELLED, current_progress, safe_error or "用户取消"
+            )
+        elif final_status == ProcessingStatus.FAILED:
+            queue_manager.update_file_status(
+                index, ProcessingStatus.FAILED, 100, safe_error or "处理失败"
             )
         else:
-            queue_manager.update_file_status(index, final_status, 100)
+            queue_manager.update_file_status(index, final_status, 100, "")
 
         self._update_queue_display()
         self._update_statistics()  # 更新统计信息

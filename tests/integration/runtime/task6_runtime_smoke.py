@@ -238,7 +238,7 @@ def run_batch(image_path: Path, video_path: Path, out_dir: Path) -> list[tuple[i
 
     batch_status: list[tuple[int, str, str]] = []
     batch.file_completed.connect(
-        lambda index, path, status: batch_status.append(
+        lambda index, path, status, _error, _details: batch_status.append(
             (index, path, getattr(status, "value", str(status)))
         )
     )

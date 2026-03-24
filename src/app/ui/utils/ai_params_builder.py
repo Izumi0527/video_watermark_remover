@@ -136,7 +136,7 @@ class AIParamsBuilder:
         - inpainting_method (下拉框) → inpainting_algorithm
         - inpainting_radius (1-10) → inpaint_radius
         - inpainting_quality (1-5) → quality_level
-        - enable_gpu (复选框) → use_gpu_inpainting
+        - enable_gpu (复选框) → use_gpu_inpainting（仅当选择 GPU U-Net 时生效）
         - enable_smooth_postprocess → enable_smooth_postprocess
         - enable_blend_postprocess → enable_blend_postprocess
         - enable_enhance_postprocess → enable_enhance_postprocess
@@ -158,8 +158,12 @@ class AIParamsBuilder:
         raw_quality = advanced_params.get("inpainting_quality", 3)
         params["quality_level"] = self._validator.validate("quality_level", raw_quality)
 
-        # GPU加速开关（布尔值，无需验证）
-        params["use_gpu_inpainting"] = advanced_params.get("enable_gpu", True)
+        # GPU 修复开关（布尔值）：仅当用户选择了 GPU 深度学习 U-Net 时才启用。
+        # 否则即使勾选了“启用 GPU”，也应尊重 OpenCV 算法选择，避免“修复算法看起来不生效”。
+        enable_gpu = bool(advanced_params.get("enable_gpu", True))
+        params["use_gpu_inpainting"] = bool(
+            enable_gpu and params["inpainting_algorithm"] == "gpu_dl"
+        )
 
         # 后处理选项（布尔值，无需验证）
         params["enable_smooth_postprocess"] = advanced_params.get("enable_smooth_postprocess", True)

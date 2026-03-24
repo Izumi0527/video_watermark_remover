@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -97,6 +98,9 @@ class SignalHandler(QObject):
         self.batch_processor: Optional[BatchProcessorThread] = None
         self.is_batch_mode = False  # 是否为批量处理模式
         self._batch_stop_requested = False  # 批量停止请求标记（用于取消/完成口径分流）
+        self._last_batch_ai_params: Optional[dict] = None
+        self._last_batch_ai_params_generated_at: Optional[str] = None
+        self._last_batch_config: Optional[dict] = None
 
         # 设置日志
         self.logger = logging.getLogger(__name__)
@@ -592,6 +596,7 @@ class SignalHandler(QObject):
             file_path: 文件路径
         """
         self.is_batch_mode = False
+        self._clear_last_batch_snapshot()
         self.file_queue_manager.clear_queue()
         self.file_panel.hide_queue()
 
@@ -651,6 +656,7 @@ class SignalHandler(QObject):
         self.file_panel.set_export_enabled(False)
 
         # 清空旧队列，添加新文件
+        self._clear_last_batch_snapshot()
         self.file_queue_manager.clear_queue()
         for path in file_paths:
             self.file_queue_manager.add_file(path)
@@ -734,6 +740,15 @@ class SignalHandler(QObject):
             manual_selections=self.manual_selections,
             input_file_path=None,
         )
+        max_concurrent_files = 4
+        auto_retry_failed = True
+        max_retry_count = 3
+        batch_config: dict[str, Any] = {
+            "max_concurrent_files": max_concurrent_files,
+            "auto_retry_failed": auto_retry_failed,
+            "max_retry_count": max_retry_count,
+        }
+        self._remember_last_batch_snapshot(ai_params=ai_params, batch_config=batch_config)
 
         # 获取预加载的AI模型
         preloaded_ai_handler = None
@@ -746,9 +761,9 @@ class SignalHandler(QObject):
             ai_params=ai_params,
             config=self.main_window.config if self.main_window else None,
             preloaded_ai_handler=preloaded_ai_handler,
-            max_concurrent_files=4,
-            auto_retry_failed=True,
-            max_retry_count=3,
+            max_concurrent_files=max_concurrent_files,
+            auto_retry_failed=auto_retry_failed,
+            max_retry_count=max_retry_count,
         )
 
         # 连接信号
@@ -788,18 +803,34 @@ class SignalHandler(QObject):
             return
         self.control_panel.update_progress(progress)
 
-    def _on_batch_file_completed(self, index: int, output_path: str, status: object):
+    def _on_batch_file_completed(
+        self,
+        index: int,
+        output_path: str,
+        status: object,
+        error_message: str,
+        processing_details: object,
+    ) -> None:
         """批处理单个文件完成"""
         final_status = status if isinstance(status, ProcessingStatus) else ProcessingStatus.FAILED
+        safe_error = str(error_message or "").strip()
+
+        if processing_details is not None:
+            self.file_queue_manager.update_file_processing_details(index, processing_details)
 
         if final_status == ProcessingStatus.CANCELLED:
             current = self.file_queue_manager.get_file_info(index) or {}
             current_progress = int(current.get("progress", 0) or 0)
             self.file_queue_manager.update_file_status(
-                index, ProcessingStatus.CANCELLED, current_progress, "用户取消"
+                index, ProcessingStatus.CANCELLED, current_progress, safe_error or "用户取消"
+            )
+        elif final_status == ProcessingStatus.FAILED:
+            self.file_queue_manager.update_file_status(
+                index, ProcessingStatus.FAILED, 100, safe_error or "处理失败"
             )
         else:
-            self.file_queue_manager.update_file_status(index, final_status, 100)
+            # 正常完成或其他状态：清空错误信息
+            self.file_queue_manager.update_file_status(index, final_status, 100, "")
 
         self._update_file_queue_display()
 
@@ -863,6 +894,7 @@ class SignalHandler(QObject):
 
     def handle_queue_clear(self):
         """处理清空队列请求"""
+        self._clear_last_batch_snapshot()
         self.file_queue_manager.clear_queue()
         self.file_panel.hide_queue()
         self.is_batch_mode = False
@@ -995,6 +1027,43 @@ class SignalHandler(QObject):
 
         manifest_items: list[dict[str, Any]] = []
 
+        run_ai_params: Optional[dict] = None
+        ai_params_source: str = "none"
+        ai_params_generated_at: Optional[str] = None
+        batch_config: Optional[dict] = None
+
+        if self.batch_processor is not None and hasattr(self.batch_processor, "ai_params"):
+            run_ai_params = dict(getattr(self.batch_processor, "ai_params", {}) or {})
+            ai_params_source = "batch_processor"
+            ai_params_generated_at = self._last_batch_ai_params_generated_at
+            batch_config = {
+                "max_concurrent_files": getattr(self.batch_processor, "max_concurrent_files", None),
+                "auto_retry_failed": getattr(self.batch_processor, "auto_retry_failed", None),
+                "max_retry_count": getattr(self.batch_processor, "max_retry_count", None),
+            }
+        elif self._last_batch_ai_params is not None:
+            run_ai_params = dict(self._last_batch_ai_params)
+            ai_params_source = "last_batch"
+            ai_params_generated_at = self._last_batch_ai_params_generated_at
+            batch_config = dict(self._last_batch_config or {})
+        else:
+            # 兜底：按当前 UI/偏好构建一次参数快照（可能与实际运行参数不一致）
+            try:
+                advanced_params = {}
+                if hasattr(self.control_panel, "get_advanced_parameters"):
+                    advanced_params = self.control_panel.get_advanced_parameters()
+                params_builder = AIParamsBuilder()
+                run_ai_params = params_builder.build_from_ui(
+                    preferences=self.preferences,
+                    advanced_params=advanced_params,
+                    manual_selections=self.manual_selections,
+                    input_file_path=None,
+                )
+                ai_params_source = "computed_at_export"
+                ai_params_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug(f"导出清单时构建参数快照失败（不影响导出）: {exc}")
+
         manifest: dict[str, Any] = {
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "app_version": None,
@@ -1002,9 +1071,24 @@ class SignalHandler(QObject):
             "os_name": os.name,
             "stats": stats,
             "batch": {
-                "max_concurrent_files": getattr(self.batch_processor, "max_concurrent_files", None),
-                "auto_retry_failed": getattr(self.batch_processor, "auto_retry_failed", None),
-                "max_retry_count": getattr(self.batch_processor, "max_retry_count", None),
+                "max_concurrent_files": (
+                    batch_config.get("max_concurrent_files")
+                    if isinstance(batch_config, dict)
+                    else None
+                ),
+                "auto_retry_failed": (
+                    batch_config.get("auto_retry_failed")
+                    if isinstance(batch_config, dict)
+                    else None
+                ),
+                "max_retry_count": (
+                    batch_config.get("max_retry_count") if isinstance(batch_config, dict) else None
+                ),
+            },
+            "run": {
+                "ai_params": self._make_json_safe(run_ai_params) if run_ai_params else None,
+                "ai_params_source": ai_params_source,
+                "ai_params_generated_at": ai_params_generated_at,
             },
             "items": manifest_items,
         }
@@ -1033,6 +1117,7 @@ class SignalHandler(QObject):
                     "status": status_value,
                     "progress": int(item.get("progress", 0) or 0),
                     "error_message": item.get("error_message", ""),
+                    "processing_details": self._make_json_safe(item.get("processing_details")),
                 }
             )
 
@@ -1067,6 +1152,67 @@ class SignalHandler(QObject):
             error_msg = f"批处理清单导出失败: {e}"
             self.log_panel.add_error_message(error_msg)
             self.logger.error(error_msg)
+
+    def _remember_last_batch_snapshot(self, ai_params: dict, batch_config: dict) -> None:
+        """缓存最近一次批处理运行快照，供任务结束后导出 manifest 使用。"""
+        self._last_batch_ai_params = dict(ai_params)
+        self._last_batch_ai_params_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._last_batch_config = dict(batch_config)
+
+    def _clear_last_batch_snapshot(self) -> None:
+        """清空最近一次批处理运行快照，避免新队列误复用旧批次参数。"""
+        self._last_batch_ai_params = None
+        self._last_batch_ai_params_generated_at = None
+        self._last_batch_config = None
+
+    @staticmethod
+    def _try_call_json_method(value: Any, method_name: str) -> tuple[bool, Any]:
+        """尝试调用对象上的序列化辅助方法。"""
+        method = getattr(value, method_name, None)
+        if not callable(method):
+            return (False, None)
+
+        try:
+            return (True, method())
+        except Exception:  # noqa: BLE001
+            return (False, None)
+
+    @staticmethod
+    def _make_json_safe(value: Any) -> Any:
+        """
+        将对象转换为 json.dumps 可序列化的结构。
+
+        说明：
+        - 批处理清单是“排查与追溯”用途，遇到无法序列化的类型时，保守降级为字符串。
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, Path):
+            return str(value)
+
+        if isinstance(value, Enum):
+            return value.value
+
+        if isinstance(value, dict):
+            return {str(k): SignalHandler._make_json_safe(v) for k, v in value.items()}
+
+        if isinstance(value, (list, tuple, set)):
+            return [SignalHandler._make_json_safe(v) for v in value]
+
+        # numpy 标量等：尽量提取为 Python 原生类型
+        item_ok, item_value = SignalHandler._try_call_json_method(value, "item")
+        if item_ok:
+            return item_value
+
+        list_ok, list_value = SignalHandler._try_call_json_method(value, "tolist")
+        if list_ok:
+            return list_value
+
+        return str(value)
 
     # ==================== 状态访问方法 ====================
 

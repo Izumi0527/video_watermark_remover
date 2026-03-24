@@ -33,6 +33,15 @@ def process_image(processor) -> None:
             image, processing_params
         )
 
+        # 记录最后一次处理信息，便于批处理清单导出追溯
+        processor.last_processing_info = processing_info
+        if (
+            isinstance(processing_info, dict)
+            and "error" not in processing_info
+            and int(processing_info.get("watermark_areas_found", 0) or 0) > 0
+        ):
+            processor.last_effective_processing_info = processing_info
+
         if "error" in processing_info:
             raise FrameProcessingError("帧处理失败", details=processing_info["error"])
 
@@ -42,6 +51,13 @@ def process_image(processor) -> None:
         areas_found = processing_info.get("watermark_areas_found", 0)
         processing_time = processing_info.get("processing_time", 0)
         method = processing_info.get("inpainting_method", "none")
+
+        processor.last_processing_summary = {
+            "media_type": "image",
+            "watermark_areas_found": int(areas_found or 0),
+            "processing_time_s": float(processing_time or 0),
+            "inpainting_method": method,
+        }
 
         processor.logger.info(
             f"Processing completed: {areas_found} watermark areas found, "

@@ -36,11 +36,11 @@ class PerformanceParametersTab:
 
         layout.addWidget(thread_group)
 
-        # GPU加速组
-        gpu_group = QGroupBox("GPU加速")
+        # GPU 深度学习修复组
+        gpu_group = QGroupBox("GPU 深度学习修复")
         gpu_layout = QVBoxLayout(gpu_group)
 
-        parent_widget.enable_gpu_check = QCheckBox("启用GPU加速 (需要CUDA支持)")
+        parent_widget.enable_gpu_check = QCheckBox("启用 GPU 深度学习修复 (U-Net，需要 CUDA 与权重)")
         gpu_layout.addWidget(parent_widget.enable_gpu_check)
 
         parent_widget.gpu_memory_spin = QSpinBox()

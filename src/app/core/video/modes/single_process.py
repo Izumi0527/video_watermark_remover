@@ -47,6 +47,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
         processed_frames = 0
         total_watermark_areas = 0
         last_preview_frame = None
+        last_effective_processing_info = None
 
         processor._emit_detailed_progress("processing_frames", 0, total_frames)
 
@@ -64,6 +65,16 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
                 frame, processing_params
             )
             last_preview_frame = processed_frame
+
+            # 记录最后一次处理信息，便于批处理清单导出追溯
+            processor.last_processing_info = processing_info
+            if (
+                isinstance(processing_info, dict)
+                and "error" not in processing_info
+                and int(processing_info.get("watermark_areas_found", 0) or 0) > 0
+            ):
+                last_effective_processing_info = processing_info
+                processor.last_effective_processing_info = processing_info
 
             if "error" in processing_info:
                 processor.logger.warning(
@@ -157,6 +168,17 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
                     processor.logger.warning(f"Failed to clean up temp file: {e}")
 
         processor.progress.emit(100)
+        if isinstance(last_effective_processing_info, dict) and last_effective_processing_info:
+            processor.last_effective_processing_info = last_effective_processing_info
+
+        processor.last_processing_summary = {
+            "media_type": "video",
+            "mode": "singleprocess",
+            "frames_total": int(total_frames or 0),
+            "frames_read": int(current_frame or 0),
+            "frames_processed": int(processed_frames or 0),
+            "total_watermark_areas": int(total_watermark_areas or 0),
+        }
         processor.logger.info(
             f"Video processing completed: {processed_frames}/{current_frame} frames processed, "
             f"{total_watermark_areas} total watermark areas found"
