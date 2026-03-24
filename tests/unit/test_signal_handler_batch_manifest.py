@@ -196,6 +196,63 @@ def _read_manifest(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _build_real_batch_processing_details(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_quality_level: object,
+    effective_quality_level: object | None = None,
+) -> dict:
+    """
+    构造真实 BatchProcessorThread._build_processing_details() 的输出，
+    用于验证批处理追溯字段在导出 manifest 时不会丢失。
+
+    注意：这里不启动线程、不跑实际处理，只做纯字段提取逻辑的单元验证。
+    """
+    video_thread_module = types.ModuleType("app.core.video.thread")
+    video_thread_module.VideoProcessorThread = _DummyVideoProcessorThread
+    monkeypatch.setitem(sys.modules, "app.core.video.thread", video_thread_module)
+
+    monkeypatch.delitem(sys.modules, "app.ui.widgets.batch.batch_processor_thread", raising=False)
+    batch_module = importlib.import_module("app.ui.widgets.batch.batch_processor_thread")
+
+    batch_thread = batch_module.BatchProcessorThread(
+        queue=[],
+        ai_params={},
+        config=None,
+        preloaded_ai_handler=None,
+        max_concurrent_files=1,
+    )
+
+    class _FakeProcessor:
+        pass
+
+    fake_processor = _FakeProcessor()
+    fake_processor.last_effective_processing_info = None
+    fake_processor.last_processing_info = {
+        "quality_level": raw_quality_level,
+        "requested_quality_level": raw_quality_level,
+        "effective_quality_level": (
+            raw_quality_level if effective_quality_level is None else effective_quality_level
+        ),
+    }
+    fake_processor.last_processing_summary = None
+    fake_processor.ai_handler = None
+
+    return batch_thread._build_processing_details(fake_processor)
+
+
+def test_batch_processing_details_includes_effective_quality_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    details = _build_real_batch_processing_details(
+        monkeypatch,
+        raw_quality_level=999,
+        effective_quality_level=5,
+    )
+    assert details["quality_level"] == 999
+    assert details["requested_quality_level"] == 999
+    assert details["effective_quality_level"] == 5
+
+
 def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -213,6 +270,16 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     handler, *_ = _build_handler(signal_handler_module)
     handler._handle_multiple_files(["first.jpg", "second.jpg"])
     handler._start_batch_processing()
+
+    # 模拟批处理中产生的 processing_details（来自真实 BatchProcessorThread 的追溯字段提取逻辑）
+    details = _build_real_batch_processing_details(monkeypatch, raw_quality_level=3)
+    handler._on_batch_file_completed(
+        0,
+        "first_out.jpg",
+        signal_handler_module.ProcessingStatus.COMPLETED,
+        "",
+        details,
+    )
     handler._on_batch_completed()
 
     manifest_path = tmp_path / "manifest.json"
@@ -230,6 +297,13 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     assert manifest["batch"]["max_concurrent_files"] == 4
     assert manifest["batch"]["auto_retry_failed"] is True
     assert manifest["batch"]["max_retry_count"] == 3
+
+    # 关键回归断言：processing_details 同时包含请求值与实际生效值
+    first_item = manifest["items"][0]
+    assert isinstance(first_item.get("processing_details"), dict)
+    assert first_item["processing_details"]["quality_level"] == 3
+    assert first_item["processing_details"]["requested_quality_level"] == 3
+    assert first_item["processing_details"]["effective_quality_level"] == 3
 
 
 def test_handle_queue_clear_clears_last_batch_snapshot(

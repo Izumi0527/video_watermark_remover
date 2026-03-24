@@ -158,6 +158,9 @@ def _build_lightweight_ai_handler(detector: _DummyDetector, ai_handler_cls: type
     handler.configured_inpainting_model_path = None
     handler.loaded_inpainting_model_path = None
     handler.last_inpainting_backend = None
+    handler.last_effective_quality_level = None
+    handler.last_effective_inpaint_radius = None
+    handler.last_gpu_inpainting_runtime_error = None
     handler.device = "cpu"
     handler.dl_inpainter = None
     handler.watermark_detector = detector
@@ -528,11 +531,11 @@ def test_ai_handler_passes_gpu_profile_params_to_dl_inpainter(
     assert info["gpu_inpainting_profile"]["quality_level"] == 5
 
 
-def test_ai_handler_does_not_report_gpu_success_when_dl_inpainting_fails(
+def test_ai_handler_falls_back_to_opencv_when_dl_inpainting_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """GPU 修复执行失败时，processing_info 不应误报成功后端。"""
+    """GPU 修复执行失败时，应降级到 OpenCV 且不误报 GPU 成功。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
@@ -555,6 +558,18 @@ def test_ai_handler_does_not_report_gpu_success_when_dl_inpainting_fails(
         raise RuntimeError("gpu inpaint failed")
 
     handler.dl_inpainter.inpaint_frame = raise_inpaint_error
+    captured = {}
+
+    def fallback_inpaint(frame, mask, method=None, radius=3, quality_level=3):
+        captured["method"] = method
+        captured["radius"] = radius
+        captured["quality_level"] = quality_level
+        handler.image_inpainter.last_quality_level = 2
+        handler.image_inpainter.last_effective_radius = 9
+        handler.image_inpainter.last_method_used = "telea"
+        return frame.copy()
+
+    handler.image_inpainter.inpaint_frame = fallback_inpaint
 
     _, info = handler.process_frame(
         _create_test_frame(),
@@ -564,9 +579,71 @@ def test_ai_handler_does_not_report_gpu_success_when_dl_inpainting_fails(
         },
     )
 
-    assert info["inpainting_backend"] is None
-    assert info["inpainting_method"] is None
+    assert captured == {
+        "method": "auto",
+        "radius": 6,
+        "quality_level": 4,
+    }
+    assert handler.use_gpu_inpainting is False
+    assert info["inpainting_backend"] == "opencv"
+    assert info["inpainting_method"] == "telea"
     assert info["gpu_inpainting_profile"] is None
+    assert info["gpu_inpainting_fallback_reason"] == "gpu_runtime_exception"
+    assert "gpu inpaint failed" in info["gpu_inpainting_runtime_error"]
+    assert info["loaded_inpainting_model_path"] == str(model_path)
+    assert info["quality_level"] == 4
+    assert info["requested_quality_level"] == 4
+    assert info["effective_quality_level"] == 2
+    assert info["effective_inpaint_radius"] == 9
+
+
+def test_ai_handler_reports_effective_quality_level_from_gpu_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """GPU 路径成功时，应把 profile 中的实际质量等级写入 processing_info。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "quality_level": 9,
+            "inpaint_radius": 6,
+        },
+    )
+    assert handler.load_models() is True
+
+    def fake_inpaint(frame, mask, radius=3, quality_level=3, profile=None):
+        handler.dl_inpainter.last_profile_used = {
+            "requested_radius": radius,
+            "quality_level": 5,
+            "mask_expand_px": 10,
+            "mask_feather_px": 6,
+        }
+        return frame.copy()
+
+    handler.dl_inpainter.inpaint_frame = fake_inpaint
+
+    _, info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": False,
+            "user_mask": [(1, 1, 10, 10)],
+        },
+    )
+
+    assert info["quality_level"] == 9
+    assert info["requested_quality_level"] == 9
+    assert info["effective_quality_level"] == 5
+    assert info["effective_inpaint_radius"] == 6
+    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
 
 
 def test_ai_handler_reports_gpu_oom_retry_info(

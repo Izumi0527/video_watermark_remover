@@ -8,6 +8,7 @@ BatchProcessorThread 预加载 AIHandler 复用策略测试
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -54,8 +55,9 @@ def test_batch_processor_returns_cancelled_tuple_when_stop_happens_after_process
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from app.ui.widgets.batch import batch_processor_thread as batch_module
-    from app.ui.widgets.batch.batch_processor_thread import BatchProcessorThread, ProcessingStatus
+    batch_module = importlib.import_module("app.ui.widgets.batch.batch_processor_thread")
+    BatchProcessorThread = batch_module.BatchProcessorThread
+    ProcessingStatus = batch_module.ProcessingStatus
 
     batch = BatchProcessorThread(
         queue=[],
@@ -93,8 +95,9 @@ def test_batch_processor_returns_cancelled_tuple_when_stop_happens_after_process
 def test_batch_processor_wrapper_marks_retry_wait_cancel_as_cancelled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.ui.widgets.batch import batch_processor_thread as batch_module
-    from app.ui.widgets.batch.batch_processor_thread import BatchProcessorThread, ProcessingStatus
+    batch_module = importlib.import_module("app.ui.widgets.batch.batch_processor_thread")
+    BatchProcessorThread = batch_module.BatchProcessorThread
+    ProcessingStatus = batch_module.ProcessingStatus
 
     batch = BatchProcessorThread(
         queue=[],

@@ -195,8 +195,8 @@ class ConfigValidator:
             "inpainting_algorithm": ValidationRule(
                 param_name="inpainting_algorithm",
                 param_type=str,
-                default="gpu_dl",
-                allowed_values=["gpu_dl", "telea", "navier_stokes", "custom_interpolation"],
+                default="auto",
+                allowed_values=["auto", "gpu_dl", "telea", "navier_stokes", "custom_interpolation"],
                 description="修复算法",
             ),
         }

@@ -73,6 +73,9 @@ class AIHandler:
         self.last_gpu_inpainting_oom_retry_used: bool = False
         self.last_gpu_inpainting_retry_count: int = 0
         self.last_gpu_inpainting_retry_profile_used: Optional[dict] = None
+        self.last_effective_quality_level: Optional[int] = None
+        self.last_effective_inpaint_radius: Optional[int] = None
+        self.last_gpu_inpainting_runtime_error: Optional[str] = None
         self.gpu_inpainting_fallback_reason: Optional[str] = None
         self.configured_inpainting_model_path = self._resolve_inpainting_model_path()
         self.loaded_inpainting_model_path: Optional[str] = None
@@ -301,6 +304,10 @@ class AIHandler:
                 "gpu_inpainting_oom_retry_used": False,
                 "gpu_inpainting_retry_count": 0,
                 "gpu_inpainting_retry_profile": None,
+                "requested_quality_level": self.quality_level,
+                "effective_quality_level": None,
+                "effective_inpaint_radius": None,
+                "gpu_inpainting_runtime_error": None,
                 "device": self.device,
             }
 
@@ -415,9 +422,19 @@ class AIHandler:
                 )
                 processing_info["watermark_area_ratio"] = area_ratio
                 processing_info["quality_level"] = self.quality_level
+                processing_info["requested_quality_level"] = self.quality_level
+                processing_info["effective_quality_level"] = getattr(
+                    self, "last_effective_quality_level", None
+                )
+                processing_info["effective_inpaint_radius"] = getattr(
+                    self, "last_effective_inpaint_radius", None
+                )
                 processing_info[
                     "gpu_inpainting_fallback_reason"
                 ] = self.gpu_inpainting_fallback_reason
+                processing_info["gpu_inpainting_runtime_error"] = getattr(
+                    self, "last_gpu_inpainting_runtime_error", None
+                )
                 processing_info["loaded_inpainting_model_path"] = self.loaded_inpainting_model_path
                 processing_info["gpu_inpainting_profile"] = getattr(
                     self,
@@ -515,7 +532,7 @@ class AIHandler:
             self.logger.error(f"Error in direct watermark detection: {e}")
             return None
 
-    def inpaint_frame(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def inpaint_frame(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:  # noqa: C901
         """
         直接调用图像修复功能
 
@@ -537,37 +554,55 @@ class AIHandler:
             self.last_gpu_inpainting_oom_retry_used = False
             self.last_gpu_inpainting_retry_count = 0
             self.last_gpu_inpainting_retry_profile_used = None
+            self.last_effective_quality_level = None
+            self.last_effective_inpaint_radius = None
+            self.last_gpu_inpainting_runtime_error = None
 
             # 优先使用深度学习 inpainter (如果已启用)
             if self.use_gpu_inpainting and self.dl_inpainter is not None:
-                dl_result = cast(
-                    np.ndarray,
-                    self.dl_inpainter.inpaint_frame(
-                        frame,
-                        mask,
-                        radius=self.inpaint_radius,
-                        quality_level=self.quality_level,
-                    ),
-                )
-                profile_used = getattr(self.dl_inpainter, "last_profile_used", None)
-                if isinstance(profile_used, dict):
-                    self.last_gpu_inpainting_profile_used = dict(profile_used)
-                retry_info = getattr(self.dl_inpainter, "last_retry_info", None)
-                if isinstance(retry_info, dict):
-                    self.last_gpu_inpainting_retry_info = dict(retry_info)
-                self.last_gpu_inpainting_oom_retry_used = bool(
-                    getattr(self.dl_inpainter, "last_oom_retry_used", False)
-                )
-                self.last_gpu_inpainting_retry_count = int(
-                    getattr(self.dl_inpainter, "last_oom_retry_count", 0)
-                )
-                retry_profile_used = getattr(self.dl_inpainter, "last_retry_profile_used", None)
-                if isinstance(retry_profile_used, dict):
-                    self.last_gpu_inpainting_retry_profile_used = dict(retry_profile_used)
-                self.last_inpainting_method_used = "gpu_deep_learning_unet"
-                self.last_inpainting_backend = "gpu_deep_learning_unet"
-                typed_result = np.asarray(dl_result)
-                return cast(np.ndarray, typed_result)
+                try:
+                    dl_result = cast(
+                        np.ndarray,
+                        self.dl_inpainter.inpaint_frame(
+                            frame,
+                            mask,
+                            radius=self.inpaint_radius,
+                            quality_level=self.quality_level,
+                        ),
+                    )
+                    profile_used = getattr(self.dl_inpainter, "last_profile_used", None)
+                    if isinstance(profile_used, dict):
+                        self.last_gpu_inpainting_profile_used = dict(profile_used)
+                    retry_info = getattr(self.dl_inpainter, "last_retry_info", None)
+                    if isinstance(retry_info, dict):
+                        self.last_gpu_inpainting_retry_info = dict(retry_info)
+                    self.last_gpu_inpainting_oom_retry_used = bool(
+                        getattr(self.dl_inpainter, "last_oom_retry_used", False)
+                    )
+                    self.last_gpu_inpainting_retry_count = int(
+                        getattr(self.dl_inpainter, "last_oom_retry_count", 0)
+                    )
+                    retry_profile_used = getattr(self.dl_inpainter, "last_retry_profile_used", None)
+                    if isinstance(retry_profile_used, dict):
+                        self.last_gpu_inpainting_retry_profile_used = dict(retry_profile_used)
+                    self._update_effective_inpainting_observation_from_gpu_profile(
+                        self.last_gpu_inpainting_profile_used
+                        or self.last_gpu_inpainting_retry_profile_used
+                    )
+                    self.last_inpainting_method_used = "gpu_deep_learning_unet"
+                    self.last_inpainting_backend = "gpu_deep_learning_unet"
+                    typed_result = np.asarray(dl_result)
+                    return cast(np.ndarray, typed_result)
+                except Exception as exc:
+                    self.last_gpu_inpainting_runtime_error = str(exc)
+                    self._disable_gpu_inpainting(
+                        "gpu_runtime_exception",
+                        clear_loaded_model_path=False,
+                    )
+                    self.logger.error(
+                        "GPU inpainting failed at runtime, falling back to OpenCV: %s",
+                        exc,
+                    )
 
             # 降级使用 OpenCV inpainter
             if hasattr(self, "image_inpainter") and self.image_inpainter is not None:
@@ -586,6 +621,7 @@ class AIHandler:
                 self.last_inpainting_method_used = (
                     getattr(self.image_inpainter, "last_method_used", None) or resolved_method
                 )
+                self._update_effective_inpainting_observation_from_opencv()
                 return cast(np.ndarray, result)
 
             self.logger.error("No inpainter available")
@@ -620,11 +656,12 @@ class AIHandler:
 
         return str(Path(normalized_path).expanduser())
 
-    def _disable_gpu_inpainting(self, reason: str) -> None:
+    def _disable_gpu_inpainting(self, reason: str, clear_loaded_model_path: bool = True) -> None:
         """禁用 GPU 修复，并记录明确的降级原因。"""
         self.use_gpu_inpainting = False
         self.dl_inpainter = None
-        self.loaded_inpainting_model_path = None
+        if clear_loaded_model_path:
+            self.loaded_inpainting_model_path = None
         self.gpu_inpainting_fallback_reason = reason
 
     def _load_gpu_inpainter_or_fallback(self) -> bool:
@@ -720,6 +757,48 @@ class AIHandler:
                 "enhance_saturation": 1.18,
             },
         }[quality]
+
+    def _normalize_effective_quality_level(self, quality_level: Optional[int]) -> Optional[int]:
+        """将追溯用质量等级限制在 1-5 之间。"""
+        if quality_level is None:
+            return None
+        try:
+            normalized = int(quality_level)
+        except (TypeError, ValueError):
+            return None
+        return max(1, min(5, normalized))
+
+    def _normalize_effective_inpaint_radius(self, radius: Optional[int]) -> Optional[int]:
+        """将追溯用半径归一为正整数。"""
+        if radius is None:
+            return None
+        try:
+            normalized = int(radius)
+        except (TypeError, ValueError):
+            return None
+        return max(1, normalized)
+
+    def _update_effective_inpainting_observation_from_gpu_profile(
+        self, profile: Optional[dict]
+    ) -> None:
+        """从 GPU profile 提取最终实际生效的观测字段。"""
+        if not isinstance(profile, dict):
+            return
+        self.last_effective_quality_level = self._normalize_effective_quality_level(
+            profile.get("quality_level")
+        )
+        self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
+            profile.get("requested_radius")
+        )
+
+    def _update_effective_inpainting_observation_from_opencv(self) -> None:
+        """从 OpenCV 修复器同步最终实际生效的观测字段。"""
+        self.last_effective_quality_level = self._normalize_effective_quality_level(
+            getattr(self.image_inpainter, "last_quality_level", None)
+        )
+        self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
+            getattr(self.image_inpainter, "last_effective_radius", None)
+        )
 
 
 # 测试代码

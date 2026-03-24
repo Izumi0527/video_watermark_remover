@@ -373,10 +373,14 @@ class BatchProcessorThread(QThread):
                 "inpainting_method",
                 "inpainting_backend",
                 "quality_level",
+                "requested_quality_level",
+                "effective_quality_level",
+                "effective_inpaint_radius",
                 "preprocessing_applied",
                 "postprocessing_applied",
                 "gpu_inpainting_requested",
                 "gpu_inpainting_fallback_reason",
+                "gpu_inpainting_runtime_error",
                 "configured_inpainting_model_path",
                 "loaded_inpainting_model_path",
                 "gpu_inpainting_profile",
@@ -389,6 +393,12 @@ class BatchProcessorThread(QThread):
             for key in keep_keys:
                 if key in info:
                     details[key] = info.get(key)
+            if "quality_level" in details and "requested_quality_level" not in details:
+                details["requested_quality_level"] = details.get("quality_level")
+            if "effective_quality_level" not in details and "quality_level" in details:
+                details["effective_quality_level"] = self._normalize_effective_quality_level(
+                    details.get("quality_level")
+                )
             details["processing_info_source"] = info_source
 
         handler = getattr(processor, "ai_handler", None)
@@ -396,8 +406,14 @@ class BatchProcessorThread(QThread):
             # 不覆盖 processing_info 中已有的键，仅用于补齐观测字段。
             fallback_pairs = {
                 "device": getattr(handler, "device", None),
+                "requested_quality_level": getattr(handler, "quality_level", None),
+                "effective_quality_level": getattr(handler, "last_effective_quality_level", None),
+                "effective_inpaint_radius": getattr(handler, "last_effective_inpaint_radius", None),
                 "gpu_inpainting_fallback_reason": getattr(
                     handler, "gpu_inpainting_fallback_reason", None
+                ),
+                "gpu_inpainting_runtime_error": getattr(
+                    handler, "last_gpu_inpainting_runtime_error", None
                 ),
                 "configured_inpainting_model_path": getattr(
                     handler, "configured_inpainting_model_path", None
@@ -415,6 +431,17 @@ class BatchProcessorThread(QThread):
             details["summary"] = dict(summary)
 
         return details
+
+    @staticmethod
+    def _normalize_effective_quality_level(raw_quality_level: Any) -> Optional[int]:
+        """兼容旧 processing_info，仅在缺少 effective 值时补位。"""
+        if raw_quality_level is None:
+            return None
+        try:
+            normalized = int(raw_quality_level)
+        except (TypeError, ValueError):
+            return None
+        return max(1, min(5, normalized))
 
     def _process_single_file(  # noqa: C901
         self, input_path: str, output_path: str, file_index: int

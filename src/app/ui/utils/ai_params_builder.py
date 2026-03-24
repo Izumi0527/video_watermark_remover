@@ -328,14 +328,38 @@ class AIParamsBuilder:
         - "Navier-Stokes 高质量 (OpenCV)" → "navier_stokes"
         - "自定义插值方法" → "custom_interpolation"
         """
-        method_mapping = {
+        ui_mapping = {
             "GPU 深度学习 U-Net (推荐)": "gpu_dl",
             "TELEA 快速修复 (OpenCV)": "telea",
             "Navier-Stokes 高质量 (OpenCV)": "navier_stokes",
             "自定义插值方法": "custom_interpolation",
         }
+        normalized = str(inpainting_method or "").strip()
+        if normalized in ui_mapping:
+            return ui_mapping[normalized]
 
-        return method_mapping.get(inpainting_method, "gpu_dl")
+        lowered = normalized.lower()
+        compact = lowered.replace("_", "").replace("-", "").replace(" ", "")
+        compatibility_mapping = {
+            "auto": "auto",
+            "telea": "telea",
+            "opencvtelea": "telea",
+            "ns": "navier_stokes",
+            "navierstokes": "navier_stokes",
+            "custom": "custom_interpolation",
+            "custominterpolation": "custom_interpolation",
+            "gpudl": "gpu_dl",
+            "gpuunet": "gpu_dl",
+            "gpudeeplearningunet": "gpu_dl",
+        }
+        if compact in compatibility_mapping:
+            return compatibility_mapping[compact]
+
+        self.logger.warning(
+            "[修复参数] 未识别的 inpainting_method=%r，安全回退到 auto，避免误触发 GPU 路径",
+            inpainting_method,
+        )
+        return "auto"
 
     def create_mask_from_regions(
         self, regions: List[tuple], image_shape: tuple
