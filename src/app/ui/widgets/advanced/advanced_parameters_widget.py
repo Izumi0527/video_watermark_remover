@@ -415,7 +415,7 @@ class AdvancedParametersWidget(QWidget):
             "enable_blur_preprocess": True,
             "enable_sharp_preprocess": False,
             "enable_denoise_preprocess": True,
-            "inpainting_method": "GPU 深度学习 U-Net (推荐)",
+            "inpainting_method": "LaMa 深度学习修复（推荐）",
             "inpainting_radius": 3,
             "inpainting_quality": 3,
             "enable_smooth_postprocess": True,

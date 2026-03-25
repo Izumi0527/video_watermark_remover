@@ -157,6 +157,7 @@ app.log
 # Models (if large or downloaded)
 models/yolo11*.pt
 !models/placeholder.txt
+models/big-lama.pt
 
 # Output/Generated videos
 output/

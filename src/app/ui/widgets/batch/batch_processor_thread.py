@@ -372,6 +372,9 @@ class BatchProcessorThread(QThread):
                 "watermark_area_ratio",
                 "inpainting_method",
                 "inpainting_backend",
+                "requested_inpainting_backend",
+                "actual_inpainting_backend",
+                "inpainting_fallback_reason",
                 "quality_level",
                 "requested_quality_level",
                 "effective_quality_level",
@@ -381,6 +384,8 @@ class BatchProcessorThread(QThread):
                 "gpu_inpainting_requested",
                 "gpu_inpainting_fallback_reason",
                 "gpu_inpainting_runtime_error",
+                "configured_inpainting_asset_ref",
+                "loaded_inpainting_asset_ref",
                 "configured_inpainting_model_path",
                 "loaded_inpainting_model_path",
                 "gpu_inpainting_profile",
@@ -409,11 +414,24 @@ class BatchProcessorThread(QThread):
                 "requested_quality_level": getattr(handler, "quality_level", None),
                 "effective_quality_level": getattr(handler, "last_effective_quality_level", None),
                 "effective_inpaint_radius": getattr(handler, "last_effective_inpaint_radius", None),
+                "requested_inpainting_backend": getattr(
+                    handler, "requested_inpainting_backend", None
+                ),
+                "actual_inpainting_backend": getattr(handler, "last_inpainting_backend", None),
+                "inpainting_fallback_reason": getattr(
+                    handler, "gpu_inpainting_fallback_reason", None
+                ),
                 "gpu_inpainting_fallback_reason": getattr(
                     handler, "gpu_inpainting_fallback_reason", None
                 ),
                 "gpu_inpainting_runtime_error": getattr(
                     handler, "last_gpu_inpainting_runtime_error", None
+                ),
+                "configured_inpainting_asset_ref": getattr(
+                    handler, "configured_inpainting_asset_ref", None
+                ),
+                "loaded_inpainting_asset_ref": getattr(
+                    handler, "loaded_inpainting_asset_ref", None
                 ),
                 "configured_inpainting_model_path": getattr(
                     handler, "configured_inpainting_model_path", None

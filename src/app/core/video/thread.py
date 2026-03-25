@@ -21,11 +21,15 @@ FFmpegAudioProcessor = None
 AI_HANDLER_REFRESH_KEYS = (
     "device",
     "use_gpu_inpainting",
+    "requested_inpainting_backend",
+    "opencv_inpainting_method",
     "inpainting_algorithm",
     "inpaint_radius",
     "quality_level",
     "min_area_pixels",
     "inpainting_model_path",
+    "lama_model_path",
+    "lama_model_dir",
 )
 
 
@@ -82,6 +86,16 @@ def _inject_inpainting_model_path(
     model_path = _get_optional_config_value(config, "inpainting_model_path", ("Models", "models"))
     if model_path:
         merged_params["inpainting_model_path"] = model_path
+
+    if not merged_params.get("lama_model_path"):
+        lama_model_path = _get_optional_config_value(config, "lama_model_path", ("Models", "models"))
+        if lama_model_path:
+            merged_params["lama_model_path"] = lama_model_path
+
+    if not merged_params.get("lama_model_dir"):
+        lama_model_dir = _get_optional_config_value(config, "lama_model_dir", ("Models", "models"))
+        if lama_model_dir:
+            merged_params["lama_model_dir"] = lama_model_dir
     return merged_params
 
 

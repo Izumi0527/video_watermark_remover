@@ -253,13 +253,38 @@ def test_batch_processing_details_includes_effective_quality_level(
     assert details["effective_quality_level"] == 5
 
 
+def test_batch_processing_details_keeps_backend_trace_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    details = _build_real_batch_processing_details(
+        monkeypatch,
+        raw_quality_level=3,
+        effective_quality_level=3,
+    )
+    details.update(
+        {
+            "requested_inpainting_backend": "lama",
+            "actual_inpainting_backend": "opencv",
+            "inpainting_fallback_reason": "lama_runtime_exception",
+        }
+    )
+
+    assert details["requested_inpainting_backend"] == "lama"
+    assert details["actual_inpainting_backend"] == "opencv"
+    assert details["inpainting_fallback_reason"] == "lama_runtime_exception"
+
+
 def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
 
-    builder_result = {"auto_detect": True, "quality_level": 3}
+    builder_result = {
+        "auto_detect": True,
+        "quality_level": 3,
+        "requested_inpainting_backend": "lama",
+    }
 
     class _DummyAIParamsBuilder:
         def build_from_ui(self, **kwargs):
@@ -273,6 +298,13 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
 
     # 模拟批处理中产生的 processing_details（来自真实 BatchProcessorThread 的追溯字段提取逻辑）
     details = _build_real_batch_processing_details(monkeypatch, raw_quality_level=3)
+    details.update(
+        {
+            "requested_inpainting_backend": "lama",
+            "actual_inpainting_backend": "opencv",
+            "inpainting_fallback_reason": "lama_runtime_exception",
+        }
+    )
     handler._on_batch_file_completed(
         0,
         "first_out.jpg",
@@ -304,6 +336,9 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     assert first_item["processing_details"]["quality_level"] == 3
     assert first_item["processing_details"]["requested_quality_level"] == 3
     assert first_item["processing_details"]["effective_quality_level"] == 3
+    assert first_item["processing_details"]["requested_inpainting_backend"] == "lama"
+    assert first_item["processing_details"]["actual_inpainting_backend"] == "opencv"
+    assert first_item["processing_details"]["inpainting_fallback_reason"] == "lama_runtime_exception"
 
 
 def test_handle_queue_clear_clears_last_batch_snapshot(

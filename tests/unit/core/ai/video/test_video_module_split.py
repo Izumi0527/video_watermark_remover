@@ -190,6 +190,22 @@ def test_video_processor_thread_injects_inpainting_model_path_from_config() -> N
     assert processor.ai_params["inpainting_model_path"] == "models/unet-stage1.pth"
 
 
+def test_video_processor_thread_injects_lama_model_path_from_config() -> None:
+    from app.core.video.thread import VideoProcessorThread
+
+    config = ConfigParser()
+    config["Models"] = {"lama_model_path": "models/lama-big.ckpt"}
+
+    processor = VideoProcessorThread(
+        input_path="demo.mp4",
+        output_path="out.mp4",
+        ai_params={"requested_inpainting_backend": "lama"},
+        config=config,
+    )
+
+    assert processor.ai_params["lama_model_path"] == "models/lama-big.ckpt"
+
+
 def test_ai_handler_refresh_check_detects_new_inpainting_model_path() -> None:
     from app.core.video import thread as video_thread
 
@@ -204,6 +220,43 @@ def test_ai_handler_refresh_check_detects_new_inpainting_model_path() -> None:
                 "auto_detect": True,
                 "device": "auto",
                 "inpainting_model_path": "models/unet-stage1.pth",
+            },
+        )
+        is True
+    )
+
+
+def test_ai_handler_refresh_check_detects_requested_backend_and_lama_path() -> None:
+    from app.core.video import thread as video_thread
+
+    existing_handler = types.SimpleNamespace(
+        ai_params={
+            "auto_detect": True,
+            "device": "auto",
+            "requested_inpainting_backend": "opencv",
+        },
+    )
+
+    assert (
+        video_thread._ai_handler_needs_refresh(
+            existing_handler,
+            {
+                "auto_detect": True,
+                "device": "auto",
+                "requested_inpainting_backend": "lama",
+            },
+        )
+        is True
+    )
+
+    assert (
+        video_thread._ai_handler_needs_refresh(
+            existing_handler,
+            {
+                "auto_detect": True,
+                "device": "auto",
+                "requested_inpainting_backend": "opencv",
+                "lama_model_path": "models/lama-big.ckpt",
             },
         )
         is True

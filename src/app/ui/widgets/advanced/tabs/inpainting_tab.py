@@ -33,7 +33,8 @@ class InpaintingParametersTab:
         parent_widget.inpainting_method_combo = QComboBox()
         parent_widget.inpainting_method_combo.addItems(
             [
-                "GPU 深度学习 U-Net (推荐)",
+                "LaMa 深度学习修复（推荐）",
+                "兼容 U-Net 深度修复（旧模型）",
                 "TELEA 快速修复 (OpenCV)",
                 "Navier-Stokes 高质量 (OpenCV)",
                 "自定义插值方法",

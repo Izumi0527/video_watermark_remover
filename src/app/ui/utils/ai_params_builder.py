@@ -144,10 +144,18 @@ class AIParamsBuilder:
         params = {}
 
         # 修复方法（带验证）
-        inpainting_method = advanced_params.get("inpainting_method", "GPU 深度学习 U-Net (推荐)")
+        inpainting_method = advanced_params.get("inpainting_method", "LaMa 深度学习修复（推荐）")
         raw_algorithm = self._map_inpainting_method(inpainting_method)
         params["inpainting_algorithm"] = self._validator.validate(
             "inpainting_algorithm", raw_algorithm
+        )
+        params["requested_inpainting_backend"] = self._validator.validate(
+            "requested_inpainting_backend",
+            self._resolve_requested_inpainting_backend(inpainting_method, params["inpainting_algorithm"]),
+        )
+        params["opencv_inpainting_method"] = self._validator.validate(
+            "opencv_inpainting_method",
+            self._resolve_opencv_inpainting_method(params["inpainting_algorithm"]),
         )
 
         # 修复半径（带验证）
@@ -162,7 +170,7 @@ class AIParamsBuilder:
         # 否则即使勾选了“启用 GPU”，也应尊重 OpenCV 算法选择，避免“修复算法看起来不生效”。
         enable_gpu = bool(advanced_params.get("enable_gpu", True))
         params["use_gpu_inpainting"] = bool(
-            enable_gpu and params["inpainting_algorithm"] == "gpu_dl"
+            enable_gpu and params["requested_inpainting_backend"] in {"legacy_unet", "lama", "mat"}
         )
 
         # 后处理选项（布尔值，无需验证）
@@ -173,7 +181,8 @@ class AIParamsBuilder:
         )
 
         self.logger.debug(
-            f"[修复参数] algorithm={params['inpainting_algorithm']}, "
+            f"[修复参数] backend={params['requested_inpainting_backend']}, "
+            f"algorithm={params['inpainting_algorithm']}, "
             f"gpu={params['use_gpu_inpainting']}, radius={params['inpaint_radius']}"
         )
 
@@ -323,12 +332,16 @@ class AIParamsBuilder:
         映射修复方法到算法标识
 
         前端选项 → 后端algorithm参数：
+        - "LaMa 深度学习修复（推荐）" → "gpu_dl"（兼容字段，实际后端由 requested_inpainting_backend 决定）
+        - "兼容 U-Net 深度修复（旧模型）" → "gpu_dl"
         - "GPU 深度学习 U-Net (推荐)" → "gpu_dl"
         - "TELEA 快速修复 (OpenCV)" → "telea"
         - "Navier-Stokes 高质量 (OpenCV)" → "navier_stokes"
         - "自定义插值方法" → "custom_interpolation"
         """
         ui_mapping = {
+            "LaMa 深度学习修复（推荐）": "gpu_dl",
+            "兼容 U-Net 深度修复（旧模型）": "gpu_dl",
             "GPU 深度学习 U-Net (推荐)": "gpu_dl",
             "TELEA 快速修复 (OpenCV)": "telea",
             "Navier-Stokes 高质量 (OpenCV)": "navier_stokes",
@@ -351,6 +364,8 @@ class AIParamsBuilder:
             "gpudl": "gpu_dl",
             "gpuunet": "gpu_dl",
             "gpudeeplearningunet": "gpu_dl",
+            "lama": "gpu_dl",
+            "lamadeeplearningrepairrecommended": "gpu_dl",
         }
         if compact in compatibility_mapping:
             return compatibility_mapping[compact]
@@ -359,6 +374,26 @@ class AIParamsBuilder:
             "[修复参数] 未识别的 inpainting_method=%r，安全回退到 auto，避免误触发 GPU 路径",
             inpainting_method,
         )
+        return "auto"
+
+    def _resolve_requested_inpainting_backend(
+        self, inpainting_method: str, normalized_algorithm: str
+    ) -> str:
+        """根据 UI 选择与兼容算法名，归一到统一后端枚举。"""
+        normalized = str(inpainting_method or "").strip()
+        compact = normalized.lower().replace("_", "").replace("-", "").replace(" ", "")
+        if normalized == "LaMa 深度学习修复（推荐）" or compact == "lama":
+            return "lama"
+        if normalized == "兼容 U-Net 深度修复（旧模型）":
+            return "legacy_unet"
+        if normalized_algorithm == "gpu_dl":
+            return "legacy_unet"
+        return "opencv"
+
+    def _resolve_opencv_inpainting_method(self, normalized_algorithm: str) -> str:
+        """将兼容算法字段收敛成 OpenCV 专用方法枚举。"""
+        if normalized_algorithm in {"telea", "navier_stokes", "custom_interpolation", "auto"}:
+            return normalized_algorithm
         return "auto"
 
     def create_mask_from_regions(

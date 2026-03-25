@@ -10,6 +10,18 @@
 .\scripts\vwr.ps1 help -Verbose
 ```
 
+LaMa 深度修复若需要 TorchScript 版 `big-lama.pt`，可使用以下公开下载源：
+
+```text
+https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt
+```
+
+下载后可设置：
+
+```powershell
+$env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
+```
+
 ---
 
 ## 1. 快速开始（推荐）
@@ -96,6 +108,7 @@
 
 功能：
 - 检查 `.venv`、关键依赖、FFmpeg、配置文件
+- 启动前额外体检 LaMa / 旧 GPU U-Net 权重配置，提前提示缺失、路径错误或可直接使用状态，但不会阻止 OpenCV 降级启动
 - `-AutoFix` 时可自动执行 `setup`、并在**用户配置目录**自动生成 `config.ini`（来自 `config.ini.example`）
 - 使用 `.venv\Scripts\python.exe` 启动 `main.py`，再转发到 `app.entrypoints:main`
 

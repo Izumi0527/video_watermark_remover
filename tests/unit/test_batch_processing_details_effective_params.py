@@ -21,6 +21,9 @@ def test_build_processing_details_keeps_effective_params_and_runtime_error(
         "quality_level": 999,
         "effective_quality_level": 5,
         "effective_inpaint_radius": 9,
+        "requested_inpainting_backend": "lama",
+        "actual_inpainting_backend": "opencv",
+        "inpainting_fallback_reason": "lama_runtime_exception",
         "gpu_inpainting_runtime_error": "gpu runtime exploded",
         "device": "cuda",
     }
@@ -33,4 +36,7 @@ def test_build_processing_details_keeps_effective_params_and_runtime_error(
     assert details["quality_level"] == 999
     assert details["effective_quality_level"] == 5
     assert details["effective_inpaint_radius"] == 9
+    assert details["requested_inpainting_backend"] == "lama"
+    assert details["actual_inpainting_backend"] == "opencv"
+    assert details["inpainting_fallback_reason"] == "lama_runtime_exception"
     assert details["gpu_inpainting_runtime_error"] == "gpu runtime exploded"

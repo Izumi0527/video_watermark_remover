@@ -1095,6 +1095,336 @@ function Assert-DevTools {
     }
 }
 
+function Get-LamaTorchScriptDownloadUrl {
+    return "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
+}
+
+function Show-LamaTorchScriptHint {
+    $url = Get-LamaTorchScriptDownloadUrl
+    Write-Info "LaMa TorchScript 模型下载（big-lama.pt）：$url"
+    Write-Info '下载后可设置：$env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"'
+}
+
+function Resolve-ConfigOptionValue {
+    param(
+        [string]$ConfigPath,
+        [string[]]$OptionNames
+    )
+
+    $result = @{
+        Value = ""
+        OptionName = ""
+    }
+
+    if (-not $ConfigPath -or -not (Test-Path $ConfigPath)) {
+        return $result
+    }
+
+    try {
+        foreach ($line in Get-Content -Path $ConfigPath -Encoding UTF8) {
+            $trimmed = [string]$line
+            if (-not $trimmed) {
+                continue
+            }
+
+            foreach ($optionName in $OptionNames) {
+                $pattern = '^\s*' + [regex]::Escape($optionName) + '\s*=\s*(.+?)\s*$'
+                if ($trimmed -match $pattern) {
+                    $resolvedValue = [string]$Matches[1]
+                    if ($resolvedValue -and $resolvedValue.Trim()) {
+                        $result.Value = $resolvedValue.Trim()
+                        $result.OptionName = $optionName
+                        return $result
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Debug "读取配置项失败：$($_.Exception.Message)"
+    }
+
+    return $result
+}
+
+function Get-LamaCommonAssetCandidates {
+    return @(
+        (Join-Path $ProjectRoot "models/big-lama.pt"),
+        (Join-Path $ProjectRoot "models/lama/big-lama.pt")
+    )
+}
+
+function Resolve-LamaStartupAssetRef {
+    param([string]$ConfigPath)
+
+    if ($env:VWR_LAMA_MODEL_PATH -and $env:VWR_LAMA_MODEL_PATH.Trim()) {
+        return @{
+            Path = $env:VWR_LAMA_MODEL_PATH.Trim()
+            Source = "VWR_LAMA_MODEL_PATH"
+        }
+    }
+
+    $configValue = Resolve-ConfigOptionValue -ConfigPath $ConfigPath -OptionNames @("lama_model_path", "lama_model_dir")
+    if ($configValue.Value) {
+        return @{
+            Path = $configValue.Value
+            Source = "config:$($configValue.OptionName)"
+        }
+    }
+
+    foreach ($candidate in Get-LamaCommonAssetCandidates) {
+        if (Test-Path $candidate) {
+            return @{
+                Path = $candidate
+                Source = "project:$([System.IO.Path]::GetFileName($candidate))"
+            }
+        }
+    }
+
+    return @{
+        Path = ""
+        Source = ""
+    }
+}
+
+function Resolve-LegacyInpaintingStartupAssetRef {
+    param([string]$ConfigPath)
+
+    if ($env:VWR_INPAINTING_MODEL_PATH -and $env:VWR_INPAINTING_MODEL_PATH.Trim()) {
+        return @{
+            Path = $env:VWR_INPAINTING_MODEL_PATH.Trim()
+            Source = "VWR_INPAINTING_MODEL_PATH"
+        }
+    }
+
+    $configValue = Resolve-ConfigOptionValue -ConfigPath $ConfigPath -OptionNames @("inpainting_model_path")
+    if ($configValue.Value) {
+        return @{
+            Path = $configValue.Value
+            Source = "config:$($configValue.OptionName)"
+        }
+    }
+
+    return @{
+        Path = ""
+        Source = ""
+    }
+}
+
+function Resolve-LamaTorchScriptAssetStatus {
+    param([string]$AssetRef)
+
+    if (-not $AssetRef -or -not $AssetRef.Trim()) {
+        return @{
+            Status = "missing"
+            ResolvedPath = ""
+            Detail = ""
+        }
+    }
+
+    if (-not (Test-Path $AssetRef)) {
+        return @{
+            Status = "path_missing"
+            ResolvedPath = $AssetRef
+            Detail = ""
+        }
+    }
+
+    $item = Get-Item -LiteralPath $AssetRef -ErrorAction SilentlyContinue
+    if ($null -eq $item) {
+        return @{
+            Status = "path_missing"
+            ResolvedPath = $AssetRef
+            Detail = ""
+        }
+    }
+
+    if ($item.PSIsContainer) {
+        foreach ($candidate in @(
+                (Join-Path $item.FullName "big-lama.pt"),
+                (Join-Path $item.FullName "lama.pt"),
+                (Join-Path $item.FullName "model.pt"),
+                (Join-Path $item.FullName "models/big-lama.pt"),
+                (Join-Path $item.FullName "models/lama.pt"),
+                (Join-Path $item.FullName "models/model.pt")
+            )) {
+            if (Test-Path $candidate) {
+                return @{
+                    Status = "ready"
+                    ResolvedPath = $candidate
+                    Detail = "directory_candidate"
+                }
+            }
+        }
+
+        return @{
+            Status = "directory_missing_torchscript"
+            ResolvedPath = $item.FullName
+            Detail = ""
+        }
+    }
+
+    $suffix = $item.Extension.ToLowerInvariant()
+    if ($suffix -in @(".pt", ".jit", ".ts")) {
+        return @{
+            Status = "ready"
+            ResolvedPath = $item.FullName
+            Detail = ""
+        }
+    }
+
+    if ($suffix -in @(".pth", ".ckpt")) {
+        return @{
+            Status = "unsupported_format"
+            ResolvedPath = $item.FullName
+            Detail = "当前 LaMa runner 仅支持 TorchScript .pt/.jit/.ts 文件。"
+        }
+    }
+
+    return @{
+        Status = "unsupported_format"
+        ResolvedPath = $item.FullName
+        Detail = "无法识别的 LaMa 资产文件类型。"
+    }
+}
+
+function Resolve-LegacyInpaintingAssetStatus {
+    param([string]$AssetRef)
+
+    if (-not $AssetRef -or -not $AssetRef.Trim()) {
+        return @{
+            Status = "missing"
+            ResolvedPath = ""
+        }
+    }
+
+    if (-not (Test-Path $AssetRef)) {
+        return @{
+            Status = "path_missing"
+            ResolvedPath = $AssetRef
+        }
+    }
+
+    $item = Get-Item -LiteralPath $AssetRef -ErrorAction SilentlyContinue
+    if ($null -eq $item) {
+        return @{
+            Status = "path_missing"
+            ResolvedPath = $AssetRef
+        }
+    }
+
+    if ($item.PSIsContainer) {
+        return @{
+            Status = "directory_path"
+            ResolvedPath = $item.FullName
+        }
+    }
+
+    return @{
+        Status = "ready"
+        ResolvedPath = $item.FullName
+    }
+}
+
+function Show-StartupInpaintingPrecheck {
+    param([string]$ConfigPath)
+
+    $lamaRef = Resolve-LamaStartupAssetRef -ConfigPath $ConfigPath
+    $lamaStatus = Resolve-LamaTorchScriptAssetStatus -AssetRef $lamaRef.Path
+    switch ($lamaStatus.Status) {
+        "ready" {
+            Write-Ok "LaMa 启动前检查：已发现可直接用于 LaMa 的 TorchScript 模型：$($lamaStatus.ResolvedPath)"
+        }
+        "path_missing" {
+            Write-Warn "LaMa 启动前检查：$($lamaRef.Source) 指向的路径不存在：$($lamaStatus.ResolvedPath)"
+            Show-LamaTorchScriptHint
+        }
+        "directory_missing_torchscript" {
+            Write-Warn "LaMa 启动前检查：目录中未发现可用的 TorchScript 模型：$($lamaStatus.ResolvedPath)"
+            Show-LamaTorchScriptHint
+        }
+        "unsupported_format" {
+            $detail = $lamaStatus.Detail
+            if (-not $detail) {
+                $detail = "请改用 TorchScript big-lama.pt。"
+            }
+            Write-Warn "LaMa 启动前检查：资产格式不受支持：$($lamaStatus.ResolvedPath)；$detail"
+            Show-LamaTorchScriptHint
+        }
+        default {
+            Write-Info "LaMa 启动前检查：未检测到可用的 TorchScript 模型，如需启用 LaMa 深度修复，请先准备 big-lama.pt。"
+            Show-LamaTorchScriptHint
+        }
+    }
+
+    $legacyRef = Resolve-LegacyInpaintingStartupAssetRef -ConfigPath $ConfigPath
+    $legacyStatus = Resolve-LegacyInpaintingAssetStatus -AssetRef $legacyRef.Path
+    switch ($legacyStatus.Status) {
+        "ready" {
+            Write-Ok "旧 GPU U-Net 启动前检查：已发现候选权重：$($legacyStatus.ResolvedPath)"
+        }
+        "path_missing" {
+            Write-Warn "旧 GPU U-Net 启动前检查：$($legacyRef.Source) 指向的路径不存在：$($legacyStatus.ResolvedPath)"
+            Write-Info '如需启用旧 GPU U-Net，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
+        }
+        "directory_path" {
+            Write-Warn "旧 GPU U-Net 启动前检查：当前路径是目录，请改为权重文件路径：$($legacyStatus.ResolvedPath)"
+            Write-Info '如需启用旧 GPU U-Net，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
+        }
+        default {
+            Write-Info '旧 GPU U-Net 启动前检查：未检测到候选权重；如需启用，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
+        }
+    }
+}
+
+function Test-ConfigHasLamaModelPath {
+    param([string]$ConfigPath)
+
+    if (-not $ConfigPath -or -not (Test-Path $ConfigPath)) {
+        return $false
+    }
+
+    try {
+        foreach ($line in Get-Content -Path $ConfigPath -Encoding UTF8) {
+            $trimmed = [string]$line
+            if (-not $trimmed) {
+                continue
+            }
+            if ($trimmed -match '^\s*(lama_model_path|lama_model_dir)\s*=\s*(.+?)\s*$') {
+                if ($Matches[2] -and $Matches[2].Trim()) {
+                    return $true
+                }
+            }
+        }
+    } catch {
+        Write-Debug "读取 LaMa 配置提示失败：$($_.Exception.Message)"
+    }
+
+    return $false
+}
+
+function Test-ShouldShowLamaTorchScriptHint {
+    param([string]$ConfigPath)
+
+    if ($env:VWR_LAMA_MODEL_PATH -and $env:VWR_LAMA_MODEL_PATH.Trim()) {
+        return $false
+    }
+
+    if (Test-ConfigHasLamaModelPath -ConfigPath $ConfigPath) {
+        return $false
+    }
+
+    foreach ($candidate in @(
+            (Join-Path $ProjectRoot "models/big-lama.pt"),
+            (Join-Path $ProjectRoot "models/lama/big-lama.pt")
+        )) {
+        if (Test-Path $candidate) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Show-Help {
     Write-Host "🎛️ 智能视频水印去除工具 - 统一脚本入口 (vwr.ps1)" -ForegroundColor Green
     Write-Host ("=" * 60) -ForegroundColor Cyan
@@ -1117,6 +1447,10 @@ function Show-Help {
     Write-Host "  test unit         -> tests/unit" -ForegroundColor White
     Write-Host "  test integration  -> tests/integration" -ForegroundColor White
     Write-Host "  test e2e          -> tests/e2e/ps1/*.ps1" -ForegroundColor White
+    Write-Host ""
+    Write-Host "LaMa TorchScript 权重：" -ForegroundColor Cyan
+    Write-Host ("  下载：{0}" -f (Get-LamaTorchScriptDownloadUrl)) -ForegroundColor White
+    Write-Host '  环境变量：$env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"' -ForegroundColor White
     Write-Host ""
 }
 
@@ -1267,6 +1601,9 @@ function Invoke-Run {
         } else {
             Write-Ok "配置文件：$configIni"
         }
+
+        Write-Section "深度修复模型体检"
+        Show-StartupInpaintingPrecheck -ConfigPath $configIni
     } else {
         Write-Warn "已跳过环境检查（-SkipChecks）"
     }

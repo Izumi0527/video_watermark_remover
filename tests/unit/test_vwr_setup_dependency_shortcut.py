@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import hashlib
 import json
 import re
@@ -7,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -56,6 +59,24 @@ def _build_requirements_signature(project_root: Path, entry_file: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+@contextmanager
+def _local_harness_tmpdir():
+    base_dir = Path.cwd() / ".tmp_test_harness"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = base_dir / f"case_{uuid.uuid4().hex}"
+    temp_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        yield temp_dir
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def tmp_path():
+    with _local_harness_tmpdir() as tmp_dir:
+        yield tmp_dir
+
+
 def _run_powershell_harness(tmp_path: Path, harness: str) -> dict:
     project_root = tmp_path / "project"
     scripts_dir = project_root / "scripts"
@@ -69,9 +90,19 @@ def _run_powershell_harness(tmp_path: Path, harness: str) -> dict:
         encoding="utf-8-sig",
     )
 
+    env = os.environ.copy()
+    for leaked_name in (
+        "UV_CACHE_DIR",
+        "VWR_UV_CACHE_DIR",
+        "VWR_LAMA_MODEL_PATH",
+        "VWR_INPAINTING_MODEL_PATH",
+    ):
+        env.pop(leaked_name, None)
+
     completed = subprocess.run(
         [_find_pwsh(), "-NoProfile", "-File", str(test_script)],
         cwd=project_root,
+        env=env,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -88,6 +119,205 @@ def _run_powershell_harness(tmp_path: Path, harness: str) -> dict:
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     assert lines, "PowerShell 测试脚本未输出任何结果"
     return json.loads(lines[-1])
+
+
+def test_get_lama_torchscript_download_url_returns_expected_release_link(
+    tmp_path: Path,
+) -> None:
+    result = _run_powershell_harness(
+        tmp_path,
+        """
+        $url = Get-LamaTorchScriptDownloadUrl
+        @{ Url = $url } | ConvertTo-Json -Compress
+        """,
+    )
+
+    assert (
+        result["Url"]
+        == "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
+    )
+
+
+def test_show_lama_torchscript_hint_outputs_download_guidance(tmp_path: Path) -> None:
+    result = _run_powershell_harness(
+        tmp_path,
+        """
+        $script:Infos = @()
+        function global:Write-Info {
+            param([string]$Message)
+            $script:Infos += $Message
+        }
+
+        Show-LamaTorchScriptHint
+        @{ Infos = $script:Infos } | ConvertTo-Json -Depth 6 -Compress
+        """,
+    )
+
+    assert any("big-lama.pt" in line for line in result["Infos"])
+    assert any("VWR_LAMA_MODEL_PATH" in line for line in result["Infos"])
+
+
+def test_vwr_help_mentions_lama_torchscript_download_link() -> None:
+    completed = subprocess.run(
+        [_find_pwsh(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/vwr.ps1", "help"],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "big-lama.pt" in completed.stdout
+    assert "VWR_LAMA_MODEL_PATH" in completed.stdout
+
+
+def test_startup_precheck_guides_when_no_inpainting_assets_configured() -> None:
+    with _local_harness_tmpdir() as tmp_dir:
+        result = _run_powershell_harness(
+            tmp_dir,
+            """
+        $script:Infos = @()
+        $script:Warns = @()
+        $script:Oks = @()
+
+        function global:Write-Info {
+            param([string]$Message)
+            $script:Infos += $Message
+        }
+        function global:Write-Warn {
+            param([string]$Message)
+            $script:Warns += $Message
+        }
+        function global:Write-Ok {
+            param([string]$Message)
+            $script:Oks += $Message
+        }
+
+        Show-StartupInpaintingPrecheck -ConfigPath ""
+        @{
+            Infos = $script:Infos
+            Warns = $script:Warns
+            Oks = $script:Oks
+        } | ConvertTo-Json -Depth 6 -Compress
+            """,
+        )
+
+    assert any("LaMa" in line and "big-lama.pt" in line for line in result["Infos"])
+    assert any("VWR_LAMA_MODEL_PATH" in line for line in result["Infos"])
+    assert any("VWR_INPAINTING_MODEL_PATH" in line for line in result["Infos"])
+    assert result["Warns"] == []
+    assert result["Oks"] == []
+
+
+def test_startup_precheck_warns_when_lama_env_path_missing() -> None:
+    missing_path = "C:/missing-models/big-lama.pt"
+    with _local_harness_tmpdir() as tmp_dir:
+        result = _run_powershell_harness(
+            tmp_dir,
+            f"""
+        $env:VWR_LAMA_MODEL_PATH = "{missing_path}"
+        $script:Infos = @()
+        $script:Warns = @()
+        $script:Oks = @()
+
+        function global:Write-Info {{
+            param([string]$Message)
+            $script:Infos += $Message
+        }}
+        function global:Write-Warn {{
+            param([string]$Message)
+            $script:Warns += $Message
+        }}
+        function global:Write-Ok {{
+            param([string]$Message)
+            $script:Oks += $Message
+        }}
+
+        Show-StartupInpaintingPrecheck -ConfigPath ""
+        @{{
+            Infos = $script:Infos
+            Warns = $script:Warns
+            Oks = $script:Oks
+        }} | ConvertTo-Json -Depth 6 -Compress
+            """,
+        )
+
+    assert any("VWR_LAMA_MODEL_PATH" in line and "不存在" in line for line in result["Warns"])
+    assert any("big-lama.pt" in line for line in result["Infos"])
+    assert result["Oks"] == []
+
+
+def test_startup_precheck_reports_existing_lama_torchscript_asset() -> None:
+    with _local_harness_tmpdir() as tmp_dir:
+        result = _run_powershell_harness(
+            tmp_dir,
+            """
+        New-Item -ItemType Directory -Path "models" -Force | Out-Null
+        Set-Content -LiteralPath "models/big-lama.pt" -Value "stub" -Encoding ASCII
+
+        $script:Infos = @()
+        $script:Warns = @()
+        $script:Oks = @()
+
+        function global:Write-Info {
+            param([string]$Message)
+            $script:Infos += $Message
+        }
+        function global:Write-Warn {
+            param([string]$Message)
+            $script:Warns += $Message
+        }
+        function global:Write-Ok {
+            param([string]$Message)
+            $script:Oks += $Message
+        }
+
+        Show-StartupInpaintingPrecheck -ConfigPath ""
+        @{
+            Infos = $script:Infos
+            Warns = $script:Warns
+            Oks = $script:Oks
+        } | ConvertTo-Json -Depth 6 -Compress
+            """,
+        )
+
+    assert any("big-lama.pt" in line and "可直接用于 LaMa" in line for line in result["Oks"])
+    assert result["Warns"] == []
+
+
+def test_startup_precheck_is_called_during_invoke_run_environment_checks() -> None:
+    python_path = sys.executable.replace("\\", "/")
+    with _local_harness_tmpdir() as tmp_dir:
+        result = _run_powershell_harness(
+            tmp_dir,
+            f"""
+        Set-Content -LiteralPath "main.py" -Value @'
+import json
+import os
+print(json.dumps({{"precheck_calls": int(os.environ.get("VWR_PRECHECK_CALLS", "0"))}}))
+'@ -Encoding UTF8
+
+        function global:Ensure-Uv {{}}
+        function global:Get-VenvInfo {{
+            return @{{
+                Python = "{python_path}"
+                Root = ".venv"
+            }}
+        }}
+        function global:Ensure-ProjectImportable {{ param([switch]$AutoFixSetup) }}
+        function global:Test-KeyPackages {{ param([switch]$FixIfMissing) return $true }}
+        function global:Test-CommandExists {{ param([string]$Name) return $false }}
+        function global:Show-StartupInpaintingPrecheck {{
+            param([string]$ConfigPath)
+            $env:VWR_PRECHECK_CALLS = "1"
+        }}
+
+        Invoke-Run
+            """,
+        )
+
+    assert result["precheck_calls"] == 1
 
 
 def test_setup_dependency_state_allows_skip_when_signature_matches_and_probes_pass(

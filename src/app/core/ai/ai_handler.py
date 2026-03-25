@@ -20,9 +20,11 @@ import cv2
 import numpy as np
 import torch
 
+from .inpainting_backends.factory import create_inpainting_backend
 from .dl_inpainter import DeepLearningInpainter
 from .image_inpainter import ImageInpainter
 from .image_processor import apply_postprocessing, apply_preprocessing
+from ...utils.inpainting_model_downloader import resolve_inpainting_asset_ref
 
 # 导入拆分出的检测和修复模块
 from .yolo_detector import YOLOWatermarkDetector
@@ -50,6 +52,8 @@ class AIHandler:
         raw_min_area_pixels = self.ai_params.get("min_area_pixels")
         self.min_area_pixels = int(raw_min_area_pixels) if raw_min_area_pixels is not None else None
         self.inpainting_algorithm = self.ai_params.get("inpainting_algorithm", "gpu_dl")
+        self.requested_inpainting_backend = self._derive_requested_inpainting_backend()
+        self.opencv_inpainting_method = self._derive_opencv_inpainting_method()
         self.inpaint_radius = self.ai_params.get("inpaint_radius", 3)
         raw_quality_level = self.ai_params.get("quality_level", 3)
         self.quality_level = int(raw_quality_level) if raw_quality_level is not None else 3
@@ -66,6 +70,8 @@ class AIHandler:
         self.watermark_detector: Optional[YOLOWatermarkDetector] = None  # 延迟初始化,需要先设置 device
         self.image_inpainter = ImageInpainter(config)
         self.dl_inpainter = None  # 深度学习 inpainter (GPU 加速)
+        self.opencv_inpainting_backend = None
+        self.deep_inpainting_backend = None
         self.last_inpainting_method_used: Optional[str] = None
         self.last_inpainting_backend: Optional[str] = None
         self.last_gpu_inpainting_profile_used: Optional[dict] = None
@@ -78,7 +84,10 @@ class AIHandler:
         self.last_gpu_inpainting_runtime_error: Optional[str] = None
         self.gpu_inpainting_fallback_reason: Optional[str] = None
         self.configured_inpainting_model_path = self._resolve_inpainting_model_path()
+        self.configured_lama_model_path = self._resolve_lama_model_path()
+        self.configured_inpainting_asset_ref = self._resolve_inpainting_asset_ref()
         self.loaded_inpainting_model_path: Optional[str] = None
+        self.loaded_inpainting_asset_ref: Optional[str] = None
 
         self.logger = logging.getLogger(__name__)
 
@@ -101,10 +110,12 @@ class AIHandler:
             f"conf_threshold={self.conf_threshold}, "
             f"device={self.device}, "
             f"min_area_pixels={self.min_area_pixels}, "
+            f"requested_inpainting_backend={self.requested_inpainting_backend}, "
             f"inpainting_algorithm={self.inpainting_algorithm}, "
             f"inpaint_radius={self.inpaint_radius}, "
             f"quality_level={self.quality_level}, "
-            f"configured_inpainting_model_path={self.configured_inpainting_model_path}"
+            f"configured_inpainting_model_path={self.configured_inpainting_model_path}, "
+            f"configured_inpainting_asset_ref={self.configured_inpainting_asset_ref}"
         )
 
     def _setup_device(self):
@@ -223,6 +234,8 @@ class AIHandler:
         detector_loaded = self.watermark_detector.load_model()
 
         # 2. 加载图像修复器
+        opencv_loaded = self._ensure_opencv_backend_loaded()
+
         if self.use_gpu_inpainting:
             # 加载深度学习 GPU inpainter
             try:
@@ -232,22 +245,19 @@ class AIHandler:
                 if dl_loaded:
                     self.logger.info("All AI models loaded successfully:")
                     self.logger.info("  - Watermark Detection: YOLO v11s deep learning (GPU)")
-                    self.logger.info("  - Image Inpainting: GPU Deep Learning (U-Net)")
+                    self.logger.info(
+                        "  - Image Inpainting: %s",
+                        self._describe_loaded_deep_inpainting_backend(),
+                    )
                     return detector_loaded and dl_loaded
-                else:
-                    self.logger.error("Failed to load deep learning inpainter")
-                    self.logger.warning("Falling back to OpenCV inpainter")
-                    # 继续使用 OpenCV inpainter
             except Exception as e:
-                self.logger.error(f"Error loading DL inpainter: {e}")
-                self.logger.warning("Falling back to OpenCV inpainter")
+                self.logger.error(f"加载深度修复后端时发生异常：{e}")
+                self.logger.warning("当前改用 OpenCV 修复")
                 self._disable_gpu_inpainting("gpu_inpainter_load_exception")
 
         # 3. 加载 OpenCV inpainter (作为默认或降级选项)
         if not self.use_gpu_inpainting:
-            inpainter_loaded = self.image_inpainter.load_model()
-
-            if detector_loaded and inpainter_loaded:
+            if detector_loaded and opencv_loaded:
                 self.logger.info("All AI models loaded successfully:")
                 self.logger.info("  - Watermark Detection: YOLO v11s deep learning")
                 self.logger.info("  - Image Inpainting: OpenCV interpolation-based repair")
@@ -286,17 +296,25 @@ class AIHandler:
             self.last_gpu_inpainting_oom_retry_used = False
             self.last_gpu_inpainting_retry_count = 0
             self.last_gpu_inpainting_retry_profile_used = None
+            requested_backend = self._derive_requested_inpainting_backend()
             processing_info = {
                 "original_shape": frame.shape,
                 "detection_method": None,
                 "inpainting_method": None,
                 "inpainting_backend": None,
+                "requested_inpainting_backend": requested_backend,
+                "actual_inpainting_backend": None,
+                "inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
                 "watermark_areas_found": 0,
                 "processing_time": 0,
                 "preprocessing_applied": [],
                 "postprocessing_applied": [],
-                "gpu_inpainting_requested": bool(self.requested_gpu_inpainting),
+                "gpu_inpainting_requested": requested_backend in {"legacy_unet", "lama", "mat"},
                 "gpu_inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
+                "configured_inpainting_asset_ref": getattr(
+                    self, "configured_inpainting_asset_ref", None
+                ),
+                "loaded_inpainting_asset_ref": getattr(self, "loaded_inpainting_asset_ref", None),
                 "configured_inpainting_model_path": self.configured_inpainting_model_path,
                 "loaded_inpainting_model_path": self.loaded_inpainting_model_path,
                 "gpu_inpainting_profile": None,
@@ -417,6 +435,9 @@ class AIHandler:
                 processing_info["inpainting_method"] = (
                     self.last_inpainting_method_used or processing_info["inpainting_method"]
                 )
+                processing_info["actual_inpainting_backend"] = (
+                    self.last_inpainting_backend or processing_info["actual_inpainting_backend"]
+                )
                 processing_info["inpainting_backend"] = (
                     self.last_inpainting_backend or processing_info["inpainting_backend"]
                 )
@@ -432,8 +453,12 @@ class AIHandler:
                 processing_info[
                     "gpu_inpainting_fallback_reason"
                 ] = self.gpu_inpainting_fallback_reason
+                processing_info["inpainting_fallback_reason"] = self.gpu_inpainting_fallback_reason
                 processing_info["gpu_inpainting_runtime_error"] = getattr(
                     self, "last_gpu_inpainting_runtime_error", None
+                )
+                processing_info["loaded_inpainting_asset_ref"] = getattr(
+                    self, "loaded_inpainting_asset_ref", None
                 )
                 processing_info["loaded_inpainting_model_path"] = self.loaded_inpainting_model_path
                 processing_info["gpu_inpainting_profile"] = getattr(
@@ -559,44 +584,25 @@ class AIHandler:
             self.last_gpu_inpainting_runtime_error = None
 
             # 优先使用深度学习 inpainter (如果已启用)
-            if self.use_gpu_inpainting and self.dl_inpainter is not None:
+            if self.use_gpu_inpainting and self.deep_inpainting_backend is not None:
                 try:
                     dl_result = cast(
                         np.ndarray,
-                        self.dl_inpainter.inpaint_frame(
+                        self.deep_inpainting_backend.inpaint_frame(
                             frame,
                             mask,
-                            radius=self.inpaint_radius,
+                            inpaint_radius=self.inpaint_radius,
                             quality_level=self.quality_level,
+                            opencv_method="auto",
                         ),
                     )
-                    profile_used = getattr(self.dl_inpainter, "last_profile_used", None)
-                    if isinstance(profile_used, dict):
-                        self.last_gpu_inpainting_profile_used = dict(profile_used)
-                    retry_info = getattr(self.dl_inpainter, "last_retry_info", None)
-                    if isinstance(retry_info, dict):
-                        self.last_gpu_inpainting_retry_info = dict(retry_info)
-                    self.last_gpu_inpainting_oom_retry_used = bool(
-                        getattr(self.dl_inpainter, "last_oom_retry_used", False)
-                    )
-                    self.last_gpu_inpainting_retry_count = int(
-                        getattr(self.dl_inpainter, "last_oom_retry_count", 0)
-                    )
-                    retry_profile_used = getattr(self.dl_inpainter, "last_retry_profile_used", None)
-                    if isinstance(retry_profile_used, dict):
-                        self.last_gpu_inpainting_retry_profile_used = dict(retry_profile_used)
-                    self._update_effective_inpainting_observation_from_gpu_profile(
-                        self.last_gpu_inpainting_profile_used
-                        or self.last_gpu_inpainting_retry_profile_used
-                    )
-                    self.last_inpainting_method_used = "gpu_deep_learning_unet"
-                    self.last_inpainting_backend = "gpu_deep_learning_unet"
+                    self._sync_trace_from_deep_backend()
                     typed_result = np.asarray(dl_result)
                     return cast(np.ndarray, typed_result)
                 except Exception as exc:
                     self.last_gpu_inpainting_runtime_error = str(exc)
                     self._disable_gpu_inpainting(
-                        "gpu_runtime_exception",
+                        self._build_runtime_fallback_reason(),
                         clear_loaded_model_path=False,
                     )
                     self.logger.error(
@@ -605,23 +611,19 @@ class AIHandler:
                     )
 
             # 降级使用 OpenCV inpainter
-            if hasattr(self, "image_inpainter") and self.image_inpainter is not None:
+            if self._ensure_opencv_backend_loaded():
                 resolved_method = self._resolve_opencv_inpainting_method()
-                result = self.image_inpainter.inpaint_frame(
+                result = self.opencv_inpainting_backend.inpaint_frame(
                     frame,
                     mask,
-                    method=resolved_method,
-                    radius=self.inpaint_radius,
+                    inpaint_radius=self.inpaint_radius,
                     quality_level=self.quality_level,
+                    opencv_method=resolved_method,
                 )
                 if result is None:
                     self.logger.warning("Inpainting returned None, using original frame")
                     return frame
-                self.last_inpainting_backend = "opencv"
-                self.last_inpainting_method_used = (
-                    getattr(self.image_inpainter, "last_method_used", None) or resolved_method
-                )
-                self._update_effective_inpainting_observation_from_opencv()
+                self._sync_trace_from_opencv_backend()
                 return cast(np.ndarray, result)
 
             self.logger.error("No inpainter available")
@@ -633,67 +635,187 @@ class AIHandler:
 
     def _resolve_inpainting_model_path(self) -> Optional[str]:
         """解析 GPU 深度学习修复权重路径，优先使用 ai_params，其次读取配置。"""
-        raw_path = self.ai_params.get("inpainting_model_path")
-        if raw_path is None and self.config is not None and hasattr(self.config, "has_option"):
-            for section in ("Models", "models"):
-                try:
-                    if self.config.has_option(section, "inpainting_model_path"):
-                        raw_path = self.config.get(section, "inpainting_model_path")
-                        break
-                except Exception as exc:
-                    self.logger.debug(
-                        "读取 GPU 修复权重路径失败: section=%s error=%s",
-                        section,
-                        exc,
-                    )
+        return resolve_inpainting_asset_ref(
+            self.ai_params,
+            self.config,
+            ("inpainting_model_path",),
+        )
 
-        if raw_path is None:
-            return None
+    def _resolve_lama_model_path(self) -> Optional[str]:
+        """解析 LaMa 资源路径。"""
+        return resolve_inpainting_asset_ref(
+            self.ai_params,
+            self.config,
+            ("lama_model_path", "lama_model_dir"),
+        )
 
-        normalized_path = str(raw_path).strip()
-        if not normalized_path:
-            return None
+    def _resolve_inpainting_asset_ref(self) -> Optional[str]:
+        """根据请求 backend 解析当前实际需要的资源引用。"""
+        requested_backend = self._derive_requested_inpainting_backend()
+        if requested_backend == "lama":
+            return self.configured_lama_model_path
+        return self.configured_inpainting_model_path
 
-        return str(Path(normalized_path).expanduser())
+    def _describe_loaded_deep_inpainting_backend(self) -> str:
+        """返回当前已加载深度修复 backend 的人类可读描述。"""
+        backend_id = str(getattr(self.deep_inpainting_backend, "backend_id", "") or "").strip().lower()
+        label_mapping = {
+            "legacy_unet": "GPU Deep Learning (U-Net)",
+            "lama": "LaMa TorchScript",
+            "mat": "MAT",
+        }
+        return label_mapping.get(backend_id, "GPU Deep Learning")
 
     def _disable_gpu_inpainting(self, reason: str, clear_loaded_model_path: bool = True) -> None:
         """禁用 GPU 修复，并记录明确的降级原因。"""
         self.use_gpu_inpainting = False
         self.dl_inpainter = None
+        self.deep_inpainting_backend = None
         if clear_loaded_model_path:
             self.loaded_inpainting_model_path = None
+            self.loaded_inpainting_asset_ref = None
         self.gpu_inpainting_fallback_reason = reason
 
     def _load_gpu_inpainter_or_fallback(self) -> bool:
         """尝试加载 GPU 深度学习修复器，失败时明确降级到 OpenCV。"""
-        model_path = self.configured_inpainting_model_path
-        if not model_path:
-            self.logger.warning(
-                "GPU inpainting requested but no inpainting model path is configured; "
-                "falling back to OpenCV"
-            )
-            self._disable_gpu_inpainting("missing_inpainting_model_path")
+        self.deep_inpainting_backend = create_inpainting_backend(
+            self._derive_requested_inpainting_backend(),
+            config=self.config,
+            torch_device=self.torch_device,
+            dl_inpainter=self.dl_inpainter,
+            model_path=self.configured_inpainting_asset_ref,
+        )
+        if getattr(self.deep_inpainting_backend, "backend_id", None) not in {"legacy_unet", "lama"}:
+            self.logger.warning("Unsupported deep inpainting backend requested; falling back to OpenCV")
+            self._disable_gpu_inpainting("unsupported_gpu_backend")
             return False
 
-        if not Path(model_path).exists():
-            self.logger.warning(
-                f"GPU inpainting model path not found: {model_path}; " "falling back to OpenCV"
-            )
-            self._disable_gpu_inpainting("inpainting_model_path_not_found")
-            return False
-
-        self.dl_inpainter = DeepLearningInpainter(config=self.config, device=self.torch_device)
-        if self.dl_inpainter.load_model(model_path=model_path):
+        if self.deep_inpainting_backend.load():
+            self.dl_inpainter = getattr(self.deep_inpainting_backend, "dl_inpainter", None)
             self.use_gpu_inpainting = True
-            self.loaded_inpainting_model_path = model_path
+            self.loaded_inpainting_model_path = getattr(
+                self.deep_inpainting_backend,
+                "loaded_model_path",
+                None,
+            ) or getattr(
+                self.deep_inpainting_backend,
+                "loaded_asset_ref",
+                self.configured_inpainting_asset_ref,
+            )
+            self.loaded_inpainting_asset_ref = getattr(
+                self.deep_inpainting_backend,
+                "loaded_asset_ref",
+                self.loaded_inpainting_model_path,
+            )
             self.gpu_inpainting_fallback_reason = None
             return True
 
-        self.logger.warning(
-            f"Failed to load GPU inpainting model from {model_path}; falling back to OpenCV"
+        load_trace = self.deep_inpainting_backend.get_last_trace()
+        load_failure_reason = load_trace.get("load_failure_reason", "inpainting_model_load_failed")
+        self._disable_gpu_inpainting(str(load_failure_reason))
+        self._log_gpu_inpainting_load_failure(
+            str(load_failure_reason),
+            load_trace.get("load_failure_detail"),
         )
-        self._disable_gpu_inpainting("inpainting_model_load_failed")
         return False
+
+    def _log_gpu_inpainting_load_failure(
+        self,
+        reason: str,
+        detail: Optional[str] = None,
+    ) -> None:
+        """区分可预期降级与真实加载故障，输出更准确的日志。"""
+        if reason == "missing_lama_model_path":
+            self.logger.warning(
+                "未配置 LaMa 模型路径，当前改用 OpenCV 修复。可设置 lama_model_path 或 VWR_LAMA_MODEL_PATH。"
+            )
+            return
+
+        if reason == "missing_inpainting_model_path":
+            self.logger.warning(
+                "未配置 GPU 修复模型路径，当前改用 OpenCV 修复。可设置 inpainting_model_path 或 VWR_INPAINTING_MODEL_PATH。"
+            )
+            return
+
+        if detail:
+            self.logger.error("GPU 深度修复加载失败：%s | %s", reason, detail)
+        else:
+            self.logger.error("GPU 深度修复加载失败：%s", reason)
+        self.logger.warning("当前改用 OpenCV 修复")
+
+    def _ensure_opencv_backend_loaded(self) -> bool:
+        """确保 OpenCV backend 已创建并完成加载。"""
+        if self.opencv_inpainting_backend is None:
+            self.opencv_inpainting_backend = create_inpainting_backend(
+                "opencv",
+                config=self.config,
+                torch_device=self.torch_device,
+                image_inpainter=self.image_inpainter,
+            )
+            self.image_inpainter = getattr(
+                self.opencv_inpainting_backend,
+                "image_inpainter",
+                self.image_inpainter,
+            )
+        return bool(self.opencv_inpainting_backend.load())
+
+    def _sync_trace_from_opencv_backend(self) -> None:
+        """把 OpenCV backend trace 同步回历史兼容字段。"""
+        if self.opencv_inpainting_backend is None:
+            return
+        trace = self.opencv_inpainting_backend.get_last_trace()
+        self.last_inpainting_backend = trace.get("inpainting_backend", "opencv")
+        self.last_inpainting_method_used = trace.get("inpainting_method")
+        self.last_effective_quality_level = self._normalize_effective_quality_level(
+            trace.get("effective_quality_level")
+        )
+        self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
+            trace.get("effective_inpaint_radius")
+        )
+        self.loaded_inpainting_asset_ref = trace.get("loaded_inpainting_asset_ref")
+        if trace.get("loaded_inpainting_model_path") is not None:
+            self.loaded_inpainting_model_path = trace.get("loaded_inpainting_model_path")
+
+    def _sync_trace_from_deep_backend(self) -> None:
+        """把 deep backend trace 同步回历史兼容字段。"""
+        if self.deep_inpainting_backend is None:
+            return
+        trace = self.deep_inpainting_backend.get_last_trace()
+        self.last_inpainting_backend = trace.get("inpainting_backend", "gpu_deep_learning_unet")
+        self.last_inpainting_method_used = trace.get(
+            "inpainting_method", "gpu_deep_learning_unet"
+        )
+        profile_used = trace.get("gpu_inpainting_profile")
+        if isinstance(profile_used, dict):
+            self.last_gpu_inpainting_profile_used = dict(profile_used)
+        retry_info = trace.get("gpu_inpainting_retry")
+        if isinstance(retry_info, dict):
+            self.last_gpu_inpainting_retry_info = dict(retry_info)
+        self.last_gpu_inpainting_oom_retry_used = bool(
+            trace.get("gpu_inpainting_oom_retry_used", False)
+        )
+        self.last_gpu_inpainting_retry_count = int(trace.get("gpu_inpainting_retry_count", 0))
+        retry_profile = trace.get("gpu_inpainting_retry_profile")
+        if isinstance(retry_profile, dict):
+            self.last_gpu_inpainting_retry_profile_used = dict(retry_profile)
+        self.last_effective_quality_level = self._normalize_effective_quality_level(
+            trace.get("effective_quality_level")
+        )
+        self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
+            trace.get("effective_inpaint_radius")
+        )
+        self.loaded_inpainting_asset_ref = trace.get("loaded_inpainting_asset_ref")
+        if trace.get("loaded_inpainting_model_path") is not None:
+            self.loaded_inpainting_model_path = trace.get("loaded_inpainting_model_path")
+
+    def _build_runtime_fallback_reason(self) -> str:
+        """根据请求 backend 生成运行期降级原因。"""
+        requested_backend = self._derive_requested_inpainting_backend()
+        if requested_backend == "lama":
+            return "lama_runtime_exception"
+        if requested_backend == "mat":
+            return "mat_runtime_exception"
+        return "gpu_runtime_exception"
 
     def _resolve_opencv_inpainting_method(self) -> str:
         """
@@ -703,7 +825,10 @@ class AIHandler:
         - UI 明确选了 OpenCV 算法时，尊重用户选择
         - 若当前配置为 GPU 深度学习，但实际走到 OpenCV（例如降级），则回退到 auto
         """
-        algorithm = (self.inpainting_algorithm or "gpu_dl").lower()
+        if self._derive_requested_inpainting_backend() != "opencv":
+            return "auto"
+
+        algorithm = (self.opencv_inpainting_method or self.inpainting_algorithm or "auto").lower()
         method_mapping = {
             "telea": "telea",
             "navier_stokes": "navier_stokes",
@@ -711,6 +836,30 @@ class AIHandler:
             "auto": "auto",
         }
         return method_mapping.get(algorithm, "auto")
+
+    def _derive_requested_inpainting_backend(self) -> str:
+        """从新旧参数推导统一的请求后端枚举。"""
+        ai_params = getattr(self, "ai_params", {}) or {}
+        raw_backend = str(ai_params.get("requested_inpainting_backend", "") or "").strip().lower()
+        if raw_backend in {"opencv", "lama", "legacy_unet", "mat"}:
+            return raw_backend
+
+        algorithm = str(self.inpainting_algorithm or "auto").strip().lower()
+        if algorithm == "gpu_dl" or bool(getattr(self, "requested_gpu_inpainting", False)):
+            return "legacy_unet"
+        return "opencv"
+
+    def _derive_opencv_inpainting_method(self) -> str:
+        """从新旧参数推导 OpenCV 专用方法。"""
+        ai_params = getattr(self, "ai_params", {}) or {}
+        raw_method = str(ai_params.get("opencv_inpainting_method", "") or "").strip().lower()
+        if raw_method in {"auto", "telea", "navier_stokes", "custom_interpolation"}:
+            return raw_method
+
+        algorithm = str(self.inpainting_algorithm or "auto").strip().lower()
+        if algorithm in {"auto", "telea", "navier_stokes", "custom_interpolation"}:
+            return algorithm
+        return "auto"
 
     def _build_postprocess_profile(self) -> dict:
         """根据质量等级构建后处理强度档位。"""
@@ -817,3 +966,4 @@ if __name__ == "__main__":
     processed_frame, info = ai_handler.process_frame(test_frame, test_params)
     print(f"Processing completed. Frame shape: {processed_frame.shape}")
     print(f"Processing info: {info}")
+

@@ -199,6 +199,20 @@ class ConfigValidator:
                 allowed_values=["auto", "gpu_dl", "telea", "navier_stokes", "custom_interpolation"],
                 description="修复算法",
             ),
+            "requested_inpainting_backend": ValidationRule(
+                param_name="requested_inpainting_backend",
+                param_type=str,
+                default="opencv",
+                allowed_values=["opencv", "lama", "legacy_unet", "mat"],
+                description="请求的修复后端",
+            ),
+            "opencv_inpainting_method": ValidationRule(
+                param_name="opencv_inpainting_method",
+                param_type=str,
+                default="auto",
+                allowed_values=["auto", "telea", "navier_stokes", "custom_interpolation"],
+                description="OpenCV 修复算法",
+            ),
         }
 
     def validate(self, param_name: str, value: Any, fallback: Optional[Any] = None) -> Any:

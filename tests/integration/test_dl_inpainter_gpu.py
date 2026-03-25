@@ -1,19 +1,43 @@
+#!/usr/bin/env python3
 """
-深度学习 Inpainter GPU 性能测试
-
-测试轻量级 U-Net 模型的 GPU 加速效果
+LaMa backend GPU subprocess smoke 包装测试。
 """
 
-import logging
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
-import time
+from pathlib import Path
 
 import pytest
 
-pytest.importorskip("cv2")
-pytest.importorskip("numpy")
+
+def _save_stub_lama_torchscript_model(path: Path) -> None:
+    script = f"""
+from pathlib import Path
+import torch
+
+class StubLaMa(torch.nn.Module):
+    def forward(self, image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        expanded_mask = mask.to(dtype=image.dtype).repeat(1, image.shape[1], 1, 1)
+        return image * (1 - expanded_mask) + torch.ones_like(image) * expanded_mask
+
+path = Path(r\"{str(path).replace('\\', '/')}\")
+path.parent.mkdir(parents=True, exist_ok=True)
+model = StubLaMa().eval()
+example_image = torch.zeros((1, 3, 16, 16), dtype=torch.float32)
+example_mask = torch.zeros((1, 1, 16, 16), dtype=torch.float32)
+scripted = torch.jit.trace(model, (example_image, example_mask))
+scripted.save(str(path))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def _probe_torch_import() -> tuple[bool, str]:
@@ -25,184 +49,57 @@ def _probe_torch_import() -> tuple[bool, str]:
     return False, (result.stderr or result.stdout or "torch import failed").strip()
 
 
-import cv2
-import numpy as np
-
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
-
-def test_torch_runtime_probe():
-    """探测当前环境是否具备运行 GPU 集成脚本所需的 torch 运行时。"""
+def test_torch_runtime_probe() -> None:
+    """探测当前环境是否具备运行 GPU smoke 所需的 torch 运行时。"""
     torch_available, torch_probe_error = _probe_torch_import()
     if not torch_available:
         pytest.skip(f"torch 不可用，跳过 GPU 集成测试：{torch_probe_error}")
     assert torch_available
 
 
-def main():
+def test_lama_smoke_runs_in_subprocess_or_skips() -> None:
+    """LaMa smoke 必须在 subprocess 中运行，避免 Qt 与 torch GPU 运行时互相影响。"""
     torch_available, torch_probe_error = _probe_torch_import()
     if not torch_available:
-        raise RuntimeError(f"torch 不可用，无法执行 GPU 集成脚本：{torch_probe_error}")
+        pytest.skip(f"torch 不可用，跳过 GPU 集成测试：{torch_probe_error}")
 
-    import torch
+    script_path = Path(__file__).resolve().parent / "runtime" / "lama_smoke.py"
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
-    from app.core.ai.dl_inpainter import DeepLearningInpainter
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode == 2:
+        pytest.skip(output or "LaMa smoke 前置条件不满足")
 
-    print("=" * 60)
-    print("深度学习 Inpainter GPU 性能测试")
-    print("=" * 60)
-
-    # 检查 CUDA
-    cuda_available = torch.cuda.is_available()
-    print(f"CUDA available: {cuda_available}")
-    if cuda_available:
-        print(f"GPU device: {torch.cuda.get_device_name(0)}")
-        print(f"GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-    print()
-
-    # 创建 inpainter (GPU)
-    logger.info("创建 GPU inpainter...")
-    gpu_inpainter = DeepLearningInpainter(device=torch.device("cuda" if cuda_available else "cpu"))
-
-    if not gpu_inpainter.load_model():
-        logger.error("GPU 模型加载失败")
-        return
-
-    # 创建测试数据
-    logger.info("创建测试数据...")
-    test_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-    test_mask = np.zeros((480, 640), dtype=np.uint8)
-    cv2.rectangle(test_mask, (100, 100), (200, 200), 255, -1)
-    print()
-
-    # ========================================
-    # 测试 1: 单帧推理 (GPU vs CPU)
-    # ========================================
-    print("=" * 60)
-    print("测试 1: 单帧推理性能")
-    print("=" * 60)
-
-    # GPU 推理
-    if cuda_available:
-        logger.info("GPU 单帧推理 (预热)...")
-        for _ in range(5):
-            _ = gpu_inpainter.inpaint_frame(test_frame, test_mask)
-
-        logger.info("GPU 单帧推理 (测试)...")
-        gpu_times = []
-        for _ in range(20):
-            start = time.time()
-            _ = gpu_inpainter.inpaint_frame(test_frame, test_mask)
-            elapsed = (time.time() - start) * 1000
-            gpu_times.append(elapsed)
-
-        gpu_avg = np.mean(gpu_times)
-        gpu_std = np.std(gpu_times)
-        print(f"GPU 单帧推理: {gpu_avg:.2f} ± {gpu_std:.2f} ms")
-
-    # CPU 推理 (对比)
-    logger.info("创建 CPU inpainter...")
-    cpu_inpainter = DeepLearningInpainter(device=torch.device("cpu"))
-    if cpu_inpainter.load_model():
-        logger.info("CPU 单帧推理 (预热)...")
-        for _ in range(5):
-            _ = cpu_inpainter.inpaint_frame(test_frame, test_mask)
-
-        logger.info("CPU 单帧推理 (测试)...")
-        cpu_times = []
-        for _ in range(20):
-            start = time.time()
-            _ = cpu_inpainter.inpaint_frame(test_frame, test_mask)
-            elapsed = (time.time() - start) * 1000
-            cpu_times.append(elapsed)
-
-        cpu_avg = np.mean(cpu_times)
-        cpu_std = np.std(cpu_times)
-        print(f"CPU 单帧推理: {cpu_avg:.2f} ± {cpu_std:.2f} ms")
-
-        if cuda_available:
-            speedup = cpu_avg / gpu_avg
-            print(f"GPU 加速倍数: {speedup:.2f}x")
-
-    print()
-
-    # ========================================
-    # 测试 2: 批处理推理 (GPU 优势)
-    # ========================================
-    print("=" * 60)
-    print("测试 2: 批处理推理性能")
-    print("=" * 60)
-
-    if cuda_available:
-        batch_sizes = [1, 2, 4, 8]
-
-        for batch_size in batch_sizes:
-            batch_frames = [test_frame] * batch_size
-            batch_masks = [test_mask] * batch_size
-
-            # 预热
-            for _ in range(3):
-                _ = gpu_inpainter.inpaint_batch(batch_frames, batch_masks)
-
-            # 测试
-            batch_times = []
-            for _ in range(10):
-                start = time.time()
-                _ = gpu_inpainter.inpaint_batch(batch_frames, batch_masks)
-                elapsed = (time.time() - start) * 1000
-                batch_times.append(elapsed)
-
-            avg_time = np.mean(batch_times)
-            per_frame_time = avg_time / batch_size
-            fps = 1000 / per_frame_time
-
-            print(
-                f"Batch={batch_size}: {avg_time:.2f} ms 总计, "
-                f"{per_frame_time:.2f} ms/帧, {fps:.2f} fps"
-            )
-
-    print()
-
-    # ========================================
-    # 测试 3: GPU 内存占用
-    # ========================================
-    if cuda_available:
-        print("=" * 60)
-        print("测试 3: GPU 内存占用")
-        print("=" * 60)
-
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-
-        # 单帧推理
-        _ = gpu_inpainter.inpaint_frame(test_frame, test_mask)
-        mem_single = torch.cuda.max_memory_allocated() / 1e6
-
-        # 批处理 (batch=8)
-        torch.cuda.reset_peak_memory_stats()
-        batch_frames = [test_frame] * 8
-        batch_masks = [test_mask] * 8
-        _ = gpu_inpainter.inpaint_batch(batch_frames, batch_masks)
-        mem_batch8 = torch.cuda.max_memory_allocated() / 1e6
-
-        print(f"单帧推理峰值内存: {mem_single:.2f} MB")
-        print(f"批处理 (batch=8) 峰值内存: {mem_batch8:.2f} MB")
-        print()
-
-    # ========================================
-    # 清理
-    # ========================================
-    logger.info("清理 GPU 内存...")
-    gpu_inpainter.cleanup()
-
-    print("=" * 60)
-    print("[SUCCESS] 测试完成!")
-    print("=" * 60)
+    assert result.returncode == 0, output or "LaMa smoke 失败"
 
 
-if __name__ == "__main__":
-    main()
+def test_lama_smoke_runs_with_temp_torchscript_asset(tmp_path: Path) -> None:
+    """给定临时 TorchScript 资产时，LaMa smoke 应真实执行而不是跳过。"""
+    torch_available, torch_probe_error = _probe_torch_import()
+    if not torch_available:
+        pytest.skip(f"torch 不可用，跳过 GPU 集成测试：{torch_probe_error}")
+
+    model_path = tmp_path / "big-lama.pt"
+    _save_stub_lama_torchscript_model(model_path)
+
+    script_path = Path(__file__).resolve().parent / "runtime" / "lama_smoke.py"
+    env = os.environ.copy()
+    env["VWR_LAMA_MODEL_PATH"] = str(model_path)
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode == 2 and "CUDA 不可用" in output:
+        pytest.skip(output)
+
+    assert result.returncode == 0, output or "临时 TorchScript 资产 smoke 失败"

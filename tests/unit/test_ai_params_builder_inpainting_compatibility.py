@@ -74,9 +74,13 @@ def test_unknown_or_auto_method_falls_back_to_safe_auto_without_gpu() -> None:
     auto_params = _build_with_method("auto", enable_gpu=True)
 
     assert unknown_params["inpainting_algorithm"] == "auto"
+    assert unknown_params["requested_inpainting_backend"] == "opencv"
+    assert unknown_params["opencv_inpainting_method"] == "auto"
     assert unknown_params["use_gpu_inpainting"] is False
 
     assert auto_params["inpainting_algorithm"] == "auto"
+    assert auto_params["requested_inpainting_backend"] == "opencv"
+    assert auto_params["opencv_inpainting_method"] == "auto"
     assert auto_params["use_gpu_inpainting"] is False
 
 
@@ -88,13 +92,17 @@ def test_only_explicit_gpu_dl_enables_gpu_inpainting() -> None:
     auto_mode = _build_with_method("auto", enable_gpu=True)
 
     assert explicit_gpu["inpainting_algorithm"] == "gpu_dl"
+    assert explicit_gpu["requested_inpainting_backend"] == "legacy_unet"
     assert explicit_gpu["use_gpu_inpainting"] is True
 
     assert ui_gpu["inpainting_algorithm"] == "gpu_dl"
+    assert ui_gpu["requested_inpainting_backend"] == "legacy_unet"
     assert ui_gpu["use_gpu_inpainting"] is True
 
     assert disabled_gpu["inpainting_algorithm"] == "gpu_dl"
+    assert disabled_gpu["requested_inpainting_backend"] == "legacy_unet"
     assert disabled_gpu["use_gpu_inpainting"] is False
 
     assert auto_mode["inpainting_algorithm"] == "auto"
+    assert auto_mode["requested_inpainting_backend"] == "opencv"
     assert auto_mode["use_gpu_inpainting"] is False
