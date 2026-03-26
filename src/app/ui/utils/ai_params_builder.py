@@ -23,6 +23,92 @@ from numpy.typing import NDArray
 from ...config.validators import get_validator
 
 
+def _get_optional_config_value(
+    config: Any, option: str, sections: tuple[str, ...]
+) -> Optional[str]:
+    """
+    从配置中读取可选字段（不存在则返回 None）。
+
+    说明：该逻辑需要同时兼容大小写不同的 section（例如 Models / models）。
+    """
+    if config is None:
+        return None
+
+    for section in sections:
+        try:
+            if config.has_option(section, option):
+                value = config.get(section, option).strip()
+                return value or None
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).debug(
+                "读取配置项失败: section=%s option=%s error=%s",
+                section,
+                option,
+                exc,
+            )
+    return None
+
+
+def _inject_inpainting_model_paths(
+    ai_params: Optional[Dict[str, Any]],
+    config: Any,
+) -> Dict[str, Any]:
+    """
+    将配置中的修复模型路径注入 ai_params。
+
+    背景：VideoProcessorThread 会在启动时做同样的注入（便于单/多进程链路共用）。
+    预加载阶段也必须保持一致，否则首任务会命中 refresh 判定，导致二次加载。
+    """
+    merged_params = dict(ai_params or {})
+
+    # 若 UI/调用方已明确传入，则不覆盖。
+    if not merged_params.get("inpainting_model_path"):
+        model_path = _get_optional_config_value(
+            config, "inpainting_model_path", ("Models", "models")
+        )
+        if model_path:
+            merged_params["inpainting_model_path"] = model_path
+
+    if not merged_params.get("lama_model_path"):
+        lama_model_path = _get_optional_config_value(
+            config, "lama_model_path", ("Models", "models")
+        )
+        if lama_model_path:
+            merged_params["lama_model_path"] = lama_model_path
+
+    if not merged_params.get("lama_model_dir"):
+        lama_model_dir = _get_optional_config_value(config, "lama_model_dir", ("Models", "models"))
+        if lama_model_dir:
+            merged_params["lama_model_dir"] = lama_model_dir
+
+    return merged_params
+
+
+def build_preload_ai_params_snapshot(
+    *,
+    preferences: Any,
+    advanced_params: Dict[str, Any],
+    config: Any,
+) -> Dict[str, Any]:
+    """
+    构建“预加载 AIHandler”用的参数快照。
+
+    目标：让启动阶段的预加载参数尽量与默认 UI 参数一致，避免首任务触发 refresh 再次加载。
+
+    注意：
+    - 这里只构建默认任务的参数快照，不涉及具体输入文件和手动框选区域。
+    - 若用户在启动后修改了参数，运行时仍会触发 refresh，这是合理且必要的。
+    """
+    builder = AIParamsBuilder()
+    ai_params = builder.build_from_ui(
+        preferences=preferences,
+        advanced_params=advanced_params,
+        manual_selections=None,
+        input_file_path=None,
+    )
+    return _inject_inpainting_model_paths(ai_params, config)
+
+
 class AIParamsBuilder:
     """
     AI参数构建器
@@ -151,7 +237,9 @@ class AIParamsBuilder:
         )
         params["requested_inpainting_backend"] = self._validator.validate(
             "requested_inpainting_backend",
-            self._resolve_requested_inpainting_backend(inpainting_method, params["inpainting_algorithm"]),
+            self._resolve_requested_inpainting_backend(
+                inpainting_method, params["inpainting_algorithm"]
+            ),
         )
         params["opencv_inpainting_method"] = self._validator.validate(
             "opencv_inpainting_method",

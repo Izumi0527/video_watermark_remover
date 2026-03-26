@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
 from .base import BaseInpaintingBackend
+
+if TYPE_CHECKING:
+    from ..dl_inpainter import DeepLearningInpainter
+    from ..image_inpainter import ImageInpainter
 
 
 def create_inpainting_backend(
@@ -11,8 +16,8 @@ def create_inpainting_backend(
     *,
     config=None,
     torch_device=None,
-    image_inpainter: Optional[object] = None,
-    dl_inpainter: Optional[object] = None,
+    image_inpainter: Optional["ImageInpainter"] = None,
+    dl_inpainter: Optional["DeepLearningInpainter"] = None,
     model_path: Optional[str] = None,
 ) -> BaseInpaintingBackend:
     """根据统一后端枚举创建适配器。"""

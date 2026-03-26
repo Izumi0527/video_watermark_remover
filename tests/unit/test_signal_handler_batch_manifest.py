@@ -338,7 +338,9 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
     assert first_item["processing_details"]["effective_quality_level"] == 3
     assert first_item["processing_details"]["requested_inpainting_backend"] == "lama"
     assert first_item["processing_details"]["actual_inpainting_backend"] == "opencv"
-    assert first_item["processing_details"]["inpainting_fallback_reason"] == "lama_runtime_exception"
+    assert (
+        first_item["processing_details"]["inpainting_fallback_reason"] == "lama_runtime_exception"
+    )
 
 
 def test_handle_queue_clear_clears_last_batch_snapshot(

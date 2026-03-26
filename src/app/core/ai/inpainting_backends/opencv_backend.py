@@ -23,9 +23,14 @@ class OpenCVInpaintingBackend(BaseInpaintingBackend):
         super().__init__()
         self.config = config
         self.image_inpainter = image_inpainter or ImageInpainter(config)
+        self._loaded = False
 
     def load(self) -> bool:
-        loaded = bool(self.image_inpainter.load_model())
+        if self._loaded:
+            loaded = True
+        else:
+            loaded = bool(self.image_inpainter.load_model())
+            self._loaded = loaded
         self._last_trace = {
             "inpainting_backend": self.backend_id,
             "load_success": loaded,

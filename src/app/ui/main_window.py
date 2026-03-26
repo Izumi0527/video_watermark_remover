@@ -30,9 +30,10 @@ class AIModelPreloader(QThread):
     # 信号：加载失败时发送错误信息
     error = pyqtSignal(str)
 
-    def __init__(self, config=None, parent=None):
+    def __init__(self, config=None, ai_params=None, parent=None):
         super().__init__(parent)
         self.config = config
+        self.ai_params = ai_params or {}
         self.logger = logging.getLogger(__name__)
 
     def run(self):
@@ -43,8 +44,9 @@ class AIModelPreloader(QThread):
             # 延迟导入（避免在 UI 模块导入阶段强依赖 torch）
             from ..core.ai.ai_handler import AIHandler  # noqa: WPS433
 
-            # 创建AIHandler并加载模型
-            ai_handler = AIHandler(self.config, ai_params={})
+            # 创建 AIHandler 并加载模型
+            # 重要：预加载必须尽量对齐默认任务参数，否则首任务仍会触发 refresh 二次加载。
+            ai_handler = AIHandler(self.config, ai_params=self.ai_params)
             if ai_handler.load_models():
                 self.logger.info("AI模型加载成功")
                 self.finished.emit(ai_handler)
@@ -327,8 +329,25 @@ class MainWindow(QMainWindow):
             self.logger.info("开始预加载AI模型...")
             self.lbl_status.setText("🔄 正在后台加载AI模型...")
 
+            advanced_params: dict[str, object] = {}
+            if hasattr(self.control_panel, "get_advanced_parameters"):
+                advanced_params = self.control_panel.get_advanced_parameters() or {}
+
+            # 构建与默认 UI 参数一致的预加载快照，提升首任务命中率。
+            from .utils.ai_params_builder import build_preload_ai_params_snapshot  # noqa: WPS433
+
+            preload_ai_params = build_preload_ai_params_snapshot(
+                preferences=self.preferences,
+                advanced_params=advanced_params,
+                config=self.config,
+            )
+
             # 创建并启动预加载线程
-            self.ai_preload_thread = AIModelPreloader(self.config, self)
+            self.ai_preload_thread = AIModelPreloader(
+                self.config,
+                ai_params=preload_ai_params,
+                parent=self,
+            )
             self.ai_preload_thread.finished.connect(self._on_ai_models_loaded)
             self.ai_preload_thread.error.connect(self._on_ai_models_load_error)
             self.ai_preload_thread.start()

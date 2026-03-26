@@ -1,6 +1,5 @@
-from pathlib import Path
 import importlib.util
-
+from pathlib import Path
 
 NEW_PATH = Path("tests/integration/runtime/task6_runtime_smoke.py")
 OLD_PATH = Path("scripts/task6_runtime_smoke.py")

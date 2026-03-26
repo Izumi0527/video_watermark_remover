@@ -13,18 +13,16 @@ AI处理协调器 - 主模块
 
 import logging
 import time
-from pathlib import Path
 from typing import Optional, Tuple, cast
 
 import cv2
 import numpy as np
 import torch
 
-from .inpainting_backends.factory import create_inpainting_backend
-from .dl_inpainter import DeepLearningInpainter
+from ...utils.inpainting_model_downloader import resolve_inpainting_asset_ref
 from .image_inpainter import ImageInpainter
 from .image_processor import apply_postprocessing, apply_preprocessing
-from ...utils.inpainting_model_downloader import resolve_inpainting_asset_ref
+from .inpainting_backends.factory import create_inpainting_backend
 
 # 导入拆分出的检测和修复模块
 from .yolo_detector import YOLOWatermarkDetector
@@ -243,8 +241,15 @@ class AIHandler:
                 dl_loaded = self._load_gpu_inpainter_or_fallback()
 
                 if dl_loaded:
+                    detector = self.watermark_detector
+                    detector_model_type = getattr(detector, "model_type", None) or "unknown"
+                    detector_device = getattr(detector, "device", None) or self.device
                     self.logger.info("All AI models loaded successfully:")
-                    self.logger.info("  - Watermark Detection: YOLO v11s deep learning (GPU)")
+                    self.logger.info(
+                        "  - Watermark Detection: YOLO %s (device=%s)",
+                        detector_model_type,
+                        detector_device,
+                    )
                     self.logger.info(
                         "  - Image Inpainting: %s",
                         self._describe_loaded_deep_inpainting_backend(),
@@ -258,8 +263,15 @@ class AIHandler:
         # 3. 加载 OpenCV inpainter (作为默认或降级选项)
         if not self.use_gpu_inpainting:
             if detector_loaded and opencv_loaded:
+                detector = self.watermark_detector
+                detector_model_type = getattr(detector, "model_type", None) or "unknown"
+                detector_device = getattr(detector, "device", None) or self.device
                 self.logger.info("All AI models loaded successfully:")
-                self.logger.info("  - Watermark Detection: YOLO v11s deep learning")
+                self.logger.info(
+                    "  - Watermark Detection: YOLO %s (device=%s)",
+                    detector_model_type,
+                    detector_device,
+                )
                 self.logger.info("  - Image Inpainting: OpenCV interpolation-based repair")
                 return True
             else:
@@ -413,7 +425,15 @@ class AIHandler:
                 _ = watermark_selection_params.get("detection_sensitivity", 0.5)
                 mask = self.watermark_detector.detect_watermark(frame)
                 processing_info["detection_method"] = "automatic_yolo"
-                self.logger.info("Using automatic watermark detection (YOLO v11s)")
+                # 避免逐帧 INFO 噪音：默认只在 DEBUG 记录。
+                detector = self.watermark_detector
+                detector_model_type = getattr(detector, "model_type", None) or "unknown"
+                detector_device = getattr(detector, "device", None) or self.device
+                self.logger.debug(
+                    "Using automatic watermark detection (YOLO %s, device=%s)",
+                    detector_model_type,
+                    detector_device,
+                )
 
             else:
                 self.logger.info("No watermark detection method specified")
@@ -487,7 +507,7 @@ class AIHandler:
                     None,
                 )
 
-                self.logger.info(
+                self.logger.debug(
                     f"Processed frame with {len(contours)} watermark areas "
                     f"({area_ratio * 100:.1f}% of image)"
                 )
@@ -525,7 +545,7 @@ class AIHandler:
                 # 未检测到水印或掩码为空
                 processed_frame = frame.copy()
                 processing_info["watermark_areas_found"] = 0
-                self.logger.info("No watermark areas detected")
+                self.logger.debug("No watermark areas detected")
 
             processing_info["processing_time"] = time.time() - start_time
             return processed_frame, processing_info
@@ -612,8 +632,12 @@ class AIHandler:
 
             # 降级使用 OpenCV inpainter
             if self._ensure_opencv_backend_loaded():
+                backend = self.opencv_inpainting_backend
+                if backend is None:
+                    self.logger.error("OpenCV backend unexpectedly unavailable after load")
+                    return frame
                 resolved_method = self._resolve_opencv_inpainting_method()
-                result = self.opencv_inpainting_backend.inpaint_frame(
+                result = backend.inpaint_frame(
                     frame,
                     mask,
                     inpaint_radius=self.inpaint_radius,
@@ -658,7 +682,9 @@ class AIHandler:
 
     def _describe_loaded_deep_inpainting_backend(self) -> str:
         """返回当前已加载深度修复 backend 的人类可读描述。"""
-        backend_id = str(getattr(self.deep_inpainting_backend, "backend_id", "") or "").strip().lower()
+        backend_id = (
+            str(getattr(self.deep_inpainting_backend, "backend_id", "") or "").strip().lower()
+        )
         label_mapping = {
             "legacy_unet": "GPU Deep Learning (U-Net)",
             "lama": "LaMa TorchScript",
@@ -686,7 +712,9 @@ class AIHandler:
             model_path=self.configured_inpainting_asset_ref,
         )
         if getattr(self.deep_inpainting_backend, "backend_id", None) not in {"legacy_unet", "lama"}:
-            self.logger.warning("Unsupported deep inpainting backend requested; falling back to OpenCV")
+            self.logger.warning(
+                "Unsupported deep inpainting backend requested; falling back to OpenCV"
+            )
             self._disable_gpu_inpainting("unsupported_gpu_backend")
             return False
 
@@ -782,9 +810,7 @@ class AIHandler:
             return
         trace = self.deep_inpainting_backend.get_last_trace()
         self.last_inpainting_backend = trace.get("inpainting_backend", "gpu_deep_learning_unet")
-        self.last_inpainting_method_used = trace.get(
-            "inpainting_method", "gpu_deep_learning_unet"
-        )
+        self.last_inpainting_method_used = trace.get("inpainting_method", "gpu_deep_learning_unet")
         profile_used = trace.get("gpu_inpainting_profile")
         if isinstance(profile_used, dict):
             self.last_gpu_inpainting_profile_used = dict(profile_used)
@@ -966,4 +992,3 @@ if __name__ == "__main__":
     processed_frame, info = ai_handler.process_frame(test_frame, test_params)
     print(f"Processing completed. Frame shape: {processed_frame.shape}")
     print(f"Processing info: {info}")
-

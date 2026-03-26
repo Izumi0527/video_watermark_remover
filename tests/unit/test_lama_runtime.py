@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pytest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,7 +96,9 @@ print(json.dumps(payload))
 """
 
 
-def test_build_lama_runner_executes_torchscript_model_from_file(tmp_path: pytest.TempPathFactory) -> None:
+def test_build_lama_runner_executes_torchscript_model_from_file(
+    tmp_path: pytest.TempPathFactory,
+) -> None:
     model_path = tmp_path / "big-lama.pt"
     result = _run_python(_torchscript_stub_code(model_path, asset_ref=model_path))
 

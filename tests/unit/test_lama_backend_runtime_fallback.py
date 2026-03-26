@@ -13,10 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.unit.test_dynamic_watermark_tracking import (
-    _create_test_frame,
-    _load_test_targets,
-)
+from tests.unit.test_dynamic_watermark_tracking import _create_test_frame, _load_test_targets
 
 
 @pytest.fixture
@@ -82,7 +79,9 @@ def test_ai_handler_falls_back_to_opencv_when_lama_runtime_inpainting_raises(
     monkeypatch.setattr(
         LaMaInpaintingBackend,
         "_create_runner",
-        lambda self: (lambda frame, mask, **kwargs: (_ for _ in ()).throw(RuntimeError("lama runtime failed"))),
+        lambda self: (
+            lambda frame, mask, **kwargs: (_ for _ in ()).throw(RuntimeError("lama runtime failed"))
+        ),
     )
 
     handler = ai_handler_cls(

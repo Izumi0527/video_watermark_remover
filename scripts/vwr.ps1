@@ -3,122 +3,18 @@
 # 智能视频水印去除工具 - 统一脚本入口（Windows PowerShell）
 # ============================================================
 # 目标：
-# - 将 scripts/ 目录脚本整合为单一入口，降低维护成本
-# - 提供 setup/run/test/quality/coverage/perf/build/clean/ci 等常用命令
+# - 将 scripts/ 目录脚本整合为单一交互式入口，降低维护成本
+# - 通过菜单提供 setup/run/test/quality/coverage/perf/build/clean/ci 等常用操作
 #
 # 用法：
-#   .\scripts\vwr.ps1 help
-#   .\scripts\vwr.ps1 setup -Dev -TorchBackend cpu -DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
-#   .\scripts\vwr.ps1 run -AutoFix
-#   .\scripts\vwr.ps1 test unit -Quick         # 对应 tests/unit
-#   .\scripts\vwr.ps1 test integration -Quick  # 对应 tests/integration
-#   .\scripts\vwr.ps1 test e2e                 # 对应 tests/e2e/ps1/*.ps1
+#   直接运行：.\scripts\vwr.ps1
+#   在菜单中选择：环境初始化 / 启动程序 / 运行测试 / 清理缓存与临时文件
 # ============================================================
 
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)]
-    [ValidateSet("help", "setup", "run", "quality", "test", "coverage", "perf", "build", "clean", "ci")]
-    [string]$Command = "help",
-
-    [Parameter(Position = 1)]
-    [string]$Arg1 = "",
-
-    [Parameter(Position = 2)]
-    [string]$Arg2 = "",
-
-    [Parameter()]
-    [switch]$Quick,
-
-    # setup
-    [Parameter()]
-    [switch]$Dev,
-
-    [Parameter()]
-    [string]$Python = "3.12.10",
-
-    [Parameter()]
-    [ValidateSet("auto", "cpu", "cu118", "cu121", "cu124", "cu126", "cu128", "cu129", "cu130")]
-    [string]$TorchBackend = "auto",
-
-    [Parameter()]
-    [string]$DefaultIndex = "",
-
-    [Parameter()]
-    [ValidateSet("first-index", "unsafe-first-match", "unsafe-best-match")]
-    [string]$IndexStrategy = "first-index",
-
-    # run
-    [Parameter()]
-    [switch]$AutoFix,
-
-    [Parameter()]
-    [switch]$SkipChecks,
-
-    # quality
-    [Parameter()]
-    [switch]$Fix,
-
-    [Parameter()]
-    [ValidateSet("all", "format", "style", "type", "security")]
-    [string]$Check = "all",
-
-    # test/coverage/perf
-    [Parameter()]
-    [switch]$Coverage,
-
-    [Parameter()]
-    [switch]$Performance,
-
-    [Parameter()]
-    [switch]$Report,
-
-    # coverage
-    [Parameter()]
-    [double]$MinCoverage = 80.0,
-
-    [Parameter()]
-    [switch]$FailOnLow,
-
-    [Parameter()]
-    [switch]$OpenReport,
-
-    # perf
-    [Parameter()]
-    [int]$Iterations = 5,
-
-    [Parameter()]
-    [switch]$MemoryProfile,
-
-    [Parameter()]
-    [switch]$GPUProfile,
-
-    [Parameter()]
-    [string]$PerfReportPath = "",
-
-    # build
-    [Parameter()]
-    [switch]$SkipTests,
-
-    # clean
-    [Parameter()]
-    [switch]$Force,
-
-    # ci
-    [Parameter()]
-    [switch]$SkipPerformance,
-
-    [Parameter()]
-    [switch]$SkipCoverage,
-
-    [Parameter()]
-    [string]$OutputFile = "",
-
-    [Parameter()]
-    [string]$ArtifactsDir = "ci-artifacts",
-
-    [Parameter()]
-    [int]$TimeoutMinutes = 30
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$LegacyArgs = @()
 )
 
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
@@ -128,8 +24,73 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 $Global:VwrLogFile = $null
-$script:DefaultIndexIsBound = $PSBoundParameters.ContainsKey("DefaultIndex")
+$script:Arg1 = ""
+$script:Arg2 = ""
+$script:Quick = $false
+$script:Dev = $false
+$script:Python = "3.12.10"
+$script:TorchBackend = "auto"
+$script:DefaultIndex = ""
+$script:IndexStrategy = "first-index"
+$script:AutoFix = $false
+$script:SkipChecks = $false
+$script:Fix = $false
+$script:Check = "all"
+$script:Coverage = $false
+$script:Performance = $false
+$script:Report = $false
+$script:MinCoverage = 80.0
+$script:FailOnLow = $false
+$script:OpenReport = $false
+$script:Iterations = 5
+$script:MemoryProfile = $false
+$script:GPUProfile = $false
+$script:PerfReportPath = ""
+$script:SkipTests = $false
+$script:Force = $false
+$script:SkipPerformance = $false
+$script:SkipCoverage = $false
+$script:OutputFile = ""
+$script:ArtifactsDir = "ci-artifacts"
+$script:TimeoutMinutes = 30
+$script:CleanScope = "all"
+$script:DefaultIndexIsBound = $false
 $script:UvExecutablePath = $null
+
+function Reset-ExecutionOptions {
+    $script:Arg1 = ""
+    $script:Arg2 = ""
+    $script:Quick = $false
+    $script:Dev = $false
+    $script:Python = "3.12.10"
+    $script:TorchBackend = "auto"
+    $script:DefaultIndex = ""
+    $script:IndexStrategy = "first-index"
+    $script:AutoFix = $false
+    $script:SkipChecks = $false
+    $script:Fix = $false
+    $script:Check = "all"
+    $script:Coverage = $false
+    $script:Performance = $false
+    $script:Report = $false
+    $script:MinCoverage = 80.0
+    $script:FailOnLow = $false
+    $script:OpenReport = $false
+    $script:Iterations = 5
+    $script:MemoryProfile = $false
+    $script:GPUProfile = $false
+    $script:PerfReportPath = ""
+    $script:SkipTests = $false
+    $script:Force = $false
+    $script:SkipPerformance = $false
+    $script:SkipCoverage = $false
+    $script:OutputFile = ""
+    $script:ArtifactsDir = "ci-artifacts"
+    $script:TimeoutMinutes = 30
+    $script:CleanScope = "all"
+    $script:DefaultIndex = ""
+    $script:DefaultIndexIsBound = $false
+}
 
 function Initialize-Log {
     if ($Global:VwrLogFile) {
@@ -965,7 +926,7 @@ function Invoke-UvPipInstall {
 
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
     }
 
     if (-not (Test-Path $RequirementsFile)) {
@@ -1002,7 +963,7 @@ function Install-EditableProject {
 
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
     }
 
     Ensure-Uv
@@ -1033,7 +994,7 @@ function Install-EditableProject {
 function Assert-ProjectImportable {
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
     }
 
     $envSnapshot = Use-ScopedProjectRuntimeEnv
@@ -1044,7 +1005,7 @@ function Assert-ProjectImportable {
     }
 
     if ($LASTEXITCODE -ne 0 -or -not $appPath) {
-        throw "项目导入验证失败：无法导入 app/app.entrypoints。请先清理根目录残留 app 目录或重新运行：.\\scripts\\vwr.ps1 setup"
+        throw "项目导入验证失败：无法导入 app/app.entrypoints。请先清理根目录残留 app 目录，然后重新运行 .\\scripts\\vwr.ps1 并在菜单中选择[环境初始化]。"
     }
 
     return $appPath.Trim()
@@ -1080,18 +1041,18 @@ function Ensure-ProjectImportable {
         }
     }
 
-    throw "当前环境尚未完成项目安装，请先运行：.\\scripts\\vwr.ps1 setup"
+    throw "当前环境尚未完成项目安装，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
 }
 
 function Assert-DevTools {
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup -Dev"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]，然后开启[安装开发依赖]。"
     }
 
     $check = & $venv.Python -m pytest --version 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "未检测到 pytest（开发依赖）。请先运行：.\\scripts\\vwr.ps1 setup -Dev"
+        throw "未检测到 pytest（开发依赖）。请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]，然后开启[安装开发依赖]。"
     }
 }
 
@@ -1426,32 +1387,266 @@ function Test-ShouldShowLamaTorchScriptHint {
 }
 
 function Show-Help {
-    Write-Host "🎛️ 智能视频水印去除工具 - 统一脚本入口 (vwr.ps1)" -ForegroundColor Green
+    Write-Host "🎛️ 智能视频水印去除工具 - 纯交互式脚本入口 (vwr.ps1)" -ForegroundColor Green
     Write-Host ("=" * 60) -ForegroundColor Cyan
     Write-Host ""
     Write-Host "用法：" -ForegroundColor Cyan
-    Write-Host "  .\\scripts\\vwr.ps1 <command> [args] [options]" -ForegroundColor White
+    Write-Host "  直接运行：.\\scripts\\vwr.ps1" -ForegroundColor White
     Write-Host ""
-    Write-Host "命令：" -ForegroundColor Cyan
-    Write-Host "  setup     创建 .venv 并安装依赖（-Dev 安装开发依赖）" -ForegroundColor White
-    Write-Host "  run       环境检查后启动 main.py（-AutoFix 自动修复）" -ForegroundColor White
-    Write-Host "  quality   代码质量检查（black/flake8/mypy/bandit）" -ForegroundColor White
-    Write-Host "  test      运行测试（pytest + 可选 PowerShell 测试脚本）" -ForegroundColor White
-    Write-Host "  coverage  覆盖率报告（pytest-cov）" -ForegroundColor White
-    Write-Host "  perf      性能基准测试（JSON 报告）" -ForegroundColor White
-    Write-Host "  build     PyInstaller 打包（release/）" -ForegroundColor White
-    Write-Host "  clean     清理缓存（-Force 跳过确认）" -ForegroundColor White
-    Write-Host "  ci        CI 模式（JSON 输出）" -ForegroundColor White
+    Write-Host "菜单功能：" -ForegroundColor Cyan
+    Write-Host "  1. 环境初始化：创建 .venv 并安装依赖" -ForegroundColor White
+    Write-Host "  2. 启动程序：环境检查后启动 main.py" -ForegroundColor White
+    Write-Host "  3. 代码质量检查：black / flake8 / mypy / bandit" -ForegroundColor White
+    Write-Host "  4. 运行测试：pytest + 可选 PowerShell 测试脚本" -ForegroundColor White
+    Write-Host "  5. 覆盖率分析：pytest-cov" -ForegroundColor White
+    Write-Host "  6. 性能测试：生成 JSON 报告" -ForegroundColor White
+    Write-Host "  7. 打包构建：PyInstaller 输出 release/" -ForegroundColor White
+    Write-Host "  8. 清理缓存与临时文件：basic / temp / all / deep" -ForegroundColor White
+    Write-Host "  9. CI 模式：运行质量、单测与可选门禁" -ForegroundColor White
     Write-Host ""
-    Write-Host "测试主分层：" -ForegroundColor Cyan
-    Write-Host "  test unit         -> tests/unit" -ForegroundColor White
-    Write-Host "  test integration  -> tests/integration" -ForegroundColor White
-    Write-Host "  test e2e          -> tests/e2e/ps1/*.ps1" -ForegroundColor White
+    Write-Host "提示：" -ForegroundColor Cyan
+    Write-Host "  脚本已移除旧式尾参命令，请勿再使用 .\\scripts\\vwr.ps1 help/setup/run/test ..." -ForegroundColor White
+    Write-Host "  如需查看帮助，可在主菜单输入 H" -ForegroundColor White
     Write-Host ""
     Write-Host "LaMa TorchScript 权重：" -ForegroundColor Cyan
     Write-Host ("  下载：{0}" -f (Get-LamaTorchScriptDownloadUrl)) -ForegroundColor White
     Write-Host '  环境变量：$env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"' -ForegroundColor White
     Write-Host ""
+}
+
+function Show-InteractiveMenuHeader {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "  智能视频水印去除工具 - 交互式菜单" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  1. 环境初始化" -ForegroundColor White
+    Write-Host "  2. 启动程序" -ForegroundColor White
+    Write-Host "  3. 代码质量检查" -ForegroundColor White
+    Write-Host "  4. 运行测试" -ForegroundColor White
+    Write-Host "  5. 覆盖率分析" -ForegroundColor White
+    Write-Host "  6. 性能测试" -ForegroundColor White
+    Write-Host "  7. 打包构建" -ForegroundColor White
+    Write-Host "  8. 清理缓存与临时文件" -ForegroundColor White
+    Write-Host "  9. CI 模式" -ForegroundColor White
+    Write-Host "  H. 查看帮助" -ForegroundColor White
+    Write-Host "  0. 退出" -ForegroundColor White
+    Write-Host ""
+}
+
+function Read-ChoiceValue {
+    param(
+        [string]$Prompt,
+        [string[]]$AllowedValues,
+        [string]$DefaultValue = ""
+    )
+
+    while ($true) {
+        $suffix = if ($DefaultValue) { " [$DefaultValue]" } else { "" }
+        $answer = Read-Host "$Prompt$suffix"
+        if ([string]::IsNullOrWhiteSpace($answer) -and $DefaultValue) {
+            return $DefaultValue
+        }
+
+        $normalized = ([string]$answer).Trim()
+        foreach ($candidate in $AllowedValues) {
+            if ($normalized.ToUpperInvariant() -eq $candidate.ToUpperInvariant()) {
+                return $candidate
+            }
+        }
+
+        Write-Warn ("输入无效，可选值：{0}" -f ($AllowedValues -join "/"))
+    }
+}
+
+function Read-YesNo {
+    param(
+        [string]$Prompt,
+        [bool]$Default = $true
+    )
+
+    $defaultLabel = if ($Default) { "Y/n" } else { "y/N" }
+    while ($true) {
+        $answer = Read-Host "$Prompt ($defaultLabel)"
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            return $Default
+        }
+
+        $normalized = ([string]$answer).Trim().ToUpperInvariant()
+        if ($normalized -in @("Y", "YES")) {
+            return $true
+        }
+        if ($normalized -in @("N", "NO")) {
+            return $false
+        }
+
+        Write-Warn "请输入 Y 或 N"
+    }
+}
+
+function Read-TextWithDefault {
+    param(
+        [string]$Prompt,
+        [string]$DefaultValue = ""
+    )
+
+    $suffix = if ($DefaultValue) { " [$DefaultValue]" } else { "" }
+    $answer = Read-Host "$Prompt$suffix"
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        return $DefaultValue
+    }
+    return ([string]$answer).Trim()
+}
+
+function Show-LegacyCliRemovedNotice {
+    Write-Host ""
+    Write-Host "当前脚本已改为纯交互模式，请直接运行：.\\scripts\\vwr.ps1" -ForegroundColor Yellow
+    Write-Host "不再支持旧式尾参命令：help/setup/run/test/quality/coverage/perf/build/clean/ci" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+function Invoke-InteractiveSetup {
+    $script:Dev = Read-YesNo -Prompt "是否安装开发依赖" -Default $false
+    $script:Python = Read-TextWithDefault -Prompt "Python 版本" -DefaultValue "3.12.10"
+    $script:TorchBackend = Read-ChoiceValue -Prompt "Torch 后端：1.auto 2.cpu 3.cu121 4.cu124 5.cu126 6.cu128 7.cu130" -AllowedValues @("1", "2", "3", "4", "5", "6", "7") -DefaultValue "1"
+    $script:TorchBackend = switch ($script:TorchBackend) {
+        "1" { "auto" }
+        "2" { "cpu" }
+        "3" { "cu121" }
+        "4" { "cu124" }
+        "5" { "cu126" }
+        "6" { "cu128" }
+        default { "cu130" }
+    }
+
+    $indexChoice = Read-ChoiceValue -Prompt "索引源：1.自动 2.清华镜像 3.自定义" -AllowedValues @("1", "2", "3") -DefaultValue "1"
+    switch ($indexChoice) {
+        "1" {
+            $script:DefaultIndex = ""
+            $script:DefaultIndexIsBound = $false
+        }
+        "2" {
+            $script:DefaultIndex = "https://pypi.tuna.tsinghua.edu.cn/simple"
+            $script:DefaultIndexIsBound = $true
+        }
+        "3" {
+            $script:DefaultIndex = Read-TextWithDefault -Prompt "请输入自定义索引 URL"
+            $script:DefaultIndexIsBound = $true
+        }
+    }
+
+    $strategyChoice = Read-ChoiceValue -Prompt "索引策略：1.first-index 2.unsafe-first-match 3.unsafe-best-match" -AllowedValues @("1", "2", "3") -DefaultValue "1"
+    $script:IndexStrategy = switch ($strategyChoice) {
+        "1" { "first-index" }
+        "2" { "unsafe-first-match" }
+        default { "unsafe-best-match" }
+    }
+
+    Invoke-Setup
+}
+
+function Invoke-InteractiveRun {
+    $script:AutoFix = Read-YesNo -Prompt "是否自动修复常见问题" -Default $true
+    $script:SkipChecks = Read-YesNo -Prompt "是否跳过启动前检查" -Default $false
+    Invoke-Run
+}
+
+function Invoke-InteractiveQuality {
+    $checkChoice = Read-ChoiceValue -Prompt "检查类型：1.all 2.format 3.style 4.type 5.security" -AllowedValues @("1", "2", "3", "4", "5") -DefaultValue "1"
+    $script:Check = switch ($checkChoice) {
+        "1" { "all" }
+        "2" { "format" }
+        "3" { "style" }
+        "4" { "type" }
+        default { "security" }
+    }
+    $script:Fix = Read-YesNo -Prompt "是否自动修复" -Default $false
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $false
+    Invoke-Quality
+}
+
+function Invoke-InteractiveTest {
+    $typeChoice = Read-ChoiceValue -Prompt "测试类型：1.unit 2.integration 3.all 4.audio 5.preferences 6.e2e 7.quality" -AllowedValues @("1", "2", "3", "4", "5", "6", "7") -DefaultValue "1"
+    $script:Arg1 = switch ($typeChoice) {
+        "1" { "unit" }
+        "2" { "integration" }
+        "3" { "all" }
+        "4" { "audio" }
+        "5" { "preferences" }
+        "6" { "e2e" }
+        default { "quality" }
+    }
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $true
+    $script:Coverage = Read-YesNo -Prompt "是否附带覆盖率分析" -Default $false
+    $script:Performance = Read-YesNo -Prompt "是否附带性能测试" -Default $false
+    $script:Report = Read-YesNo -Prompt "是否保存 JSON 报告" -Default $false
+    Invoke-Test
+}
+
+function Invoke-InteractiveCoverage {
+    $script:MinCoverage = [double](Read-TextWithDefault -Prompt "最低覆盖率阈值" -DefaultValue "80")
+    $script:FailOnLow = Read-YesNo -Prompt "低于阈值时是否失败" -Default $false
+    $script:OpenReport = Read-YesNo -Prompt "是否自动打开 HTML 报告" -Default $false
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $false
+    Invoke-Coverage
+}
+
+function Invoke-InteractivePerf {
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $true
+    $script:Iterations = [int](Read-TextWithDefault -Prompt "迭代次数" -DefaultValue "5")
+    $script:MemoryProfile = Read-YesNo -Prompt "是否采集内存信息" -Default $false
+    $script:GPUProfile = Read-YesNo -Prompt "是否采集 GPU 信息" -Default $false
+    Invoke-Perf
+}
+
+function Invoke-InteractiveBuild {
+    $script:SkipTests = Read-YesNo -Prompt "是否跳过构建前测试" -Default $false
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $false
+    Invoke-Build
+}
+
+function Invoke-InteractiveClean {
+    $scopeChoice = Read-ChoiceValue -Prompt "清理级别：1.basic 2.temp 3.all 4.deep" -AllowedValues @("1", "2", "3", "4") -DefaultValue "3"
+    $script:CleanScope = switch ($scopeChoice) {
+        "1" { "basic" }
+        "2" { "temp" }
+        "3" { "all" }
+        default { "deep" }
+    }
+    Invoke-Clean -Scope $script:CleanScope
+}
+
+function Invoke-InteractiveCI {
+    $script:Quick = Read-YesNo -Prompt "是否启用快速模式" -Default $false
+    $script:SkipCoverage = Read-YesNo -Prompt "是否跳过覆盖率检查" -Default $false
+    $script:SkipPerformance = Read-YesNo -Prompt "是否跳过性能测试" -Default $false
+    $script:TimeoutMinutes = [int](Read-TextWithDefault -Prompt "CI 超时时间（分钟）" -DefaultValue "30")
+    Invoke-CI
+}
+
+function Start-InteractiveMenu {
+    while ($true) {
+        Reset-ExecutionOptions
+        Show-InteractiveMenuHeader
+        $choice = Read-ChoiceValue -Prompt "请输入选项" -AllowedValues @("1", "2", "3", "4", "5", "6", "7", "8", "9", "H", "0") -DefaultValue "0"
+
+        switch ($choice.ToUpperInvariant()) {
+            "1" { Invoke-InteractiveSetup }
+            "2" { Invoke-InteractiveRun }
+            "3" { Invoke-InteractiveQuality }
+            "4" { Invoke-InteractiveTest }
+            "5" { Invoke-InteractiveCoverage }
+            "6" { Invoke-InteractivePerf }
+            "7" { Invoke-InteractiveBuild }
+            "8" { Invoke-InteractiveClean }
+            "9" { Invoke-InteractiveCI }
+            "H" { Show-Help }
+            "0" {
+                Write-Info "已退出交互式菜单"
+                return
+            }
+        }
+    }
 }
 
 function Invoke-Setup {
@@ -1485,7 +1680,7 @@ function Invoke-Setup {
     $pyVer = & $venv.Python --version 2>&1
     Write-Ok "Python：$pyVer"
     Write-Ok "导入验证：$appPath"
-    Write-Ok "完成：可运行 .\\scripts\\vwr.ps1 run"
+    Write-Ok "完成：可重新运行 .\\scripts\\vwr.ps1，并在菜单中选择[启动程序]。"
 }
 
 function Test-KeyPackages {
@@ -1514,7 +1709,7 @@ function Test-KeyPackages {
     }
 
     Write-Warn ("缺失关键依赖：" + ($missing -join ", "))
-    Write-Info "建议修复：.\\scripts\\vwr.ps1 setup"
+    Write-Info "建议修复：重新运行 .\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
 
     if ($FixIfMissing) {
         Write-Info "AutoFix：尝试自动安装 requirements.txt ..."
@@ -1545,7 +1740,7 @@ function Invoke-Run {
             Write-Warn "虚拟环境不存在，AutoFix 将执行 setup..."
             Invoke-Setup
         } else {
-            throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+            throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
         }
     }
 
@@ -1675,7 +1870,7 @@ function Invoke-Quality {
             $failed = $true
             Write-Err "Black 未通过"
             if (-not $Fix) {
-                Write-Info "可运行：.\\scripts\\vwr.ps1 quality -Fix"
+                Write-Info "可重新运行 .\\scripts\\vwr.ps1，并在菜单中选择[代码质量检查]，然后开启[自动修复]。"
             }
         } else {
             Write-Ok "Black 通过"
@@ -1767,7 +1962,7 @@ function Invoke-Pytest {
         # 先做一次关键依赖探测，避免 pytest 在收集阶段抛出难以理解的 ImportError
         $depsOk = Test-KeyPackages
         if (-not $depsOk) {
-            Write-Err "关键依赖未安装或不完整，无法运行 pytest。请先运行：.\\scripts\\vwr.ps1 setup -Dev（可加 -TorchBackend cpu / -DefaultIndex 镜像提速）"
+            Write-Err "关键依赖未安装或不完整，无法运行 pytest。请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]，然后开启[安装开发依赖]。"
             return 2
         }
 
@@ -1984,7 +2179,7 @@ function Invoke-Perf {
 
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]。"
     }
 
     $logsDir = Join-Path $ProjectRoot "logs"
@@ -2112,7 +2307,7 @@ function Invoke-Build {
 
     $venv = Get-VenvInfo
     if (-not (Test-Path $venv.Python)) {
-        throw "虚拟环境不存在，请先运行：.\\scripts\\vwr.ps1 setup -Dev"
+        throw "虚拟环境不存在，请直接运行：.\\scripts\\vwr.ps1，并在菜单中选择[环境初始化]，然后开启[安装开发依赖]。"
     }
 
     Ensure-ProjectImportable
@@ -2187,57 +2382,278 @@ Python版本: $(& $venv.Python --version 2>&1)
     Write-Ok "构建完成：release/ 目录"
 }
 
-function Invoke-Clean {
-    Write-Section "缓存清理 (clean)"
-
-    $targets = @(
-        @{ type = "dir"; path = ".mypy_cache" },
-        @{ type = "dir"; path = ".pytest_cache" },
-        @{ type = "file"; path = ".coverage" },
-        @{ type = "glob"; path = ".coverage.*" },
-        @{ type = "glob"; path = "logs/*.log" }
+function Resolve-CleanTargets {
+    param(
+        [ValidateSet("basic", "temp", "all", "deep")]
+        [string]$Scope = "all"
     )
+
+    $targets = [System.Collections.Generic.List[object]]::new()
+
+    if ($Scope -in @("basic", "all", "deep")) {
+        foreach ($target in @(
+                @{ Type = "dir"; Path = ".mypy_cache" },
+                @{ Type = "dir"; Path = ".pytest_cache" },
+                @{ Type = "file"; Path = ".coverage" },
+                @{ Type = "glob"; Path = ".coverage.*" },
+                @{ Type = "glob"; Path = "logs/*.log" }
+            )) {
+            $targets.Add([pscustomobject]$target) | Out-Null
+        }
+    }
+
+    if ($Scope -in @("temp", "all", "deep")) {
+        foreach ($target in @(
+                @{ Type = "dir"; Path = ".cache/tmp" },
+                @{ Type = "dir"; Path = ".cache/pytest" },
+                @{ Type = "dir"; Path = ".pytest_tmp" },
+                @{ Type = "dir"; Path = ".tmp_test_harness" },
+                @{ Type = "glob"; Path = ".tmp_*" },
+                @{ Type = "dir"; Path = "test_output" },
+                @{ Type = "dir"; Path = "tests/.cache" }
+            )) {
+            $targets.Add([pscustomobject]$target) | Out-Null
+        }
+    }
+
+    if ($Scope -eq "deep") {
+        foreach ($target in @(
+                @{ Type = "dir"; Path = ".uv-cache" },
+                @{ Type = "dir"; Path = ".cache/uv" },
+                @{ Type = "dir"; Path = ".cache/setup-state" },
+                @{ Type = "dir"; Path = "src/video_watermark_remover.egg-info" }
+            )) {
+            $targets.Add([pscustomobject]$target) | Out-Null
+        }
+    }
+
+    return @($targets)
+}
+
+function New-CleanFailureRecord {
+    param(
+        [string]$Path,
+        [string]$Message
+    )
+
+    return [pscustomobject]@{
+        Path = $Path
+        Message = $Message
+    }
+}
+
+function New-CleanResult {
+    param(
+        [int]$RemovedCount = 0,
+        [object[]]$Failures = @()
+    )
+
+    return [pscustomobject]@{
+        RemovedCount = $RemovedCount
+        Failures = @($Failures)
+    }
+}
+
+function Merge-CleanResult {
+    param(
+        [pscustomobject]$BaseResult,
+        [pscustomobject]$DeltaResult
+    )
+
+    return [pscustomobject]@{
+        RemovedCount = ($BaseResult.RemovedCount + $DeltaResult.RemovedCount)
+        Failures = @($BaseResult.Failures) + @($DeltaResult.Failures)
+    }
+}
+
+function Remove-CleanLiteralPath {
+    param(
+        [string]$LiteralPath,
+        [bool]$Recurse = $false
+    )
+
+    if (-not (Test-Path $LiteralPath)) {
+        return (New-CleanResult)
+    }
+
+    try {
+        Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force -ErrorAction Stop
+        return (New-CleanResult -RemovedCount 1)
+    } catch {
+        return (New-CleanResult -Failures @(
+                (New-CleanFailureRecord -Path $LiteralPath -Message $_.Exception.Message)
+            ))
+    }
+}
+
+function Remove-CleanDirectoryWithFallback {
+    param([string]$Path)
+
+    $directResult = Remove-CleanLiteralPath -LiteralPath $Path -Recurse $true
+    if ($directResult.Failures.Count -eq 0) {
+        return $directResult
+    }
+
+    $children = @()
+    try {
+        $children = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+    } catch {
+        return $directResult
+    }
+
+    $result = New-CleanResult
+    foreach ($child in $children) {
+        $childResult = Remove-CleanLiteralPath -LiteralPath $child.FullName -Recurse ([bool]$child.PSIsContainer)
+        $result = Merge-CleanResult -BaseResult $result -DeltaResult $childResult
+    }
+
+    if (Test-Path $Path) {
+        $remainingItems = @()
+        try {
+            $remainingItems = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+        } catch {
+            $remainingItems = @("__unknown__")
+        }
+
+        if ($remainingItems.Count -eq 0) {
+            $rootResult = Remove-CleanLiteralPath -LiteralPath $Path -Recurse $true
+            $result = Merge-CleanResult -BaseResult $result -DeltaResult $rootResult
+        } else {
+            $hasRootFailure = @($result.Failures | Where-Object { $_.Path -eq $Path }).Count -gt 0
+            if (-not $hasRootFailure) {
+                $result = Merge-CleanResult -BaseResult $result -DeltaResult (
+                    New-CleanResult -Failures @(
+                        (New-CleanFailureRecord -Path $Path -Message "目录未完全清理，请检查权限或占用进程。")
+                    )
+                )
+            }
+        }
+    }
+
+    return $result
+}
+
+function Remove-CleanGlobTarget {
+    param([string]$Path)
+
+    $parent = Split-Path -Path $Path -Parent
+    $filter = Split-Path -Path $Path -Leaf
+    $searchRoot = if ($parent) { Join-Path $ProjectRoot $parent } else { $ProjectRoot }
+    if (-not (Test-Path $searchRoot)) {
+        return (New-CleanResult)
+    }
+
+    $result = New-CleanResult
+    $items = @(Get-ChildItem -Path $searchRoot -Filter $filter -Force -ErrorAction SilentlyContinue)
+    foreach ($item in $items) {
+        $itemResult = Remove-CleanLiteralPath -LiteralPath $item.FullName -Recurse ([bool]$item.PSIsContainer)
+        $result = Merge-CleanResult -BaseResult $result -DeltaResult $itemResult
+    }
+
+    return $result
+}
+
+function Remove-CleanTarget {
+    param([pscustomobject]$Target)
+
+    switch ($Target.Type) {
+        "dir" {
+            return (Remove-CleanDirectoryWithFallback -Path $Target.Path)
+        }
+        "file" {
+            return (Remove-CleanLiteralPath -LiteralPath $Target.Path -Recurse $false)
+        }
+        "glob" {
+            return (Remove-CleanGlobTarget -Path $Target.Path)
+        }
+    }
+
+    return (New-CleanResult)
+}
+
+function Invoke-Clean {
+    param(
+        [ValidateSet("basic", "temp", "all", "deep")]
+        [string]$Scope = "",
+        [switch]$SkipConfirm
+    )
+
+    if (-not $Scope) {
+        $Scope = if ($script:CleanScope) { $script:CleanScope } else { "all" }
+    }
+
+    Write-Section "缓存清理 (clean)"
+    Write-Info "清理级别：$Scope"
+
+    $targets = Resolve-CleanTargets -Scope $Scope
 
     Write-Info "将清理以下内容："
     foreach ($t in $targets) {
-        Write-Host ("  - " + $t.path) -ForegroundColor White
+        Write-Host ("  - " + $t.Path) -ForegroundColor White
     }
-    Write-Host "  - 递归清理：__pycache__、*.pyc、*.pyo（仅 app/tests 目录）" -ForegroundColor White
+    Write-Host "  - 递归清理：__pycache__、*.pyc、*.pyo（仅 src/tests 目录）" -ForegroundColor White
 
-    if (-not $Force) {
-        $ans = Read-Host "是否继续清理？(y/N)"
-        if ($ans -ne "y" -and $ans -ne "Y") {
+    if (-not $SkipConfirm) {
+        $confirmed = Read-YesNo -Prompt "是否继续清理" -Default $false
+        if (-not $confirmed) {
             Write-Warn "已取消清理"
             return
         }
     }
 
+    $removedCount = 0
+    $failures = @()
     foreach ($t in $targets) {
-        try {
-            if ($t.type -eq "dir" -and (Test-Path $t.path)) {
-                Remove-Item -Path $t.path -Recurse -Force
-            } elseif ($t.type -eq "file" -and (Test-Path $t.path)) {
-                Remove-Item -Path $t.path -Force
-            } elseif ($t.type -eq "glob") {
-                Get-ChildItem -Path $ProjectRoot -Filter $t.path -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-            }
-        } catch {
-            Write-Warn "清理失败：$($t.path) - $($_.Exception.Message)"
+        $result = Remove-CleanTarget -Target $t
+        $removedCount += $result.RemovedCount
+        $failures += @($result.Failures)
+    }
+
+    $rootPycacheResult = Remove-CleanLiteralPath -LiteralPath "__pycache__" -Recurse $true
+    $removedCount += $rootPycacheResult.RemovedCount
+    $failures += @($rootPycacheResult.Failures)
+
+    foreach ($rootBytecode in @(
+            (Join-Path $ProjectRoot "*.pyc"),
+            (Join-Path $ProjectRoot "*.pyo")
+        )) {
+        $result = Remove-CleanGlobTarget -Path $rootBytecode
+        $removedCount += $result.RemovedCount
+        $failures += @($result.Failures)
+    }
+
+    foreach ($scopePath in @("src", "tests")) {
+        if (-not (Test-Path $scopePath)) {
+            continue
+        }
+
+        Get-ChildItem -Path $scopePath -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue | ForEach-Object {
+            $result = Remove-CleanLiteralPath -LiteralPath $_.FullName -Recurse $true
+            $removedCount += $result.RemovedCount
+            $failures += @($result.Failures)
+        }
+
+        Get-ChildItem -Path $scopePath -Recurse -File -Include "*.pyc", "*.pyo" -ErrorAction SilentlyContinue | ForEach-Object {
+            $result = Remove-CleanLiteralPath -LiteralPath $_.FullName -Recurse $false
+            $removedCount += $result.RemovedCount
+            $failures += @($result.Failures)
         }
     }
 
-    foreach ($scope in @("app", "tests")) {
-        if (Test-Path $scope) {
-            Get-ChildItem -Path $scope -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            Get-ChildItem -Path $scope -Recurse -File -Include "*.pyc", "*.pyo" -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
-            }
+    if ($failures.Count -gt 0) {
+        foreach ($failure in @($failures | Select-Object -First 5)) {
+            Write-Warn "清理失败：$($failure.Path) - $($failure.Message)"
         }
+
+        if ($failures.Count -gt 5) {
+            Write-Warn "还有 $($failures.Count - 5) 项失败未展开显示"
+        }
+
+        Write-Warn "清理完成：成功 $removedCount 项，失败 $($failures.Count) 项，已继续处理其余项。"
+        return
     }
 
-    Write-Ok "清理完成"
+    Write-Ok "清理完成，共处理 $removedCount 项"
 }
 
 function Invoke-CI {
@@ -2358,19 +2774,13 @@ function Invoke-CI {
 }
 
 try {
-    switch ($Command) {
-        "help" { Show-Help; exit 0 }
-        "setup" { Invoke-Setup; exit 0 }
-        "run" { Invoke-Run; exit 0 }
-        "quality" { Invoke-Quality; exit 0 }
-        "test" { Invoke-Test; exit 0 }
-        "coverage" { Invoke-Coverage; exit 0 }
-        "perf" { Invoke-Perf; exit 0 }
-        "build" { Invoke-Build; exit 0 }
-        "clean" { Invoke-Clean; exit 0 }
-        "ci" { Invoke-CI; exit 0 }
-        default { throw "未知命令：$Command" }
+    if ($LegacyArgs.Count -gt 0) {
+        Show-LegacyCliRemovedNotice
+        exit 1
     }
+
+    Start-InteractiveMenu
+    exit 0
 } catch {
     Write-Host "[✗] $($_.Exception.Message)" -ForegroundColor Red
     if (Is-VerboseEnabled) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray }

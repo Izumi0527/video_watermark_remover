@@ -335,6 +335,9 @@ class SignalHandler(QObject):
                 ai_params=ai_params,
                 config=self.main_window.config if self.main_window else None,
                 preloaded_ai_handler=preloaded_ai_handler,
+                enable_multiprocess=bool(ai_params.get("enable_multiprocess", False)),
+                num_processes=ai_params.get("num_processes"),
+                use_pipeline=bool(ai_params.get("use_pipeline", False)),
             )
 
             # 连接信号

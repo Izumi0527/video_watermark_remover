@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, Mapping, Optional, Sequence, cast
 
 import torch
 
@@ -72,6 +72,28 @@ class InpaintingWeightInspector:
     def inspect_file(self, path: Path | str) -> WeightInspectionResult:
         """检查单个候选文件。"""
         candidate_path = Path(path)
+        basic_validation = self._validate_candidate_path(candidate_path)
+        if basic_validation is not None:
+            return basic_validation
+
+        load_result = self._load_payload(candidate_path)
+        if isinstance(load_result, WeightInspectionResult):
+            return load_result
+        payload = load_result
+
+        candidates = self._extract_state_dict_candidates(payload)
+        if not candidates:
+            return WeightInspectionResult(
+                path=candidate_path,
+                status="incompatible",
+                reason_code="state_dict_not_found",
+                message="未识别到可分析的 state_dict 结构",
+                is_directly_loadable=False,
+            )
+
+        return self._select_best_candidate_result(candidate_path, candidates)
+
+    def _validate_candidate_path(self, candidate_path: Path) -> Optional[WeightInspectionResult]:
         if not candidate_path.exists():
             return WeightInspectionResult(
                 path=candidate_path,
@@ -100,8 +122,11 @@ class InpaintingWeightInspector:
                 is_directly_loadable=False,
             )
 
+        return None
+
+    def _load_payload(self, candidate_path: Path) -> Any | WeightInspectionResult:
         try:
-            payload = torch.load(candidate_path, map_location="cpu")
+            return torch.load(candidate_path, map_location="cpu")
         except Exception as exc:  # noqa: BLE001
             return WeightInspectionResult(
                 path=candidate_path,
@@ -111,16 +136,11 @@ class InpaintingWeightInspector:
                 is_directly_loadable=False,
             )
 
-        candidates = self._extract_state_dict_candidates(payload)
-        if not candidates:
-            return WeightInspectionResult(
-                path=candidate_path,
-                status="incompatible",
-                reason_code="state_dict_not_found",
-                message="未识别到可分析的 state_dict 结构",
-                is_directly_loadable=False,
-            )
-
+    def _select_best_candidate_result(
+        self,
+        candidate_path: Path,
+        candidates: list[tuple[Mapping[str, Any], Optional[str]]],
+    ) -> WeightInspectionResult:
         best_result: Optional[WeightInspectionResult] = None
         for state_dict, container_key in candidates:
             result = self._analyze_state_dict(
@@ -135,10 +155,19 @@ class InpaintingWeightInspector:
             if result.status == "compatible":
                 return result
 
-        assert best_result is not None
+        if best_result is None:
+            return WeightInspectionResult(
+                path=candidate_path,
+                status="incompatible",
+                reason_code="state_dict_not_found",
+                message="未识别到可分析的 state_dict 结构",
+                is_directly_loadable=False,
+            )
         return best_result
 
-    def scan_directory(self, directory: Path | str, recursive: bool = True) -> list[WeightInspectionResult]:
+    def scan_directory(
+        self, directory: Path | str, recursive: bool = True
+    ) -> list[WeightInspectionResult]:
         """扫描目录中的候选权重文件。"""
         root = Path(directory)
         if not root.exists() or not root.is_dir():
@@ -168,13 +197,13 @@ class InpaintingWeightInspector:
         """从顶层对象中抽取可分析的候选 state_dict。"""
         candidates: list[tuple[Mapping[str, Any], Optional[str]]] = []
         if self._looks_like_state_dict(payload):
-            candidates.append((payload, None))
+            candidates.append((cast(Mapping[str, Any], payload), None))
 
         if isinstance(payload, Mapping):
             for key in WRAPPED_STATE_DICT_KEYS:
                 nested = payload.get(key)
                 if self._looks_like_state_dict(nested):
-                    candidates.append((nested, key))
+                    candidates.append((cast(Mapping[str, Any], nested), key))
 
         return candidates
 
@@ -326,7 +355,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code)
+        return int(exc.code or 0)
 
     inspector = InpaintingWeightInspector()
     target_path = Path(args.path)

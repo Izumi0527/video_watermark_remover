@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -90,16 +90,19 @@ class LegacyUNetInpaintingBackend(BaseInpaintingBackend):
         )
         profile = getattr(self.dl_inpainter, "last_profile_used", None)
         retry_profile = getattr(self.dl_inpainter, "last_retry_profile_used", None)
+        retry_info = getattr(self.dl_inpainter, "last_retry_info", None)
         chosen_profile = profile if isinstance(profile, dict) else retry_profile
+        chosen_quality = (
+            chosen_profile.get("quality_level") if isinstance(chosen_profile, dict) else None
+        )
+        chosen_radius = (
+            chosen_profile.get("requested_radius") if isinstance(chosen_profile, dict) else None
+        )
         self._last_trace = {
             "inpainting_backend": "gpu_deep_learning_unet",
             "inpainting_method": "gpu_deep_learning_unet",
             "gpu_inpainting_profile": dict(profile) if isinstance(profile, dict) else None,
-            "gpu_inpainting_retry": (
-                dict(getattr(self.dl_inpainter, "last_retry_info", None))
-                if isinstance(getattr(self.dl_inpainter, "last_retry_info", None), dict)
-                else None
-            ),
+            "gpu_inpainting_retry": dict(retry_info) if isinstance(retry_info, dict) else None,
             "gpu_inpainting_oom_retry_used": bool(
                 getattr(self.dl_inpainter, "last_oom_retry_used", False)
             ),
@@ -110,16 +113,9 @@ class LegacyUNetInpaintingBackend(BaseInpaintingBackend):
                 dict(retry_profile) if isinstance(retry_profile, dict) else None
             ),
             "effective_quality_level": (
-                int(chosen_profile.get("quality_level"))
-                if isinstance(chosen_profile, dict) and chosen_profile.get("quality_level") is not None
-                else None
+                int(chosen_quality) if chosen_quality is not None else None
             ),
-            "effective_inpaint_radius": (
-                int(chosen_profile.get("requested_radius"))
-                if isinstance(chosen_profile, dict)
-                and chosen_profile.get("requested_radius") is not None
-                else None
-            ),
+            "effective_inpaint_radius": (int(chosen_radius) if chosen_radius is not None else None),
             "configured_inpainting_model_path": self.model_path,
             "loaded_inpainting_model_path": self.loaded_model_path,
         }

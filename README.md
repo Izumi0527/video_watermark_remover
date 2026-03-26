@@ -20,7 +20,7 @@
 
 ## 📌 项目简介
 
-智能视频水印去除工具面向图片与视频场景，提供水印检测、区域修复、音频保留、批量队列和图形化预览能力。项目当前以 `PyQt6 + OpenCV + PyTorch + Ultralytics + FFmpeg + uv` 为核心技术栈，仓库代码已经收敛到 `src/app` 布局，并通过统一脚本入口 `.\scripts\vwr.ps1` 管理环境、运行、测试、质量检查与打包流程。
+智能视频水印去除工具面向图片与视频场景，提供水印检测、区域修复、音频保留、批量队列和图形化预览能力。项目当前以 `PyQt6 + OpenCV + PyTorch + Ultralytics + FFmpeg + uv` 为核心技术栈，仓库代码已经收敛到 `src/app` 布局，并通过统一脚本入口 `.\scripts\vwr.ps1` 以交互式菜单管理环境、运行、测试、质量检查与打包流程。
 
 这个项目目前更适合以下使用场景：
 
@@ -73,7 +73,7 @@
 
 ### 工程与运维体验
 
-- 统一使用 `.\scripts\vwr.ps1` 管理 `setup`、`run`、`quality`、`test`、`coverage`、`perf`、`build`、`clean`、`ci`
+- 统一使用 `.\scripts\vwr.ps1` 交互式菜单管理环境初始化、启动、测试、质量检查、构建与清理
 - `setup` 会优先复用已满足的依赖状态，减少重复下载
 - 在部分 Windows 环境下，程序会先预加载 `torch` 再导入 `PyQt6`，降低 `WinError 1114` 风险
 - 当前仓库已适配 `src/app` editable 开发流，便于调试、测试和打包复用同一导入路径
@@ -89,25 +89,16 @@
 git clone https://github.com/Izumi0527/video_watermark_remover.git
 cd video_watermark_remover
 
-# 2. 初始化环境
-# 如需 CPU 版 PyTorch，可加：-TorchBackend cpu
-# 如需镜像，可加：-DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
-# 如需开发依赖，可加：-Dev
-.\scripts\vwr.ps1 setup
-
-# 3. 启动应用
-.\scripts\vwr.ps1 run
+# 2. 运行交互式脚本
+.\scripts\vwr.ps1
 ```
 
-常见变体：
+启动后请在菜单中按顺序选择：
 
-```powershell
-# 国内网络常用组合：清华镜像 + CPU 版 PyTorch
-.\scripts\vwr.ps1 setup -TorchBackend cpu -DefaultIndex "https://pypi.tuna.tsinghua.edu.cn/simple"
+1. `环境初始化`
+2. `启动程序`
 
-# 自动修复常见问题（缺 .venv / 缺依赖 / 缺配置）
-.\scripts\vwr.ps1 run -AutoFix
-```
+如需国内镜像、CPU 版 PyTorch 或开发依赖，脚本会在“环境初始化”过程中继续询问。
 
 ### Linux / macOS（手动路径）
 
@@ -134,26 +125,16 @@ python main.py
 - 在依赖状态未变化时跳过重复安装
 - 若 Windows 临时构建目录触发 `build_editable` / `egg-info` 权限异常，则自动回退为本地 `.pth` 桥接
 
-### 常用命令
+### 常用菜单项
 
-```powershell
-# 运行应用
-.\scripts\vwr.ps1 run
-
-# 代码质量检查
-.\scripts\vwr.ps1 quality
-.\scripts\vwr.ps1 quality -Quick
-
-# 测试
-.\scripts\vwr.ps1 test unit -Quick
-.\scripts\vwr.ps1 test integration -Quick
-.\scripts\vwr.ps1 test all
-
-# 覆盖率 / 性能 / 构建
-.\scripts\vwr.ps1 coverage
-.\scripts\vwr.ps1 perf -Quick
-.\scripts\vwr.ps1 build
-```
+- `环境初始化`：创建或修复 `.venv`，安装运行/开发依赖
+- `启动程序`：检查环境后启动应用
+- `代码质量检查`：执行格式、风格、类型与安全检查
+- `运行测试`：运行 `unit / integration / all / audio / preferences / e2e / quality`
+- `覆盖率分析`：生成覆盖率报告
+- `性能测试`：生成性能报告
+- `打包构建`：执行 PyInstaller 打包
+- `清理缓存与临时文件`：支持 `basic / temp / all / deep`
 
 ### 配置文件位置
 
@@ -163,11 +144,7 @@ python main.py
 python -c "from app.config.config_manager import ConfigManager; print(ConfigManager.get_config_path())"
 ```
 
-如需快速生成配置，可直接运行：
-
-```powershell
-.\scripts\vwr.ps1 run -AutoFix
-```
+如需快速生成配置，可直接运行 `.\scripts\vwr.ps1`，然后在菜单中选择“启动程序”，并开启自动修复。
 
 ---
 

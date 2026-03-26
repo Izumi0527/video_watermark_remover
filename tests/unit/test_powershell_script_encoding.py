@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-
 UTF8_BOM = b"\xef\xbb\xbf"
 E2E_SCRIPT_PATHS = (
     Path("tests/e2e/ps1/test_audio_processing.ps1"),
@@ -45,9 +44,7 @@ def test_powershell_e2e_scripts_do_not_shadow_common_verbose_parameter() -> None
         if "[switch]$Verbose" in content:
             duplicated_verbose.append(str(script_path))
 
-    assert not duplicated_verbose, (
-        f"以下 PowerShell 脚本仍声明了冲突的 Verbose 参数：{duplicated_verbose}"
-    )
+    assert not duplicated_verbose, f"以下 PowerShell 脚本仍声明了冲突的 Verbose 参数：{duplicated_verbose}"
 
 
 def test_powershell_e2e_scripts_set_src_pythonpath() -> None:
@@ -59,9 +56,9 @@ def test_powershell_e2e_scripts_set_src_pythonpath() -> None:
         if 'Join-Path (Get-Location).Path "src"' not in content:
             missing_src_pythonpath.append(str(script_path))
 
-    assert not missing_src_pythonpath, (
-        f"以下 PowerShell 脚本未将 src 注入 PYTHONPATH：{missing_src_pythonpath}"
-    )
+    assert (
+        not missing_src_pythonpath
+    ), f"以下 PowerShell 脚本未将 src 注入 PYTHONPATH：{missing_src_pythonpath}"
 
 
 def test_powershell_e2e_scripts_do_not_use_invalid_array_filter() -> None:
@@ -73,9 +70,7 @@ def test_powershell_e2e_scripts_do_not_use_invalid_array_filter() -> None:
         if '-Filter "*prefs*", "*test*"' in content or '-Filter "*temp*", "*test*"' in content:
             invalid_filter_scripts.append(str(script_path))
 
-    assert not invalid_filter_scripts, (
-        f"以下 PowerShell 脚本仍使用了非法的数组 Filter：{invalid_filter_scripts}"
-    )
+    assert not invalid_filter_scripts, f"以下 PowerShell 脚本仍使用了非法的数组 Filter：{invalid_filter_scripts}"
 
 
 def test_vwr_prefers_pwsh_for_child_powershell_scripts() -> None:
@@ -94,10 +89,7 @@ def test_powershell_e2e_scripts_do_not_reference_removed_runtime_apis() -> None:
             if legacy_pattern in content:
                 invalid_references.append(f"{script_path}: {legacy_pattern}")
 
-    assert not invalid_references, (
-        "以下 PowerShell 脚本仍引用旧运行时接口："
-        f"{invalid_references}"
-    )
+    assert not invalid_references, "以下 PowerShell 脚本仍引用旧运行时接口：" f"{invalid_references}"
 
 
 def test_powershell_e2e_scripts_use_python_execution_helper() -> None:
@@ -119,9 +111,5 @@ def test_powershell_e2e_scripts_use_python_execution_helper() -> None:
             legacy_inline_python.append(str(script_path))
 
     assert not missing_helper, f"以下脚本尚未统一使用 Python helper：{missing_helper}"
-    assert not missing_exitcode_guard, (
-        f"以下脚本尚未检查 Python 退出码：{missing_exitcode_guard}"
-    )
-    assert not legacy_inline_python, (
-        f"以下脚本仍直接使用 python -c 内联执行：{legacy_inline_python}"
-    )
+    assert not missing_exitcode_guard, f"以下脚本尚未检查 Python 退出码：{missing_exitcode_guard}"
+    assert not legacy_inline_python, f"以下脚本仍直接使用 python -c 内联执行：{legacy_inline_python}"

@@ -88,7 +88,9 @@ def _inject_inpainting_model_path(
         merged_params["inpainting_model_path"] = model_path
 
     if not merged_params.get("lama_model_path"):
-        lama_model_path = _get_optional_config_value(config, "lama_model_path", ("Models", "models"))
+        lama_model_path = _get_optional_config_value(
+            config, "lama_model_path", ("Models", "models")
+        )
         if lama_model_path:
             merged_params["lama_model_path"] = lama_model_path
 
@@ -301,6 +303,24 @@ class VideoProcessorThread(QThread):
                         )
                         self.ai_handler.update_device(new_device)
                     self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
+
+            # 关键运行上下文：用于用户直接判断“是否走 GPU / 用的是什么模型”。
+            try:
+                detector = getattr(self.ai_handler, "watermark_detector", None)
+                detector_model_type = getattr(detector, "model_type", None) or "unknown"
+                detector_device = getattr(detector, "device", None) or getattr(
+                    self.ai_handler, "device", "unknown"
+                )
+                self.logger.info(
+                    "处理配置快照: device=%s, detector=%s(device=%s), requested_inpainting_backend=%s, use_gpu_inpainting=%s",
+                    getattr(self.ai_handler, "device", "unknown"),
+                    detector_model_type,
+                    detector_device,
+                    getattr(self.ai_handler, "requested_inpainting_backend", None),
+                    getattr(self.ai_handler, "use_gpu_inpainting", None),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug("打印处理配置快照失败: %s", exc)
 
             file_ext = os.path.splitext(self.input_path)[1].lower()
 

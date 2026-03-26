@@ -81,9 +81,9 @@ def test_component_imports() -> None:
     for component_name, success, details in import_results:
         print_test_result(component_name, success, details)
 
-    assert successful_imports == total_imports, (
-        f"{total_imports - successful_imports}个组件导入失败 ({successful_imports}/{total_imports})"
-    )
+    assert (
+        successful_imports == total_imports
+    ), f"{total_imports - successful_imports}个组件导入失败 ({successful_imports}/{total_imports})"
     print_test_result(test_name, True, f"所有UI组件导入成功 ({successful_imports}/{total_imports})")
 
 

@@ -496,6 +496,9 @@ class BatchProcessorThread(QThread):
                 ai_params=self.ai_params,
                 config=self.config,
                 preloaded_ai_handler=self.preloaded_ai_handler,  # 复用预加载的AI模型
+                enable_multiprocess=bool(self.ai_params.get("enable_multiprocess", False)),
+                num_processes=self.ai_params.get("num_processes"),
+                use_pipeline=bool(self.ai_params.get("use_pipeline", False)),
             )
 
             # 连接进度信号

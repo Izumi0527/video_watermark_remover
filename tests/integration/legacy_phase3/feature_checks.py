@@ -99,11 +99,7 @@ def test_modern_style_manager():
     print("\n[测试] 现代化样式管理器...")
 
     try:
-        from app.config.styles import (
-            ModernStyleManager,
-            get_dark_style,
-            get_light_style,
-        )
+        from app.config.styles import ModernStyleManager, get_dark_style, get_light_style
 
         # 测试创建样式管理器
         dark_style = get_dark_style()

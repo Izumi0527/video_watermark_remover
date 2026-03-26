@@ -12,11 +12,11 @@ from typing import Any, Optional, Tuple, cast
 import cv2
 from PyQt6.QtCore import QTimer
 
+from ..utils.path import build_temp_path
 from ..workers.audio import async_audio_extractor
 from ..workers.frame_processor import frame_processor_worker, init_worker_ai_handler
 from ..workers.frame_reader import frame_reader_worker
 from ..workers.frame_writer import frame_writer_worker
-from ..utils.path import build_temp_path
 
 
 def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_queues.Queue[Any]:

@@ -3,11 +3,10 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 import pytest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = PROJECT_ROOT / "src"

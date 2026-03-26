@@ -40,9 +40,7 @@ class PerformanceParametersTab:
         gpu_group = QGroupBox("GPU 深度学习修复")
         gpu_layout = QVBoxLayout(gpu_group)
 
-        parent_widget.enable_gpu_check = QCheckBox(
-            "启用深度学习修复后端（LaMa / 兼容 U-Net，需要 CUDA 与权重）"
-        )
+        parent_widget.enable_gpu_check = QCheckBox("启用深度学习修复后端（LaMa / 兼容 U-Net，需要 CUDA 与权重）")
         gpu_layout.addWidget(parent_widget.enable_gpu_check)
 
         parent_widget.gpu_memory_spin = QSpinBox()

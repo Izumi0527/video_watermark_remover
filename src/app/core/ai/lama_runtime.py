@@ -21,7 +21,6 @@ import cv2
 import numpy as np
 import torch
 
-
 TORCHSCRIPT_SUFFIXES = {".pt", ".jit", ".ts"}
 TORCHSCRIPT_CANDIDATE_NAMES = (
     "big-lama.pt",
@@ -137,8 +136,7 @@ def _resolve_torchscript_model_path(asset_ref: str) -> Path:
         if suffix in {".ckpt", ".pth"}:
             raise LaMaRuntimeError(
                 "lama_checkpoint_assets_unsupported",
-                "当前 LaMa 运行时仅支持 TorchScript .pt/.jit/.ts 文件，"
-                "暂不直接支持 .ckpt/.pth 训练检查点。",
+                "当前 LaMa 运行时仅支持 TorchScript .pt/.jit/.ts 文件，" "暂不直接支持 .ckpt/.pth 训练检查点。",
             )
         raise LaMaRuntimeError(
             "lama_asset_layout_unsupported",
@@ -180,7 +178,10 @@ def _iter_torchscript_candidates(asset_dir: Path) -> Iterable[Path]:
         for path in root.iterdir():
             if not path.is_file():
                 continue
-            if path.name in TORCHSCRIPT_CANDIDATE_NAMES or path.suffix.lower() in TORCHSCRIPT_SUFFIXES:
+            if (
+                path.name in TORCHSCRIPT_CANDIDATE_NAMES
+                or path.suffix.lower() in TORCHSCRIPT_SUFFIXES
+            ):
                 discovered.append(path)
 
     for candidate in discovered:
@@ -280,13 +281,6 @@ def _convert_output_to_bgr_image(
         )
 
     cropped = output[:, :original_height, :original_width]
-    rgb_image = (
-        cropped.detach()
-        .float()
-        .cpu()
-        .clamp(0, 1)
-        .permute(1, 2, 0)
-        .numpy()
-    )
+    rgb_image = cropped.detach().float().cpu().clamp(0, 1).permute(1, 2, 0).numpy()
     rgb_uint8 = np.clip(rgb_image * 255.0, 0, 255).astype(np.uint8)
     return cv2.cvtColor(rgb_uint8, cv2.COLOR_RGB2BGR)

@@ -12,8 +12,8 @@ from typing import Any, List, Optional, Tuple, cast
 import cv2
 from PyQt6.QtCore import QTimer
 
-from ..workers.chunk import init_chunk_worker_ai_handler, process_video_chunk
 from ..utils.path import build_temp_path
+from ..workers.chunk import init_chunk_worker_ai_handler, process_video_chunk
 
 
 def _calculate_chunks(

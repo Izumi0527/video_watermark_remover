@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,7 +25,7 @@ def _find_pwsh() -> str:
 
 def _strip_dispatch_block(content: str) -> str:
     pattern = re.compile(
-        r"\ntry \{\n\s+switch \(\$Command\) \{[\s\S]*?exit 1\n\}\s*$",
+        r"\ntry \{\n[\s\S]*?exit 1\n\}\s*$",
         re.MULTILINE,
     )
     stripped, count = pattern.subn("\n", content)
@@ -112,8 +112,7 @@ def _run_powershell_harness(tmp_path: Path, harness: str) -> dict:
 
     if completed.returncode != 0:
         raise AssertionError(
-            "PowerShell 测试脚本执行失败：\n"
-            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+            "PowerShell 测试脚本执行失败：\n" f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
         )
 
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
@@ -157,12 +156,13 @@ def test_show_lama_torchscript_hint_outputs_download_guidance(tmp_path: Path) ->
     assert any("VWR_LAMA_MODEL_PATH" in line for line in result["Infos"])
 
 
-def test_vwr_help_mentions_lama_torchscript_download_link() -> None:
+def test_vwr_menu_help_mentions_lama_torchscript_download_link() -> None:
     completed = subprocess.run(
-        [_find_pwsh(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/vwr.ps1", "help"],
+        [_find_pwsh(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/vwr.ps1"],
         text=True,
         encoding="utf-8",
         errors="replace",
+        input="H\n0\n",
         capture_output=True,
         check=False,
     )
@@ -704,7 +704,9 @@ exit /b 0
         @{
             Args = (Get-Content -LiteralPath $capturePath -Raw -Encoding UTF8).Trim()
         } | ConvertTo-Json -Compress
-        """.replace("__PYTHON__", python_path),
+        """.replace(
+            "__PYTHON__", python_path
+        ),
     )
 
     assert result["Args"].startswith("pip install --python ")
