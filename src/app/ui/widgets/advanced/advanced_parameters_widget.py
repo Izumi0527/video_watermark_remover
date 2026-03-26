@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ....config.advanced_params import AdvancedParamsSnapshot, processing_mode_to_label
+
 # 导入Tab页面实现
 from .advanced_parameters_tabs import (
     DetectionParametersTab,
@@ -68,11 +70,16 @@ class AdvancedParametersWidget(QWidget):
         self.enable_smooth_check: Optional["QCheckBox"] = None
         self.enable_blend_check: Optional["QCheckBox"] = None
         self.enable_enhance_check: Optional["QCheckBox"] = None
+        self.processing_mode_combo: Optional["QComboBox"] = None
+        self.worker_count_spin: Optional["QSpinBox"] = None
         self.thread_count_spin: Optional["QSpinBox"] = None
         self.enable_gpu_check: Optional["QCheckBox"] = None
         self.gpu_memory_spin: Optional["QSpinBox"] = None
         self.cache_size_spin: Optional["QSpinBox"] = None
         self.enable_cache_check: Optional["QCheckBox"] = None
+        self.batch_max_concurrent_files_spin: Optional["QSpinBox"] = None
+        self.batch_auto_retry_failed_check: Optional["QCheckBox"] = None
+        self.batch_max_retry_count_spin: Optional["QSpinBox"] = None
         self.output_format_combo: Optional["QComboBox"] = None
         self.compression_slider: Optional["QSlider"] = None
         self.compression_label: Optional["QLabel"] = None
@@ -151,6 +158,10 @@ class AdvancedParametersWidget(QWidget):
             self.enable_enhance_check.toggled.connect(self._on_parameter_changed)
 
         # 性能参数信号
+        if self.processing_mode_combo:
+            self.processing_mode_combo.currentTextChanged.connect(self._on_parameter_changed)
+        if self.worker_count_spin:
+            self.worker_count_spin.valueChanged.connect(self._on_parameter_changed)
         if self.thread_count_spin:
             self.thread_count_spin.valueChanged.connect(self._on_parameter_changed)
         if self.enable_gpu_check:
@@ -161,6 +172,12 @@ class AdvancedParametersWidget(QWidget):
             self.cache_size_spin.valueChanged.connect(self._on_parameter_changed)
         if self.enable_cache_check:
             self.enable_cache_check.toggled.connect(self._on_parameter_changed)
+        if self.batch_max_concurrent_files_spin:
+            self.batch_max_concurrent_files_spin.valueChanged.connect(self._on_parameter_changed)
+        if self.batch_auto_retry_failed_check:
+            self.batch_auto_retry_failed_check.toggled.connect(self._on_parameter_changed)
+        if self.batch_max_retry_count_spin:
+            self.batch_max_retry_count_spin.valueChanged.connect(self._on_parameter_changed)
 
         # 输出参数信号
         if self.output_format_combo:
@@ -200,6 +217,36 @@ class AdvancedParametersWidget(QWidget):
 
     def get_parameters(self) -> Dict[str, Any]:
         """获取当前参数"""
+        performance_snapshot = AdvancedParamsSnapshot.from_dict(
+            {
+                "processing_mode": (
+                    self.processing_mode_combo.currentData() if self.processing_mode_combo else None
+                ),
+                "worker_count": self.worker_count_spin.value() if self.worker_count_spin else 0,
+                "enable_gpu": self.enable_gpu_check.isChecked() if self.enable_gpu_check else False,
+                "gpu_memory_limit_mb": self.gpu_memory_spin.value() if self.gpu_memory_spin else 0,
+                "enable_cache": (
+                    self.enable_cache_check.isChecked() if self.enable_cache_check else False
+                ),
+                "cache_size_mb": self.cache_size_spin.value() if self.cache_size_spin else 0,
+                "batch_max_concurrent_files": (
+                    self.batch_max_concurrent_files_spin.value()
+                    if self.batch_max_concurrent_files_spin
+                    else 1
+                ),
+                "batch_auto_retry_failed": (
+                    self.batch_auto_retry_failed_check.isChecked()
+                    if self.batch_auto_retry_failed_check
+                    else True
+                ),
+                "batch_max_retry_count": (
+                    self.batch_max_retry_count_spin.value()
+                    if self.batch_max_retry_count_spin
+                    else 0
+                ),
+            }
+        )
+
         return {
             # 检测参数
             "detection_sensitivity": (
@@ -236,13 +283,7 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_enhance_check.isChecked() if self.enable_enhance_check else False
             ),
             # 性能参数
-            "thread_count": self.thread_count_spin.value() if self.thread_count_spin else 0,
-            "enable_gpu": self.enable_gpu_check.isChecked() if self.enable_gpu_check else False,
-            "gpu_memory_limit": self.gpu_memory_spin.value() if self.gpu_memory_spin else 0,
-            "cache_size": self.cache_size_spin.value() if self.cache_size_spin else 0,
-            "enable_cache": (
-                self.enable_cache_check.isChecked() if self.enable_cache_check else False
-            ),
+            **performance_snapshot.to_ui_dict(),
             # 输出参数
             "output_format": (
                 self.output_format_combo.currentText() if self.output_format_combo else ""
@@ -303,20 +344,32 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_enhance_check.setChecked(parameters["enable_enhance_postprocess"])
 
             # 设置性能参数
-            if "thread_count" in parameters and self.thread_count_spin:
-                self.thread_count_spin.setValue(parameters["thread_count"])
-
-            if "enable_gpu" in parameters and self.enable_gpu_check:
-                self.enable_gpu_check.setChecked(parameters["enable_gpu"])
-
-            if "gpu_memory_limit" in parameters and self.gpu_memory_spin:
-                self.gpu_memory_spin.setValue(parameters["gpu_memory_limit"])
-
-            if "cache_size" in parameters and self.cache_size_spin:
-                self.cache_size_spin.setValue(parameters["cache_size"])
-
-            if "enable_cache" in parameters and self.enable_cache_check:
-                self.enable_cache_check.setChecked(parameters["enable_cache"])
+            performance_snapshot = AdvancedParamsSnapshot.from_dict(parameters)
+            if self.processing_mode_combo:
+                display_text = processing_mode_to_label(performance_snapshot.processing_mode)
+                index = self.processing_mode_combo.findText(display_text)
+                if index >= 0:
+                    self.processing_mode_combo.setCurrentIndex(index)
+            if self.worker_count_spin:
+                self.worker_count_spin.setValue(performance_snapshot.worker_count)
+            if self.enable_gpu_check:
+                self.enable_gpu_check.setChecked(performance_snapshot.enable_gpu)
+            if self.gpu_memory_spin:
+                self.gpu_memory_spin.setValue(performance_snapshot.gpu_memory_limit_mb)
+            if self.cache_size_spin:
+                self.cache_size_spin.setValue(performance_snapshot.cache_size_mb)
+            if self.enable_cache_check:
+                self.enable_cache_check.setChecked(performance_snapshot.enable_cache)
+            if self.batch_max_concurrent_files_spin:
+                self.batch_max_concurrent_files_spin.setValue(
+                    performance_snapshot.batch_max_concurrent_files
+                )
+            if self.batch_auto_retry_failed_check:
+                self.batch_auto_retry_failed_check.setChecked(
+                    performance_snapshot.batch_auto_retry_failed
+                )
+            if self.batch_max_retry_count_spin:
+                self.batch_max_retry_count_spin.setValue(performance_snapshot.batch_max_retry_count)
 
             if "compression_quality" in parameters and self.compression_slider:
                 self.compression_slider.setValue(parameters["compression_quality"])
@@ -382,6 +435,10 @@ class AdvancedParametersWidget(QWidget):
             if self.enable_enhance_check:
                 self.enable_enhance_check.toggled.disconnect(self._on_parameter_changed)
 
+            if self.processing_mode_combo:
+                self.processing_mode_combo.currentTextChanged.disconnect(self._on_parameter_changed)
+            if self.worker_count_spin:
+                self.worker_count_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.thread_count_spin:
                 self.thread_count_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.enable_gpu_check:
@@ -392,6 +449,14 @@ class AdvancedParametersWidget(QWidget):
                 self.cache_size_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.enable_cache_check:
                 self.enable_cache_check.toggled.disconnect(self._on_parameter_changed)
+            if self.batch_max_concurrent_files_spin:
+                self.batch_max_concurrent_files_spin.valueChanged.disconnect(
+                    self._on_parameter_changed
+                )
+            if self.batch_auto_retry_failed_check:
+                self.batch_auto_retry_failed_check.toggled.disconnect(self._on_parameter_changed)
+            if self.batch_max_retry_count_spin:
+                self.batch_max_retry_count_spin.valueChanged.disconnect(self._on_parameter_changed)
 
             if self.output_format_combo:
                 self.output_format_combo.currentTextChanged.disconnect(self._on_parameter_changed)
@@ -408,6 +473,7 @@ class AdvancedParametersWidget(QWidget):
 
     def reset_to_defaults(self):
         """重置为默认值"""
+        performance_defaults = AdvancedParamsSnapshot.defaults().to_ui_dict()
         default_params = {
             "detection_sensitivity": 0.5,
             "detection_method": "YOLO v11x 深度学习auto (推荐)",
@@ -421,11 +487,7 @@ class AdvancedParametersWidget(QWidget):
             "enable_smooth_postprocess": True,
             "enable_blend_postprocess": True,
             "enable_enhance_postprocess": False,
-            "thread_count": 4,
-            "enable_gpu": True,
-            "gpu_memory_limit": 2048,
-            "cache_size": 512,
-            "enable_cache": True,
+            **performance_defaults,
             "output_format": "保持原格式",
             "compression_quality": 85,
             "add_suffix": True,
@@ -470,6 +532,9 @@ class AdvancedParametersWidget(QWidget):
                     value = preferences.get_preference("advanced_params", key)
                     if value is not None:
                         saved_params[key] = value
+
+                if hasattr(preferences, "get_advanced_params_snapshot"):
+                    saved_params.update(preferences.get_advanced_params_snapshot().to_ui_dict())
 
                 if saved_params:
                     self.set_parameters(saved_params)

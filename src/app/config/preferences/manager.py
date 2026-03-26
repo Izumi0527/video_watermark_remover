@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from ..advanced_params import AdvancedParamsSnapshot, migrate_legacy_performance_preferences
 from .defaults import PreferencesDefaults
 from .storage import PreferencesStorage
 from .validator import PreferencesValidator
@@ -102,6 +103,31 @@ class UserPreferencesManager:
         """获取批处理偏好设置."""
         result = self.preferences.get("batch", {})
         return result if isinstance(result, dict) else {}
+
+    def get_advanced_params_preferences(self) -> Dict[str, Any]:
+        """获取统一高级性能参数偏好设置。"""
+        result = self.preferences.get("advanced_params", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_advanced_params_snapshot(self) -> AdvancedParamsSnapshot:
+        """获取统一高级性能参数快照，并兼容旧结构迁移。"""
+        current_preferences = self.get_advanced_params_preferences()
+        if current_preferences == PreferencesDefaults.get_advanced_params_defaults():
+            current_preferences = {}
+
+        migrated = migrate_legacy_performance_preferences(
+            current=current_preferences,
+            advanced=self.get_advanced_preferences(),
+            batch=self.get_batch_preferences(),
+        )
+        snapshot = AdvancedParamsSnapshot.from_dict(migrated)
+
+        if "advanced_params" not in self.preferences or not isinstance(
+            self.preferences.get("advanced_params"), dict
+        ):
+            self.preferences["advanced_params"] = snapshot.to_dict()
+
+        return snapshot
 
     def update_window_geometry(
         self, x: int, y: int, width: int, height: int, maximized: bool = False

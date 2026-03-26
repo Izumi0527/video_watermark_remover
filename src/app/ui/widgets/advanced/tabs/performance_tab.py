@@ -5,6 +5,7 @@
 
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QLabel,
@@ -12,6 +13,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .....config.advanced_params import PROCESSING_MODE_OPTIONS, processing_mode_to_label
 
 
 class PerformanceParametersTab:
@@ -23,16 +26,22 @@ class PerformanceParametersTab:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # 线程设置组
-        thread_group = QGroupBox("线程设置")
+        # 运行模式组
+        thread_group = QGroupBox("运行模式")
         thread_layout = QFormLayout(thread_group)
 
-        parent_widget.thread_count_spin = QSpinBox()
-        parent_widget.thread_count_spin.setMinimum(1)
-        parent_widget.thread_count_spin.setMaximum(16)
-        parent_widget.thread_count_spin.setValue(4)
-        parent_widget.thread_count_spin.setSpecialValueText("自动")
-        thread_layout.addRow("处理线程数:", parent_widget.thread_count_spin)
+        parent_widget.processing_mode_combo = QComboBox()
+        for mode in PROCESSING_MODE_OPTIONS:
+            parent_widget.processing_mode_combo.addItem(processing_mode_to_label(mode), mode)
+        thread_layout.addRow("处理模式:", parent_widget.processing_mode_combo)
+
+        parent_widget.worker_count_spin = QSpinBox()
+        parent_widget.worker_count_spin.setMinimum(0)
+        parent_widget.worker_count_spin.setMaximum(16)
+        parent_widget.worker_count_spin.setValue(0)
+        parent_widget.worker_count_spin.setSpecialValueText("自动")
+        parent_widget.thread_count_spin = parent_widget.worker_count_spin
+        thread_layout.addRow("并行度:", parent_widget.worker_count_spin)
 
         layout.addWidget(thread_group)
 
@@ -69,6 +78,28 @@ class PerformanceParametersTab:
         cache_layout.addRow("", parent_widget.enable_cache_check)
 
         layout.addWidget(cache_group)
+
+        # 批处理策略组
+        batch_group = QGroupBox("批处理策略")
+        batch_layout = QFormLayout(batch_group)
+
+        parent_widget.batch_max_concurrent_files_spin = QSpinBox()
+        parent_widget.batch_max_concurrent_files_spin.setMinimum(1)
+        parent_widget.batch_max_concurrent_files_spin.setMaximum(16)
+        parent_widget.batch_max_concurrent_files_spin.setValue(1)
+        batch_layout.addRow("并发文件数:", parent_widget.batch_max_concurrent_files_spin)
+
+        parent_widget.batch_auto_retry_failed_check = QCheckBox("失败后自动重试")
+        parent_widget.batch_auto_retry_failed_check.setChecked(True)
+        batch_layout.addRow("", parent_widget.batch_auto_retry_failed_check)
+
+        parent_widget.batch_max_retry_count_spin = QSpinBox()
+        parent_widget.batch_max_retry_count_spin.setMinimum(0)
+        parent_widget.batch_max_retry_count_spin.setMaximum(10)
+        parent_widget.batch_max_retry_count_spin.setValue(3)
+        batch_layout.addRow("最大重试次数:", parent_widget.batch_max_retry_count_spin)
+
+        layout.addWidget(batch_group)
         layout.addStretch()
 
         return tab

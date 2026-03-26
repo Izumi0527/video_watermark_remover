@@ -42,3 +42,19 @@ def test_build_preload_ai_params_snapshot_injects_model_paths() -> None:
     # 配置注入必须生效（与 VideoProcessorThread 的注入逻辑对齐）
     assert snapshot.get("lama_model_path") == "models/big-lama.pt"
     assert snapshot.get("inpainting_model_path") == "models/stub-unet.pth"
+
+
+def test_build_preload_runtime_snapshot_exposes_resolved_runtime_performance() -> None:
+    from app.ui.utils.ai_params_builder import build_preload_runtime_snapshot
+
+    payload = build_preload_runtime_snapshot(
+        preferences=_DummyPreferences(),
+        advanced_params={"processing_mode": "auto", "worker_count": 0},
+        config=configparser.ConfigParser(),
+    )
+
+    assert payload["ai_params"]["resolved_processing_mode"] == "single_process"
+    assert payload["runtime_performance"]["requested_processing_mode"] == "auto"
+    assert payload["runtime_performance"]["resolved_processing_mode"] == "single_process"
+    assert payload["runtime_performance"]["worker_count"] == 1
+    assert payload["runtime_performance"]["gpu_memory_budget_mb"] == 2048

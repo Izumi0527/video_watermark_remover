@@ -16,8 +16,7 @@ from typing import Any, Dict
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
-# 导入配置管理器
-from app.config.config_manager import ConfigManager
+from app.config.advanced_params import AdvancedParamsSnapshot
 
 from .batch_file_manager import BatchFileManager
 
@@ -50,11 +49,11 @@ class BatchProcessingWidget(QWidget):
         self.preloaded_ai_handler = None
 
         # 并发处理配置
-        self.max_concurrent_files = 4  # 默认并发处理4个文件
+        self.max_concurrent_files = AdvancedParamsSnapshot.defaults().batch_max_concurrent_files
 
         # 自动重试配置
-        self.auto_retry_failed = True  # 默认自动重试
-        self.max_retry_count = 3  # 默认重试次数
+        self.auto_retry_failed = AdvancedParamsSnapshot.defaults().batch_auto_retry_failed
+        self.max_retry_count = AdvancedParamsSnapshot.defaults().batch_max_retry_count
         self._stop_requested = False  # 批量停止请求标记（用于取消/完成口径分流）
 
         # UI组件引用
@@ -103,14 +102,15 @@ class BatchProcessingWidget(QWidget):
         self.ai_params = ai_params
 
     def set_config(self, config):
-        """设置配置并从中读取批处理参数"""
+        """设置配置对象，不再从旧 batch 配置读取性能参数。"""
         self.config = config
-        if config:
-            # 从配置读取最大并发数
-            self.max_concurrent_files = ConfigManager.get_batch_max_concurrent(config, default=4)
-            # 读取自动重试设置
-            self.auto_retry_failed = ConfigManager.get_batch_auto_retry(config, default=True)
-            self.max_retry_count = ConfigManager.get_batch_max_retry_count(config, default=3)
+
+    def set_advanced_params(self, advanced_params: Dict[str, Any]) -> None:
+        """从统一高级参数快照同步批处理策略。"""
+        snapshot = AdvancedParamsSnapshot.from_dict(advanced_params)
+        self.max_concurrent_files = snapshot.batch_max_concurrent_files
+        self.auto_retry_failed = snapshot.batch_auto_retry_failed
+        self.max_retry_count = snapshot.batch_max_retry_count
 
     def set_preloaded_ai_handler(self, ai_handler):
         """
@@ -126,9 +126,9 @@ class BatchProcessingWidget(QWidget):
         设置最大并发文件数
 
         Args:
-            max_concurrent: 最大并发文件数（建议1-8，默认4）
+            max_concurrent: 最大并发文件数（建议1-16）
         """
-        self.max_concurrent_files = max(1, min(max_concurrent, 8))  # 限制在1-8之间
+        self.max_concurrent_files = max(1, min(max_concurrent, 16))  # 限制在1-16之间
 
     def add_files(self):
         """添加文件到队列"""

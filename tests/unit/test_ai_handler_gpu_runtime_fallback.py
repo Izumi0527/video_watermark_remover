@@ -74,3 +74,63 @@ def test_ai_handler_falls_back_to_opencv_when_gpu_runtime_inpainting_raises(
     assert info["loaded_inpainting_model_path"] == str(model_path)
     assert handler.use_gpu_inpainting is False
     assert handler.dl_inpainter is None
+
+
+def test_ai_handler_applies_gpu_memory_budget_to_deep_inpainting_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
+
+    model_path = tmp_path / "stub-unet.pth"
+    model_path.write_bytes(b"stub")
+
+    handler = ai_handler_cls(
+        config=_build_test_config(str(model_path)),
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "gpu_memory_mb": 1024,
+        },
+    )
+    assert handler.load_models() is True
+
+    runtime_profile = handler.build_gpu_runtime_profile((1080, 1920, 3))
+
+    assert runtime_profile["memory_budget_mb"] == 1024
+    assert runtime_profile["resize_limit"] == 640
+    assert getattr(handler.dl_inpainter, "memory_budget_mb", None) == 1024
+
+
+def test_ai_handler_pushes_runtime_profile_to_active_deep_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
+
+    handler = ai_handler_cls(
+        config=None,
+        ai_params={
+            "use_gpu_inpainting": True,
+            "device": "cuda",
+            "gpu_memory_mb": 1024,
+            "requested_inpainting_backend": "lama",
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    class _Backend:
+        def set_runtime_profile(self, profile):
+            captured.update(profile)
+
+    handler.deep_inpainting_backend = _Backend()
+
+    runtime_profile = handler.build_gpu_runtime_profile((1080, 1920, 3))
+
+    assert runtime_profile["memory_budget_mb"] == 1024
+    assert captured["memory_budget_mb"] == 1024
+    assert captured["resize_limit"] == 640

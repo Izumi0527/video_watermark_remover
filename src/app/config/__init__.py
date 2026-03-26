@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .advanced_params import AdvancedParamsSnapshot, ProcessingContext, ResolvedPerformanceConfig
 from .config_manager import ConfigManager
 from .validators import ConfigValidator, get_validator, validate_param, validate_params
 
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ConfigManager",
+    "AdvancedParamsSnapshot",
+    "ProcessingContext",
+    "ResolvedPerformanceConfig",
     "UserPreferencesManager",
     "ModernStyleManager",
     "ConfigValidator",

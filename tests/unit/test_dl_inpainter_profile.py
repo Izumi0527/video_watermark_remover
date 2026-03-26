@@ -159,6 +159,29 @@ def test_build_oom_retry_profile_reduces_resize_limit_and_blend_ratio(
     assert retry_profile.blend_ratio > 0
 
 
+def test_build_gpu_profile_respects_memory_budget(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dl_module = _load_dl_inpainter_module(monkeypatch)
+    unbudgeted = dl_module.DeepLearningInpainter(device="cpu")
+    budgeted = dl_module.DeepLearningInpainter(device="cpu")
+    budgeted.set_runtime_memory_budget(1024)
+
+    unbudgeted_profile = unbudgeted._build_inpainting_profile(
+        (1080, 1920, 3),
+        radius=3,
+        quality_level=5,
+    )
+    budgeted_profile = budgeted._build_inpainting_profile(
+        (1080, 1920, 3),
+        radius=3,
+        quality_level=5,
+    )
+
+    assert budgeted_profile.memory_budget_mb == 1024
+    assert budgeted_profile.resize_limit < unbudgeted_profile.resize_limit
+
+
 def test_inpaint_frame_retries_with_conservative_profile_after_oom(
     monkeypatch: pytest.MonkeyPatch,
 ):

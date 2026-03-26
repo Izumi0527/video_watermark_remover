@@ -35,6 +35,7 @@ class GPUInpaintingProfile:
     mask_feather_px: int
     blend_ratio: float
     resize_limit: int
+    memory_budget_mb: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Union[int, float]]:
         return asdict(self)
@@ -224,7 +225,20 @@ class DeepLearningInpainter:
         self.last_oom_retry_used: bool = False
         self.last_oom_retry_count: int = 0
         self.last_retry_profile_used: Optional[Dict[str, Union[int, float]]] = None
+        self.memory_budget_mb: Optional[int] = None
         self.logger.info(f"DeepLearningInpainter initialized on device: {self.device}")
+
+    def set_runtime_memory_budget(self, memory_budget_mb: Optional[int]) -> None:
+        """设置当前 GPU 推理的软显存预算。"""
+        if memory_budget_mb is None:
+            self.memory_budget_mb = None
+            return
+        try:
+            normalized = int(memory_budget_mb)
+        except (TypeError, ValueError):
+            self.memory_budget_mb = None
+            return
+        self.memory_budget_mb = max(256, normalized)
 
     def load_model(self, model_path: Optional[str] = None) -> bool:
         """
@@ -1387,14 +1401,41 @@ class DeepLearningInpainter:
         mask_expand_px = normalized_radius + normalized_quality - 1
         mask_feather_px = normalized_quality + max(1, normalized_radius // 2)
 
-        return GPUInpaintingProfile(
+        profile = GPUInpaintingProfile(
             requested_radius=normalized_radius,
             quality_level=normalized_quality,
             mask_expand_px=mask_expand_px,
             mask_feather_px=mask_feather_px,
             blend_ratio=blend_ratio_map[normalized_quality],
             resize_limit=resize_limit_map[normalized_quality],
+            memory_budget_mb=self.memory_budget_mb,
         )
+        return self._apply_memory_budget_to_profile(profile)
+
+    def _resolve_resize_limit_cap_from_budget(self, memory_budget_mb: int) -> int:
+        """把显存预算映射为更保守的推理分辨率上限。"""
+        if memory_budget_mb <= 1024:
+            return 640
+        if memory_budget_mb <= 1536:
+            return 768
+        if memory_budget_mb <= 2048:
+            return 960
+        return 1152
+
+    def _apply_memory_budget_to_profile(
+        self,
+        profile: GPUInpaintingProfile,
+    ) -> GPUInpaintingProfile:
+        """根据软显存预算收缩 profile。"""
+        if self.memory_budget_mb is None:
+            return profile
+
+        profile.memory_budget_mb = self.memory_budget_mb
+        profile.resize_limit = min(
+            profile.resize_limit,
+            self._resolve_resize_limit_cap_from_budget(self.memory_budget_mb),
+        )
+        return profile
 
     def _resolve_profile(
         self,

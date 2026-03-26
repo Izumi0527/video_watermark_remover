@@ -10,7 +10,43 @@
 """
 
 import threading
+from dataclasses import dataclass
 from typing import Optional
+
+
+@dataclass(frozen=True)
+class QueueBudget:
+    """流水线运行时缓冲预算。"""
+
+    frame_queue_size: int
+    result_queue_size: int
+    writer_buffer_size: int
+
+
+def calculate_runtime_queue_budget(
+    enable_cache: bool,
+    cache_size_mb: int,
+    frame_shape: tuple[int, int],
+) -> QueueBudget:
+    """根据缓存预算推导流水线队列与写入缓冲大小。"""
+    if not enable_cache:
+        return QueueBudget(frame_queue_size=10, result_queue_size=20, writer_buffer_size=20)
+
+    height, width = frame_shape[:2]
+    frame_bytes = max(1, int(height) * int(width) * 3)
+    frame_mb = max(1.0, frame_bytes / (1024 * 1024))
+    normalized_cache_mb = max(64, int(cache_size_mb))
+    approx_frames = max(4, int(normalized_cache_mb / frame_mb))
+
+    frame_queue_size = max(10, min(80, approx_frames // 8))
+    result_queue_size = max(20, min(160, approx_frames // 4))
+    writer_buffer_size = max(20, min(160, approx_frames // 4))
+
+    return QueueBudget(
+        frame_queue_size=frame_queue_size,
+        result_queue_size=result_queue_size,
+        writer_buffer_size=writer_buffer_size,
+    )
 
 
 class BackpressureController:
@@ -200,4 +236,9 @@ class AdaptiveBackpressure(BackpressureController):
         self._wait_count = 0
 
 
-__all__ = ["BackpressureController", "AdaptiveBackpressure"]
+__all__ = [
+    "AdaptiveBackpressure",
+    "BackpressureController",
+    "QueueBudget",
+    "calculate_runtime_queue_budget",
+]

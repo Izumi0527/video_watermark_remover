@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, cast
 
+from ..advanced_params import AdvancedParamsSnapshot
 from ..styles.colors import DEFAULT_THEME
 
 
@@ -30,15 +31,17 @@ class PreferencesDefaults:
             "ffmpeg_path": "",
         },
         "advanced": {
-            "max_threads": -1,
+            "max_threads": 0,
             "cache_size_mb": 512,
-            "enable_gpu": False,
+            "enable_gpu": True,
             "log_level": "INFO",
             "auto_save_interval": 300,
         },
+        "advanced_params": AdvancedParamsSnapshot.defaults().to_dict(),
         "batch": {
             "max_concurrent_files": 1,
             "auto_retry_failed": True,
+            "max_retry_count": 3,
             "delete_temp_files": True,
             "show_progress_details": True,
         },
@@ -75,6 +78,11 @@ class PreferencesDefaults:
     def get_batch_defaults(cls) -> Dict[str, Any]:
         """获取批量处理默认设置."""
         return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["batch"]).copy()
+
+    @classmethod
+    def get_advanced_params_defaults(cls) -> Dict[str, Any]:
+        """获取统一高级性能参数默认设置。"""
+        return cast(Dict[str, Any], cls.DEFAULT_PREFERENCES["advanced_params"]).copy()
 
 
 __all__ = ["PreferencesDefaults"]

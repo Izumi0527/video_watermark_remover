@@ -20,6 +20,7 @@ from typing import Any, List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # 导入配置
+from ..config.advanced_params import ResolvedPerformanceConfig
 from ..config.styles.colors import DEFAULT_THEME
 
 # 导入视频处理线程
@@ -101,6 +102,7 @@ class SignalHandler(QObject):
         self._last_batch_ai_params: Optional[dict] = None
         self._last_batch_ai_params_generated_at: Optional[str] = None
         self._last_batch_config: Optional[dict] = None
+        self._last_batch_runtime_config: Optional[dict] = None
 
         # 设置日志
         self.logger = logging.getLogger(__name__)
@@ -322,6 +324,7 @@ class SignalHandler(QObject):
                 advanced_params=advanced_params,
                 manual_selections=self.manual_selections,
                 input_file_path=self.input_file_path,
+                is_batch=False,
             )
 
             # 使用预加载的AI模型 (如果可用)
@@ -737,21 +740,39 @@ class SignalHandler(QObject):
 
         # 构建AI参数
         params_builder = AIParamsBuilder()
+        first_input_path = None
+        if queue:
+            first_item = queue[0]
+            if isinstance(first_item, dict):
+                first_input_path = first_item.get("input_path")
         ai_params = params_builder.build_from_ui(
             preferences=self.preferences,
             advanced_params=advanced_params,
             manual_selections=self.manual_selections,
-            input_file_path=None,
+            input_file_path=first_input_path,
+            is_batch=True,
         )
-        max_concurrent_files = 4
-        auto_retry_failed = True
-        max_retry_count = 3
+        resolved_runtime_config = self._resolve_runtime_performance_config(
+            params_builder=params_builder,
+            advanced_params=advanced_params,
+            input_file_path=first_input_path,
+            is_batch=True,
+            ai_params=ai_params,
+        )
+        resolved_batch_config = resolved_runtime_config.to_batch_config()
+        max_concurrent_files = int(resolved_batch_config.get("max_concurrent_files", 1) or 1)
+        auto_retry_failed = bool(resolved_batch_config.get("auto_retry_failed", True))
+        max_retry_count = int(resolved_batch_config.get("max_retry_count", 3) or 0)
         batch_config: dict[str, Any] = {
             "max_concurrent_files": max_concurrent_files,
             "auto_retry_failed": auto_retry_failed,
             "max_retry_count": max_retry_count,
         }
-        self._remember_last_batch_snapshot(ai_params=ai_params, batch_config=batch_config)
+        self._remember_last_batch_snapshot(
+            ai_params=ai_params,
+            batch_config=batch_config,
+            runtime_config=resolved_runtime_config.to_manifest_dict(),
+        )
 
         # 获取预加载的AI模型
         preloaded_ai_handler = None
@@ -1034,6 +1055,7 @@ class SignalHandler(QObject):
         ai_params_source: str = "none"
         ai_params_generated_at: Optional[str] = None
         batch_config: Optional[dict] = None
+        runtime_config: Optional[dict] = None
 
         if self.batch_processor is not None and hasattr(self.batch_processor, "ai_params"):
             run_ai_params = dict(getattr(self.batch_processor, "ai_params", {}) or {})
@@ -1044,24 +1066,48 @@ class SignalHandler(QObject):
                 "auto_retry_failed": getattr(self.batch_processor, "auto_retry_failed", None),
                 "max_retry_count": getattr(self.batch_processor, "max_retry_count", None),
             }
+            runtime_config = self._build_runtime_config_snapshot(
+                ai_params=run_ai_params,
+                batch_config=batch_config,
+            )
         elif self._last_batch_ai_params is not None:
             run_ai_params = dict(self._last_batch_ai_params)
             ai_params_source = "last_batch"
             ai_params_generated_at = self._last_batch_ai_params_generated_at
             batch_config = dict(self._last_batch_config or {})
+            runtime_config = dict(self._last_batch_runtime_config or {})
+            if not runtime_config:
+                runtime_config = self._build_runtime_config_snapshot(
+                    ai_params=run_ai_params,
+                    batch_config=batch_config,
+                )
         else:
             # 兜底：按当前 UI/偏好构建一次参数快照（可能与实际运行参数不一致）
             try:
                 advanced_params = {}
                 if hasattr(self.control_panel, "get_advanced_parameters"):
                     advanced_params = self.control_panel.get_advanced_parameters()
+                first_input_path = None
+                first_item = queue[0] if queue else None
+                if isinstance(first_item, dict):
+                    first_input_path = first_item.get("input_path")
                 params_builder = AIParamsBuilder()
                 run_ai_params = params_builder.build_from_ui(
                     preferences=self.preferences,
                     advanced_params=advanced_params,
                     manual_selections=self.manual_selections,
-                    input_file_path=None,
+                    input_file_path=first_input_path,
+                    is_batch=True,
                 )
+                resolved_runtime_config = self._resolve_runtime_performance_config(
+                    params_builder=params_builder,
+                    advanced_params=advanced_params,
+                    input_file_path=first_input_path,
+                    is_batch=True,
+                    ai_params=run_ai_params,
+                )
+                batch_config = resolved_runtime_config.to_batch_config()
+                runtime_config = resolved_runtime_config.to_manifest_dict()
                 ai_params_source = "computed_at_export"
                 ai_params_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             except Exception as exc:  # noqa: BLE001
@@ -1092,6 +1138,9 @@ class SignalHandler(QObject):
                 "ai_params": self._make_json_safe(run_ai_params) if run_ai_params else None,
                 "ai_params_source": ai_params_source,
                 "ai_params_generated_at": ai_params_generated_at,
+                "runtime_performance": (
+                    self._make_json_safe(runtime_config) if runtime_config else None
+                ),
             },
             "items": manifest_items,
         }
@@ -1156,17 +1205,76 @@ class SignalHandler(QObject):
             self.log_panel.add_error_message(error_msg)
             self.logger.error(error_msg)
 
-    def _remember_last_batch_snapshot(self, ai_params: dict, batch_config: dict) -> None:
+    def _remember_last_batch_snapshot(
+        self,
+        ai_params: dict,
+        batch_config: dict,
+        runtime_config: Optional[dict] = None,
+    ) -> None:
         """缓存最近一次批处理运行快照，供任务结束后导出 manifest 使用。"""
         self._last_batch_ai_params = dict(ai_params)
         self._last_batch_ai_params_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._last_batch_config = dict(batch_config)
+        self._last_batch_runtime_config = dict(runtime_config or {})
 
     def _clear_last_batch_snapshot(self) -> None:
         """清空最近一次批处理运行快照，避免新队列误复用旧批次参数。"""
         self._last_batch_ai_params = None
         self._last_batch_ai_params_generated_at = None
         self._last_batch_config = None
+        self._last_batch_runtime_config = None
+
+    def _resolve_runtime_performance_config(
+        self,
+        *,
+        params_builder: Any,
+        advanced_params: dict,
+        input_file_path: Optional[str],
+        is_batch: bool,
+        ai_params: Optional[dict] = None,
+    ) -> ResolvedPerformanceConfig:
+        """优先复用 builder 的统一解析入口，必要时回退到运行时字段重建。"""
+        build_runtime_config = getattr(params_builder, "build_resolved_performance_config", None)
+        if callable(build_runtime_config):
+            try:
+                resolved_runtime_config = build_runtime_config(
+                    advanced_params=advanced_params,
+                    input_file_path=input_file_path,
+                    is_batch=is_batch,
+                )
+                if isinstance(resolved_runtime_config, ResolvedPerformanceConfig):
+                    return resolved_runtime_config
+            except TypeError:
+                self.logger.debug("builder.build_resolved_performance_config 不支持新签名，回退兼容路径")
+
+        batch_config = {}
+        build_batch_config = getattr(params_builder, "build_batch_config", None)
+        if callable(build_batch_config):
+            try:
+                batch_config = build_batch_config(
+                    advanced_params,
+                    input_file_path=input_file_path,
+                )
+            except TypeError:
+                batch_config = build_batch_config(advanced_params)
+        return ResolvedPerformanceConfig.from_runtime_sources(
+            ai_params=ai_params,
+            batch_config=batch_config,
+        )
+
+    def _build_runtime_config_snapshot(
+        self,
+        *,
+        ai_params: Optional[dict],
+        batch_config: Optional[dict],
+    ) -> Optional[dict]:
+        """根据运行时参数重建可导出的统一性能快照。"""
+        if ai_params is None and batch_config is None:
+            return None
+        return ResolvedPerformanceConfig.from_runtime_sources(
+            ai_params=ai_params,
+            batch_config=batch_config,
+        ).to_manifest_dict()
 
     @staticmethod
     def _try_call_json_method(value: Any, method_name: str) -> tuple[bool, Any]:

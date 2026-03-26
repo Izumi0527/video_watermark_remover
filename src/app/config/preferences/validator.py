@@ -21,6 +21,8 @@ class PreferencesValidator:
                 return self._validate_processing(key, value)
             if category == "advanced":
                 return self._validate_advanced(key, value)
+            if category == "advanced_params":
+                return self._validate_advanced_params(key, value)
             return True
         except Exception as e:  # noqa: BLE001
             self.logger.error(f"Error validating preference {category}.{key}: {e}")
@@ -53,6 +55,28 @@ class PreferencesValidator:
         if key == "cache_size_mb":
             return isinstance(value, int) and value >= 0
         if key == "auto_save_interval":
+            return isinstance(value, int) and value >= 0
+        return True
+
+    def _validate_advanced_params(self, key: str, value: Any) -> bool:
+        """验证统一性能参数分类的偏好值。"""
+        if key == "processing_mode":
+            return value in {"auto", "single_process", "multiprocess", "pipeline"}
+        if key == "worker_count":
+            return isinstance(value, int) and 0 <= value <= 16
+        if key == "enable_gpu":
+            return isinstance(value, bool)
+        if key == "gpu_memory_limit_mb":
+            return isinstance(value, int) and value >= 256
+        if key == "enable_cache":
+            return isinstance(value, bool)
+        if key == "cache_size_mb":
+            return isinstance(value, int) and value >= 64
+        if key == "batch_max_concurrent_files":
+            return isinstance(value, int) and value >= 1
+        if key == "batch_auto_retry_failed":
+            return isinstance(value, bool)
+        if key == "batch_max_retry_count":
             return isinstance(value, int) and value >= 0
         return True
 

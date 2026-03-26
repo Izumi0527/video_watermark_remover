@@ -7,11 +7,12 @@ import threading
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import queues as mp_queues
 from multiprocessing import synchronize
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 import cv2
 from PyQt6.QtCore import QTimer
 
+from ..utils.backpressure import QueueBudget, calculate_runtime_queue_budget
 from ..utils.path import build_temp_path
 from ..workers.audio import async_audio_extractor
 from ..workers.frame_processor import frame_processor_worker, init_worker_ai_handler
@@ -24,35 +25,24 @@ def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_que
     return cast(mp_queues.Queue[Any], queue_obj)
 
 
-def _calculate_queue_sizes(processor) -> Tuple[int, int]:
-    try:
-        import psutil  # type: ignore[import-untyped]
-
-        available_mb = psutil.virtual_memory().available / (1024 * 1024)
-
-        if available_mb < 4096:
-            processor.logger.info(
-                f"Low memory detected ({available_mb:.0f}MB), using small queues (20+40)"
-            )
-            return (20, 40)
-        elif available_mb < 8192:
-            processor.logger.info(
-                f"Medium memory detected ({available_mb:.0f}MB), using medium queues (30+50)"
-            )
-            return (30, 50)
-        else:
-            processor.logger.info(
-                f"High memory detected ({available_mb:.0f}MB), using large queues (50+100)"
-            )
-            return (50, 100)
-
-    except ImportError:
-        processor.logger.warning("psutil not available, using default queue sizes (30+50)")
-        return (30, 50)
-
-    except Exception as e:  # noqa: BLE001
-        processor.logger.warning(f"Failed to detect memory: {e}, using default queue sizes (30+50)")
-        return (30, 50)
+def _calculate_queue_budget(processor, frame_shape: tuple[int, int]) -> QueueBudget:
+    enable_cache = bool(processor.ai_params.get("enable_cache", True))
+    cache_size_mb = int(processor.ai_params.get("cache_size_mb", 512) or 512)
+    queue_budget = calculate_runtime_queue_budget(
+        enable_cache=enable_cache,
+        cache_size_mb=cache_size_mb,
+        frame_shape=frame_shape,
+    )
+    processor.logger.info(
+        "Pipeline queue budget resolved: enable_cache=%s cache_size_mb=%s "
+        "frame_queue=%s result_queue=%s writer_buffer=%s",
+        enable_cache,
+        cache_size_mb,
+        queue_budget.frame_queue_size,
+        queue_budget.result_queue_size,
+        queue_budget.writer_buffer_size,
+    )
+    return queue_budget
 
 
 def _check_pipeline_progress(
@@ -123,9 +113,9 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
         processor._emit_detailed_progress("processing_frames", 0, total_frames)
 
         manager = multiprocessing.Manager()
-        frame_queue_size, result_queue_size = _calculate_queue_sizes(processor)
-        frame_queue = _create_manager_queue(manager, frame_queue_size)
-        result_queue = _create_manager_queue(manager, result_queue_size)
+        queue_budget = _calculate_queue_budget(processor, (height, width))
+        frame_queue = _create_manager_queue(manager, queue_budget.frame_queue_size)
+        result_queue = _create_manager_queue(manager, queue_budget.result_queue_size)
         progress_queue = _create_manager_queue(manager)
         processor._stop_event = cast(synchronize.Event, manager.Event())
 
@@ -206,6 +196,7 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
             "width": width,
             "height": height,
             "fourcc": fourcc,
+            "writer_buffer_size": queue_budget.writer_buffer_size,
         }
 
         writer_result = []

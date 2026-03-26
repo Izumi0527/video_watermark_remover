@@ -38,7 +38,7 @@ def frame_writer_worker(  # noqa: C901
     logger = logging.getLogger(__name__)
 
     # 缓冲区配置
-    MAX_BUFFER_SIZE = 50  # 最大缓冲帧数
+    max_buffer_size = max(10, int(video_params.get("writer_buffer_size", 50) or 50))
     MIN_SLEEP_MS = 1  # 最小休眠时间
     MAX_SLEEP_MS = 20  # 最大休眠时间
 
@@ -93,13 +93,13 @@ def frame_writer_worker(  # noqa: C901
             try:
                 # 自适应背压控制
                 buffer_size = len(frame_heap)
-                if buffer_size >= MAX_BUFFER_SIZE:
+                if buffer_size >= max_buffer_size:
                     # 先尝试写入可写的帧
                     _write_sequential_frames()
 
                     # 如果仍然满，使用自适应休眠
-                    if len(frame_heap) >= MAX_BUFFER_SIZE:
-                        fill_ratio = len(frame_heap) / MAX_BUFFER_SIZE
+                    if len(frame_heap) >= max_buffer_size:
+                        fill_ratio = len(frame_heap) / max_buffer_size
                         _adaptive_sleep(fill_ratio)
                         continue
 

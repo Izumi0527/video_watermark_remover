@@ -55,6 +55,11 @@ class AIHandler:
         self.inpaint_radius = self.ai_params.get("inpaint_radius", 3)
         raw_quality_level = self.ai_params.get("quality_level", 3)
         self.quality_level = int(raw_quality_level) if raw_quality_level is not None else 3
+        raw_gpu_memory_limit_mb = self.ai_params.get("gpu_memory_mb", 2048)
+        self.gpu_memory_limit_mb = (
+            int(raw_gpu_memory_limit_mb) if raw_gpu_memory_limit_mb is not None else 2048
+        )
+        self.effective_gpu_memory_budget_mb: Optional[int] = None
 
         # 预处理/后处理开关
         self.enable_blur_preprocess = self.ai_params.get("enable_blur_preprocess", False)
@@ -112,6 +117,7 @@ class AIHandler:
             f"inpainting_algorithm={self.inpainting_algorithm}, "
             f"inpaint_radius={self.inpaint_radius}, "
             f"quality_level={self.quality_level}, "
+            f"gpu_memory_limit_mb={self.gpu_memory_limit_mb}, "
             f"configured_inpainting_model_path={self.configured_inpainting_model_path}, "
             f"configured_inpainting_asset_ref={self.configured_inpainting_asset_ref}"
         )
@@ -606,6 +612,7 @@ class AIHandler:
             # 优先使用深度学习 inpainter (如果已启用)
             if self.use_gpu_inpainting and self.deep_inpainting_backend is not None:
                 try:
+                    self.build_gpu_runtime_profile(frame.shape)
                     dl_result = cast(
                         np.ndarray,
                         self.deep_inpainting_backend.inpaint_frame(
@@ -786,6 +793,59 @@ class AIHandler:
                 self.image_inpainter,
             )
         return bool(self.opencv_inpainting_backend.load())
+
+    def _resolve_effective_gpu_memory_budget_mb(self) -> int:
+        """解析当前深度修复链路实际可用的软显存预算。"""
+        requested_budget_mb = max(256, int(self.gpu_memory_limit_mb))
+        effective_budget_mb = requested_budget_mb
+
+        if self.device == "cuda":
+            try:
+                mem_get_info = getattr(getattr(torch, "cuda", None), "mem_get_info", None)
+                if callable(mem_get_info):
+                    free_bytes, _ = mem_get_info()
+                    free_mb = max(256, int(free_bytes / (1024 * 1024)))
+                    effective_budget_mb = min(requested_budget_mb, free_mb)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug("读取 CUDA 可用显存失败，继续使用请求预算: %s", exc)
+
+        self.effective_gpu_memory_budget_mb = effective_budget_mb
+        return effective_budget_mb
+
+    def _resolve_runtime_resize_limit_from_budget(self, memory_budget_mb: int) -> int:
+        """把软显存预算映射为更保守的推理尺寸上限。"""
+        if memory_budget_mb <= 1024:
+            return 640
+        if memory_budget_mb <= 1536:
+            return 768
+        if memory_budget_mb <= 2048:
+            return 960
+        return 1152
+
+    def build_gpu_runtime_profile(self, frame_shape: tuple[int, ...]) -> dict[str, object]:
+        """构建当前帧的 GPU 运行时预算快照，并同步到深度修复器。"""
+        memory_budget_mb = self._resolve_effective_gpu_memory_budget_mb()
+        runtime_profile = {
+            "frame_shape": tuple(frame_shape),
+            "memory_budget_mb": memory_budget_mb,
+            "resize_limit": self._resolve_runtime_resize_limit_from_budget(memory_budget_mb),
+            "requested_radius": int(self.inpaint_radius),
+            "quality_level": int(self.quality_level),
+        }
+
+        if self.dl_inpainter is not None:
+            set_budget = getattr(self.dl_inpainter, "set_runtime_memory_budget", None)
+            if callable(set_budget):
+                set_budget(memory_budget_mb)
+            else:
+                setattr(self.dl_inpainter, "memory_budget_mb", memory_budget_mb)
+
+        if self.deep_inpainting_backend is not None:
+            set_runtime_profile = getattr(self.deep_inpainting_backend, "set_runtime_profile", None)
+            if callable(set_runtime_profile):
+                set_runtime_profile(runtime_profile)
+
+        return runtime_profile
 
     def _sync_trace_from_opencv_backend(self) -> None:
         """把 OpenCV backend trace 同步回历史兼容字段。"""

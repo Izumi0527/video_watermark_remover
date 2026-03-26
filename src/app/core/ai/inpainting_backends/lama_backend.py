@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, cast
 
+import cv2
 import numpy as np
 
 from .base import BaseInpaintingBackend
@@ -174,6 +175,55 @@ def _dilate_mask_if_needed(mask_bool: np.ndarray, *, inpaint_radius: int) -> np.
         return mask_bool
 
 
+def _resize_inputs_if_needed(
+    frame: np.ndarray,
+    mask: np.ndarray,
+    *,
+    resize_limit: Optional[int],
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """按运行时预算收缩输入尺寸。"""
+    if resize_limit is None:
+        return frame, mask, False
+
+    height, width = frame.shape[:2]
+    max_dimension = max(height, width)
+    if max_dimension <= resize_limit:
+        return frame, mask, False
+
+    scale = resize_limit / float(max_dimension)
+    resized_width = max(1, int(round(width * scale)))
+    resized_height = max(1, int(round(height * scale)))
+
+    resized_frame = cv2.resize(
+        frame,
+        (resized_width, resized_height),
+        interpolation=cv2.INTER_AREA,
+    )
+    resized_mask = cv2.resize(
+        mask,
+        (resized_width, resized_height),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    return resized_frame, np.asarray(resized_mask, dtype=np.uint8), True
+
+
+def _restore_result_size(
+    result: np.ndarray,
+    *,
+    target_shape: tuple[int, int],
+) -> np.ndarray:
+    """把推理输出恢复到目标尺寸。"""
+    target_height, target_width = target_shape
+    if result.shape[:2] == (target_height, target_width):
+        return result
+    restored = cv2.resize(
+        result,
+        (target_width, target_height),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    return np.asarray(restored, dtype=np.uint8)
+
+
 class LaMaInpaintingBackend(BaseInpaintingBackend):
     """LaMa backend 的最小适配层。"""
 
@@ -297,6 +347,11 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
             raise RuntimeError("LaMa backend not loaded")
 
         del opencv_method
+        runtime_profile = self.get_runtime_profile()
+        resize_limit = runtime_profile.get("resize_limit")
+        memory_budget_mb = runtime_profile.get("memory_budget_mb")
+        normalized_resize_limit = max(64, int(resize_limit)) if resize_limit is not None else None
+        runtime_resize_applied = False
 
         raw_mask = _normalize_mask(mask)
         roi_rect = _compute_roi_rect(
@@ -310,17 +365,25 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
             try:
                 cropped_frame = frame[roi_rect.y1 : roi_rect.y2, roi_rect.x1 : roi_rect.x2]
                 cropped_mask = raw_mask[roi_rect.y1 : roi_rect.y2, roi_rect.x1 : roi_rect.x2]
-
-                cropped_result = self.runner(
+                resized_frame, resized_mask, runtime_resize_applied = _resize_inputs_if_needed(
                     cropped_frame,
                     cropped_mask,
+                    resize_limit=normalized_resize_limit,
+                )
+
+                cropped_result = self.runner(
+                    resized_frame,
+                    resized_mask,
                     inpaint_radius=inpaint_radius,
                     quality_level=quality_level,
                     device=self.torch_device,
                     asset_ref=self.asset_ref,
+                    memory_budget_mb=memory_budget_mb,
+                    resize_limit=normalized_resize_limit,
                 )
-                resolved_crop = np.asarray(
-                    cropped_result if cropped_result is not None else cropped_frame
+                resolved_crop = _restore_result_size(
+                    np.asarray(cropped_result if cropped_result is not None else resized_frame),
+                    target_shape=cropped_frame.shape[:2],
                 )
 
                 # 仅将 mask 区域（轻微膨胀）写回，避免无关区域抖动导致视频闪烁。
@@ -343,22 +406,37 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
                     "roi_rect": roi_rect.to_xywh(),
                     "roi_area_ratio": float(roi_rect.area_ratio),
                     "roi_padding": int(roi_rect.padding),
+                    "memory_budget_mb": memory_budget_mb,
+                    "resize_limit": normalized_resize_limit,
+                    "runtime_resize_applied": runtime_resize_applied,
                 }
 
                 return output
             except Exception:
                 # ROI 优化不能影响稳定性：任何 ROI 拼接异常都回退到整帧推理。
                 roi_rect = None
+                runtime_resize_applied = False
 
-        result = self.runner(
+        resized_frame, resized_mask, runtime_resize_applied = _resize_inputs_if_needed(
             frame,
             raw_mask,
+            resize_limit=normalized_resize_limit,
+        )
+
+        result = self.runner(
+            resized_frame,
+            resized_mask,
             inpaint_radius=inpaint_radius,
             quality_level=quality_level,
             device=self.torch_device,
             asset_ref=self.asset_ref,
+            memory_budget_mb=memory_budget_mb,
+            resize_limit=normalized_resize_limit,
         )
-        resolved = np.asarray(result if result is not None else frame)
+        resolved = _restore_result_size(
+            np.asarray(result if result is not None else resized_frame),
+            target_shape=frame.shape[:2],
+        )
         self._last_trace = {
             "inpainting_backend": self.backend_id,
             "inpainting_method": self.backend_id,
@@ -369,5 +447,8 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
             "configured_inpainting_model_path": self.asset_ref,
             "loaded_inpainting_model_path": self.loaded_model_path,
             "roi_used": False,
+            "memory_budget_mb": memory_budget_mb,
+            "resize_limit": normalized_resize_limit,
+            "runtime_resize_applied": runtime_resize_applied,
         }
         return resolved

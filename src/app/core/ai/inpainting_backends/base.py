@@ -15,6 +15,7 @@ class BaseInpaintingBackend(ABC):
 
     def __init__(self) -> None:
         self._last_trace: Dict[str, Any] = {}
+        self._runtime_profile: Dict[str, Any] = {}
 
     @abstractmethod
     def load(self) -> bool:
@@ -35,6 +36,14 @@ class BaseInpaintingBackend(ABC):
     def get_last_trace(self) -> Dict[str, Any]:
         """返回最近一次执行的追溯信息。"""
         return dict(self._last_trace)
+
+    def set_runtime_profile(self, profile: Dict[str, Any]) -> None:
+        """设置当前后端的运行时 profile。"""
+        self._runtime_profile = dict(profile or {})
+
+    def get_runtime_profile(self) -> Dict[str, Any]:
+        """获取当前后端持有的运行时 profile。"""
+        return dict(self._runtime_profile)
 
     def cleanup(self) -> None:
         """释放资源。"""

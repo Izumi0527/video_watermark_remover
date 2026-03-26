@@ -284,11 +284,26 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
         "auto_detect": True,
         "quality_level": 3,
         "requested_inpainting_backend": "lama",
+        "processing_mode": "auto",
+        "resolved_processing_mode": "pipeline",
+        "enable_multiprocess": True,
+        "use_pipeline": True,
+        "num_processes": 3,
+        "gpu_memory_mb": 1536,
+        "enable_cache": True,
+        "cache_size_mb": 256,
     }
 
     class _DummyAIParamsBuilder:
         def build_from_ui(self, **kwargs):
             return dict(builder_result)
+
+        def build_batch_config(self, _advanced_params):
+            return {
+                "max_concurrent_files": 1,
+                "auto_retry_failed": True,
+                "max_retry_count": 3,
+            }
 
     monkeypatch.setattr(signal_handler_module, "AIParamsBuilder", _DummyAIParamsBuilder)
 
@@ -326,9 +341,20 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
 
     assert manifest["run"]["ai_params_source"] == "last_batch"
     assert manifest["run"]["ai_params"] == builder_result
-    assert manifest["batch"]["max_concurrent_files"] == 4
+    assert manifest["run"]["runtime_performance"]["requested_processing_mode"] == "auto"
+    assert manifest["run"]["runtime_performance"]["resolved_processing_mode"] == "pipeline"
+    assert manifest["run"]["runtime_performance"]["worker_count"] == 3
+    assert manifest["run"]["runtime_performance"]["enable_multiprocess"] is True
+    assert manifest["run"]["runtime_performance"]["use_pipeline"] is True
+    assert manifest["run"]["runtime_performance"]["gpu_memory_budget_mb"] == 1536
+    assert manifest["run"]["runtime_performance"]["enable_cache"] is True
+    assert manifest["run"]["runtime_performance"]["cache_size_mb"] == 256
+    assert manifest["batch"]["max_concurrent_files"] == 1
     assert manifest["batch"]["auto_retry_failed"] is True
     assert manifest["batch"]["max_retry_count"] == 3
+    assert manifest["run"]["runtime_performance"]["batch_max_concurrent_files"] == 1
+    assert manifest["run"]["runtime_performance"]["batch_auto_retry_failed"] is True
+    assert manifest["run"]["runtime_performance"]["batch_max_retry_count"] == 3
 
     # 关键回归断言：processing_details 同时包含请求值与实际生效值
     first_item = manifest["items"][0]
@@ -352,12 +378,14 @@ def test_handle_queue_clear_clears_last_batch_snapshot(
     handler._last_batch_ai_params = {"stale": True}
     handler._last_batch_ai_params_generated_at = "2026-03-24 10:00:00"
     handler._last_batch_config = {"max_concurrent_files": 4}
+    handler._last_batch_runtime_config = {"resolved_processing_mode": "pipeline"}
 
     handler.handle_queue_clear()
 
     assert handler._last_batch_ai_params is None
     assert handler._last_batch_ai_params_generated_at is None
     assert handler._last_batch_config is None
+    assert handler._last_batch_runtime_config is None
 
 
 def test_switching_to_single_file_clears_last_batch_snapshot(
@@ -369,12 +397,14 @@ def test_switching_to_single_file_clears_last_batch_snapshot(
     handler._last_batch_ai_params = {"stale": True}
     handler._last_batch_ai_params_generated_at = "2026-03-24 10:00:00"
     handler._last_batch_config = {"max_concurrent_files": 4}
+    handler._last_batch_runtime_config = {"resolved_processing_mode": "pipeline"}
 
     handler._handle_single_file("demo.jpg")
 
     assert handler._last_batch_ai_params is None
     assert handler._last_batch_ai_params_generated_at is None
     assert handler._last_batch_config is None
+    assert handler._last_batch_runtime_config is None
 
 
 def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(
@@ -389,6 +419,13 @@ def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(
         def build_from_ui(self, **kwargs):
             return dict(builder_result)
 
+        def build_batch_config(self, _advanced_params):
+            return {
+                "max_concurrent_files": 1,
+                "auto_retry_failed": True,
+                "max_retry_count": 3,
+            }
+
     monkeypatch.setattr(signal_handler_module, "AIParamsBuilder", _DummyAIParamsBuilder)
 
     handler, *_ = _build_handler(signal_handler_module)
@@ -396,7 +433,18 @@ def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(
     handler._start_batch_processing()
     handler._on_batch_completed()
 
-    builder_result = {"fresh": True, "auto_detect": True}
+    builder_result = {
+        "fresh": True,
+        "auto_detect": True,
+        "processing_mode": "auto",
+        "resolved_processing_mode": "single_process",
+        "enable_multiprocess": False,
+        "use_pipeline": False,
+        "num_processes": 1,
+        "gpu_memory_mb": 2048,
+        "enable_cache": True,
+        "cache_size_mb": 512,
+    }
     handler._handle_multiple_files(["new.jpg", "new2.jpg"])
 
     manifest_path = tmp_path / "manifest.json"
@@ -411,3 +459,5 @@ def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(
 
     assert manifest["run"]["ai_params_source"] == "computed_at_export"
     assert manifest["run"]["ai_params"] == builder_result
+    assert manifest["run"]["runtime_performance"]["requested_processing_mode"] == "auto"
+    assert manifest["run"]["runtime_performance"]["resolved_processing_mode"] == "single_process"

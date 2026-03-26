@@ -15,11 +15,17 @@ AI参数构建器
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
+from ...config.advanced_params import (
+    AdvancedParamsSnapshot,
+    ProcessingContext,
+    ResolvedPerformanceConfig,
+)
 from ...config.validators import get_validator
 
 
@@ -109,6 +115,36 @@ def build_preload_ai_params_snapshot(
     return _inject_inpainting_model_paths(ai_params, config)
 
 
+def build_preload_runtime_snapshot(
+    *,
+    preferences: Any,
+    advanced_params: Dict[str, Any],
+    config: Any,
+) -> Dict[str, Any]:
+    """
+    构建预加载阶段使用的统一运行时快照。
+
+    返回值同时包含：
+    - `ai_params`：供 AIHandler 直接使用
+    - `runtime_performance`：供日志/追溯导出使用
+    """
+    builder = AIParamsBuilder()
+    runtime_config = builder.build_resolved_performance_config(
+        advanced_params=advanced_params,
+        input_file_path=None,
+        is_batch=False,
+    )
+    ai_params = build_preload_ai_params_snapshot(
+        preferences=preferences,
+        advanced_params=advanced_params,
+        config=config,
+    )
+    return {
+        "ai_params": ai_params,
+        "runtime_performance": runtime_config.to_manifest_dict(),
+    }
+
+
 class AIParamsBuilder:
     """
     AI参数构建器
@@ -126,6 +162,7 @@ class AIParamsBuilder:
         advanced_params: Dict[str, Any],
         manual_selections: Optional[List] = None,
         input_file_path: Optional[str] = None,
+        is_batch: bool = False,
     ) -> Dict[str, Any]:
         """
         从UI组件构建完整的AI参数字典
@@ -154,7 +191,11 @@ class AIParamsBuilder:
         ai_params.update(inpainting_params)
 
         # 4. 性能参数
-        performance_params = self._build_performance_params(advanced_params)
+        performance_params = self._build_performance_params(
+            advanced_params,
+            input_file_path=input_file_path,
+            is_batch=is_batch,
+        )
         ai_params.update(performance_params)
 
         # 5. 输出参数
@@ -276,39 +317,73 @@ class AIParamsBuilder:
 
         return params
 
-    def _build_performance_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_performance_params(
+        self,
+        advanced_params: Dict[str, Any],
+        *,
+        input_file_path: Optional[str] = None,
+        is_batch: bool = False,
+    ) -> Dict[str, Any]:
         """
         构建性能参数（带验证）
 
         前端参数映射：
-        - thread_count (1-16) → num_processes
-        - gpu_memory_limit (MB) → gpu_memory_mb
-        - cache_size (MB) → cache_size_mb
+        - processing_mode → enable_multiprocess / use_pipeline
+        - worker_count (0-16) → num_processes
+        - gpu_memory_limit_mb (MB) → gpu_memory_mb
+        - cache_size_mb (MB) → cache_size_mb
         - enable_cache → enable_cache
         """
-        params = {}
-
-        # 线程/进程数量（带验证）
-        raw_processes = advanced_params.get("thread_count", 4)
-        params["num_processes"] = self._validator.validate("num_processes", raw_processes)
-
-        # GPU内存限制（带验证）
-        raw_gpu_memory = advanced_params.get("gpu_memory_limit", 2048)
-        params["gpu_memory_mb"] = self._validator.validate("gpu_memory_mb", raw_gpu_memory)
-
-        # 缓存大小（带验证）
-        raw_cache = advanced_params.get("cache_size", 512)
-        params["cache_size_mb"] = self._validator.validate("cache_size_mb", raw_cache)
-
-        # 缓存开关（布尔值，无需验证）
-        params["enable_cache"] = advanced_params.get("enable_cache", True)
+        runtime_config = self.build_resolved_performance_config(
+            advanced_params=advanced_params,
+            input_file_path=input_file_path,
+            is_batch=is_batch,
+        )
+        params = runtime_config.to_ai_params()
 
         self.logger.debug(
-            f"[性能参数] num_processes={params['num_processes']}, "
-            f"gpu_memory={params['gpu_memory_mb']}MB"
+            "[性能参数] mode=%s resolved=%s num_processes=%s gpu_memory=%sMB cache=%s/%sMB",
+            runtime_config.requested_processing_mode,
+            runtime_config.resolved_processing_mode,
+            runtime_config.worker_count,
+            runtime_config.gpu_memory_budget_mb,
+            runtime_config.enable_cache,
+            runtime_config.cache_size_mb,
         )
 
         return params
+
+    def build_resolved_performance_config(
+        self,
+        advanced_params: Dict[str, Any],
+        *,
+        input_file_path: Optional[str] = None,
+        is_batch: bool = False,
+    ) -> ResolvedPerformanceConfig:
+        """从 UI 参数构建统一运行时性能配置。"""
+        snapshot = AdvancedParamsSnapshot.from_dict(advanced_params)
+        context = ProcessingContext(
+            input_file_path=input_file_path,
+            is_batch=is_batch,
+            prefer_pipeline=True,
+            cpu_count=os.cpu_count() or 4,
+            gpu_enabled=bool(advanced_params.get("enable_gpu", snapshot.enable_gpu)),
+        )
+        return snapshot.resolve(context)
+
+    def build_batch_config(
+        self,
+        advanced_params: Dict[str, Any],
+        *,
+        input_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """从统一高级参数构建批处理策略配置。"""
+        runtime_config = self.build_resolved_performance_config(
+            advanced_params=advanced_params,
+            input_file_path=input_file_path,
+            is_batch=True,
+        )
+        return runtime_config.to_batch_config()
 
     def _build_output_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
         """
