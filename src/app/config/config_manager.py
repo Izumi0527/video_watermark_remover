@@ -80,7 +80,6 @@ class ConfigManager:
             # Phase3 期望的键
             "default_detection_sensitivity": "0.5",
             "default_inpainting_method": "auto",
-            "preserve_audio": "true",
         },
         "processing": {
             "default_output_suffix": "_processed",
@@ -88,7 +87,6 @@ class ConfigManager:
             "gpu_acceleration": "auto",
             "default_detection_sensitivity": "0.5",
             "default_inpainting_method": "auto",
-            "preserve_audio": "true",
         },
         "Logging": {
             "log_level": "INFO",
@@ -251,23 +249,6 @@ class ConfigManager:
         method = (raw or default).lower()
         allowed = {"auto", "telea", "ns", "custom"}
         return method if method in allowed else default
-
-    @staticmethod
-    def preserve_audio(config: ConfigParser, default: bool = True) -> bool:
-        """
-        是否保留音频，兼容大小写/多种真值写法。
-        """
-        raw = ConfigManager._get_option_with_fallback(
-            config, ["processing", "Processing"], "preserve_audio"
-        )
-        if raw is None:
-            return default
-        value = raw.strip().lower()
-        if value in {"true", "yes", "1", "y", "on"}:
-            return True
-        if value in {"false", "no", "0", "n", "off"}:
-            return False
-        return default
 
     # ===================== 批处理配置 API =====================
 

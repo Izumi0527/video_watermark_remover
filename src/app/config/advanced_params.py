@@ -34,12 +34,6 @@ OUTPUT_FORMAT_LABEL_TO_VALUE = {
     **{value: key for key, value in OUTPUT_FORMAT_LABELS.items()},
     "jpeg": "jpg",
 }
-LEGACY_OUTPUT_QUALITY_TO_COMPRESSION = {
-    "low": 60,
-    "medium": 80,
-    "high": 95,
-}
-
 _DEFAULT_AUTO_WORKER_COUNT = 4
 _VIDEO_FILE_EXTENSIONS = {
     ".mp4",
@@ -143,13 +137,6 @@ def output_format_to_label(value: Any) -> str:
     return OUTPUT_FORMAT_LABELS.get(normalize_output_format(value), OUTPUT_FORMAT_LABELS["keep"])
 
 
-def _normalize_legacy_output_quality(value: Any, default: int) -> int:
-    normalized = str(value or "").strip().lower()
-    if normalized in LEGACY_OUTPUT_QUALITY_TO_COMPRESSION:
-        return LEGACY_OUTPUT_QUALITY_TO_COMPRESSION[normalized]
-    return _normalize_compression_quality(value, default)
-
-
 def _resolve_auto_worker_count() -> int:
     cpu_count = os.cpu_count() or _DEFAULT_AUTO_WORKER_COUNT
     return max(1, min(cpu_count, _DEFAULT_AUTO_WORKER_COUNT))
@@ -174,13 +161,11 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     current: Mapping[str, Any] | None = None,
     advanced: Mapping[str, Any] | None = None,
     batch: Mapping[str, Any] | None = None,
-    processing: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """将旧结构中的性能参数迁移到统一字段。"""
     normalized_current = dict(current or {})
     normalized_advanced = dict(advanced or {})
     normalized_batch = dict(batch or {})
-    normalized_processing = dict(processing or {})
 
     result: dict[str, Any] = {}
 
@@ -241,15 +226,10 @@ def migrate_legacy_performance_preferences(  # noqa: C901
         result["output_format"] = output_format
 
     compression_quality = normalized_current.get("compression_quality")
-    if compression_quality is None:
-        compression_quality = normalized_current.get(
-            "output_quality",
-            normalized_processing.get("output_quality"),
-        )
     if compression_quality is not None:
         result["compression_quality"] = compression_quality
 
-    add_suffix = normalized_current.get("add_suffix", normalized_current.get("add_processed_suffix"))
+    add_suffix = normalized_current.get("add_suffix")
     if add_suffix is not None:
         result["add_suffix"] = add_suffix
 
@@ -257,7 +237,7 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     if add_timestamp is not None:
         result["add_timestamp"] = add_timestamp
 
-    preserve_audio = normalized_current.get("preserve_audio", normalized_processing.get("preserve_audio"))
+    preserve_audio = normalized_current.get("preserve_audio")
     if preserve_audio is not None:
         result["preserve_audio"] = preserve_audio
 
@@ -499,8 +479,10 @@ class AdvancedParamsSnapshot:
                 0,
                 10,
             ),
-            output_format=normalize_output_format(merged.get("output_format", defaults.output_format)),
-            compression_quality=_normalize_legacy_output_quality(
+            output_format=normalize_output_format(
+                merged.get("output_format", defaults.output_format)
+            ),
+            compression_quality=_normalize_compression_quality(
                 merged.get("compression_quality", defaults.compression_quality),
                 defaults.compression_quality,
             ),

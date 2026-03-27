@@ -414,11 +414,11 @@ class AIParamsBuilder:
             "[输出参数] format=%s, quality=%s, suffix=%s, timestamp=%s, preserve_audio=%s",
             params["output_format"],
             params["compression_quality"],
-            params.get("add_suffix", params.get("add_processed_suffix")),
+            params["add_suffix"],
             params["add_timestamp"],
             params["preserve_audio"],
         )
-        return params
+        return dict(params)
 
     def _convert_manual_selections(
         self, manual_selections: Optional[List], input_file_path: Optional[str] = None

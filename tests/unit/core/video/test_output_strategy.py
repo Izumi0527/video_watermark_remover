@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import datetime
 
 
@@ -19,7 +20,7 @@ def test_resolve_output_path_applies_suffix_timestamp_and_format_for_image() -> 
         "C:/tmp/sample.png",
         {
             "output_format": "jpg",
-            "add_processed_suffix": True,
+            "add_suffix": True,
             "add_timestamp": True,
         },
         generated_at=datetime(2026, 3, 27, 12, 34, 56),
@@ -35,7 +36,7 @@ def test_resolve_output_path_keeps_video_extension_when_requested_format_is_imag
         "C:/tmp/clip.mp4",
         {
             "output_format": "png",
-            "add_processed_suffix": True,
+            "add_suffix": True,
             "add_timestamp": False,
         },
     )
@@ -50,7 +51,7 @@ def test_resolve_output_path_avoids_overwriting_input_when_suffix_and_timestamp_
         "C:/tmp/clip.mp4",
         {
             "output_format": "keep",
-            "add_processed_suffix": False,
+            "add_suffix": False,
             "add_timestamp": False,
         },
     )
@@ -85,3 +86,39 @@ def test_resolve_ffmpeg_output_codecs_tracks_container_suffix() -> None:
         "video_codec": "mpeg4",
         "audio_codec": "libmp3lame",
     }
+
+
+def test_output_strategy_ignores_legacy_output_fields() -> None:
+    from app.core.video.output_strategy import build_image_write_options, resolve_output_path
+
+    output_path = resolve_output_path(
+        "C:/tmp/clip.mp4",
+        {
+            "add_processed_suffix": False,
+            "output_quality": "low",
+        },
+    )
+    image_write_options = build_image_write_options(
+        "C:/tmp/frame.jpg",
+        {
+            "output_quality": "low",
+        },
+    )
+
+    assert _normalize(output_path) == "C:/tmp/clip_processed.mp4"
+    assert image_write_options == ("jpeg_quality", 85)
+
+
+def test_should_preserve_audio_only_reads_current_field() -> None:
+    from app.core.video.output_strategy import should_preserve_audio
+
+    assert should_preserve_audio({"preserve_audio": False}) is False
+    assert should_preserve_audio({"processing": {"preserve_audio": False}}) is True
+
+
+def test_runtime_output_whitelist_covers_output_config_fields() -> None:
+    from app.config.advanced_params import ResolvedOutputConfig
+    from app.core.video import output_strategy
+
+    expected_fields = {field.name for field in fields(ResolvedOutputConfig)}
+    assert output_strategy._RUNTIME_OUTPUT_PARAM_KEYS == expected_fields

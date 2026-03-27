@@ -125,7 +125,6 @@ class UserPreferencesManager:
             current=None,
             advanced=self.get_advanced_preferences(),
             batch=self.get_batch_preferences(),
-            processing=self.get_processing_preferences(),
         )
         snapshot = AdvancedParamsSnapshot.from_dict(migrated)
         self.preferences["advanced_params"] = snapshot.to_dict()

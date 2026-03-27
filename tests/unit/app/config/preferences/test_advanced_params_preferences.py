@@ -62,7 +62,7 @@ def test_existing_advanced_params_defaults_are_not_overridden_by_legacy_fields()
     assert snapshot == AdvancedParamsSnapshot.defaults()
 
 
-def test_manager_migrates_legacy_processing_output_preferences() -> None:
+def test_manager_ignores_legacy_processing_output_preferences() -> None:
     config_dir = _make_config_dir("processing_output")
     manager = UserPreferencesManager(config_dir=str(config_dir / "prefs"))
     manager.preferences["processing"] = {
@@ -72,5 +72,5 @@ def test_manager_migrates_legacy_processing_output_preferences() -> None:
 
     snapshot = manager.get_advanced_params_snapshot()
 
-    assert snapshot.preserve_audio is False
-    assert snapshot.compression_quality == 60
+    assert snapshot.preserve_audio is True
+    assert snapshot.compression_quality == 85

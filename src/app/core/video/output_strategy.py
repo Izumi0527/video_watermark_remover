@@ -49,8 +49,22 @@ _IMAGE_WRITE_OPTION_NAMES = {
 }
 
 
+_RUNTIME_OUTPUT_PARAM_KEYS = {
+    "output_format",
+    "compression_quality",
+    "add_suffix",
+    "add_timestamp",
+    "preserve_audio",
+}
+
+
 def _resolve_snapshot(ai_params: Mapping[str, Any] | None = None) -> AdvancedParamsSnapshot:
-    return AdvancedParamsSnapshot.from_dict(ai_params)
+    normalized_ai_params: dict[str, Any] = {}
+    if ai_params:
+        normalized_ai_params = {
+            key: value for key, value in ai_params.items() if key in _RUNTIME_OUTPUT_PARAM_KEYS
+        }
+    return AdvancedParamsSnapshot.from_dict(normalized_ai_params)
 
 
 def _is_image_suffix(suffix: str) -> bool:
@@ -116,7 +130,9 @@ def build_image_write_params(
         return []
 
     if cv2_module is None:
-        import cv2 as cv2_module
+        import cv2 as imported_cv2_module
+
+        cv2_module = imported_cv2_module
 
     option_name, value = option
     constant_name = _IMAGE_WRITE_OPTION_NAMES[option_name]
@@ -136,13 +152,16 @@ def create_video_writer(
     cv2_module: Any | None = None,
 ):
     if cv2_module is None:
-        import cv2 as cv2_module
+        import cv2 as imported_cv2_module
+
+        cv2_module = imported_cv2_module
+    real_cv2_module: Any = cv2_module
 
     last_writer = None
     for codec in resolve_video_writer_codecs(output_path):
-        writer = cv2_module.VideoWriter(
+        writer = real_cv2_module.VideoWriter(
             output_path,
-            cv2_module.VideoWriter_fourcc(*codec),
+            real_cv2_module.VideoWriter_fourcc(*codec),
             fps,
             frame_size,
         )

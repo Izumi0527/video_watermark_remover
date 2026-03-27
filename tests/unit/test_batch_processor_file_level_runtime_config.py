@@ -92,7 +92,9 @@ def test_batch_processor_uses_file_level_ai_params_when_provided(
             self.finished.emit(self.output_path)
 
     monkeypatch.setattr(batch_module, "VideoProcessorThread", _DummyVideoProcessorThread)
-    monkeypatch.setattr(batch_module.os.path, "exists", lambda path: _normalize(path) in existing_paths)
+    monkeypatch.setattr(
+        batch_module.os.path, "exists", lambda path: _normalize(path) in existing_paths
+    )
     monkeypatch.setattr(
         batch_module.os,
         "makedirs",
@@ -155,6 +157,58 @@ def test_batch_processor_uses_file_level_ai_params_when_provided(
     assert captured_by_input[str(second_input)]["num_processes"] == 4
 
 
+def test_batch_processor_remove_pending_file_marks_waiting_file_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_pyqt_core_stub(monkeypatch)
+    placeholder_video_thread_module = types.ModuleType("app.core.video.thread")
+    placeholder_video_thread_module.VideoProcessorThread = object
+    monkeypatch.setitem(sys.modules, "app.core.video.thread", placeholder_video_thread_module)
+    monkeypatch.delitem(sys.modules, "app.ui.widgets.batch.batch_processor_thread", raising=False)
+
+    batch_module = importlib.import_module("app.ui.widgets.batch.batch_processor_thread")
+    BatchProcessorThread = batch_module.BatchProcessorThread
+
+    batch = BatchProcessorThread(
+        queue=[
+            {
+                "file_id": "file-1",
+                "input_path": "C:/tmp/a.jpg",
+                "output_path": "C:/tmp/a_out.jpg",
+                "status": batch_module.ProcessingStatus.WAITING,
+                "progress": 0,
+                "error_message": "",
+            }
+        ],
+        ai_params={},
+        file_ai_params_by_index={0: {}},
+        file_ai_params_by_file_id={"file-1": {}},
+        config=None,
+        preloaded_ai_handler=None,
+        max_concurrent_files=1,
+        auto_retry_failed=False,
+    )
+
+    class _FakeFuture:
+        def __init__(self):
+            self.cancel_called = False
+
+        def cancel(self):
+            self.cancel_called = True
+            return True
+
+        def cancelled(self):
+            return self.cancel_called
+
+    future = _FakeFuture()
+    batch._futures = {future: 0}
+    batch._future_file_ids = {future: "file-1"}
+
+    assert batch.remove_pending_file("file-1") is True
+    assert future.cancel_called is True
+    assert batch._is_file_removed("file-1") is True
+
+
 def test_batch_processing_widget_keeps_existing_file_level_output_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,7 +249,9 @@ def test_batch_processing_widget_keeps_existing_file_level_output_paths(
         placeholder_batch_ui_module,
     )
 
-    placeholder_batch_thread_module = types.ModuleType("app.ui.widgets.batch.batch_processor_thread")
+    placeholder_batch_thread_module = types.ModuleType(
+        "app.ui.widgets.batch.batch_processor_thread"
+    )
 
     class _PlaceholderBatchProcessorThread:
         def __init__(self, *args, **kwargs):
@@ -298,7 +354,7 @@ def test_batch_processing_widget_keeps_existing_file_level_output_paths(
     fake._stop_requested = False
     fake.file_manager = _DummyFileManager(queue_manager)
     fake.batch_processor = None
-    fake.ai_params = {"add_processed_suffix": True}
+    fake.ai_params = {"add_suffix": True}
     fake.config = None
     fake.preloaded_ai_handler = None
     fake.max_concurrent_files = 1

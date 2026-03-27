@@ -7,18 +7,20 @@ ConfigManager 单元测试
 - 默认值处理
 - 错误处理
 
-测试用例数量: 18个
+测试用例数量: 16个
 覆盖率目标: 90%+
 """
 
 import shutil
-import tempfile
 from configparser import ConfigParser
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 from app.config.config_manager import ConfigManager
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[3] / ".cache" / "tests" / "config-manager-phase3"
 
 
 class TestConfigManager:
@@ -113,42 +115,6 @@ class TestConfigManager:
         # Assert
         assert method == "telea"
 
-    def test_preserve_audio_default(self, temp_config_file):
-        """测试默认保留音频设置"""
-        # Arrange
-        config = ConfigManager.load_config(str(temp_config_file))
-
-        # Act
-        preserve = ConfigManager.preserve_audio(config)
-
-        # Assert
-        assert preserve is True
-        assert isinstance(preserve, bool)
-
-    def test_preserve_audio_false(self, temp_config_file):
-        """测试音频不保留设置"""
-        # Arrange
-        config = ConfigManager.load_config(str(temp_config_file))
-        config.set("processing", "preserve_audio", "false")
-
-        # Act
-        preserve = ConfigManager.preserve_audio(config)
-
-        # Assert
-        assert preserve is False
-
-    def test_preserve_audio_invalid_returns_default(self, temp_config_file):
-        """测试无效音频保留值返回默认值"""
-        # Arrange
-        config = ConfigManager.load_config(str(temp_config_file))
-        config.set("processing", "preserve_audio", "maybe")
-
-        # Act
-        preserve = ConfigManager.preserve_audio(config)
-
-        # Assert
-        assert preserve is True
-
     def test_config_has_required_sections(self, temp_config_file):
         """测试配置包含必需的section"""
         # Act
@@ -167,7 +133,7 @@ class TestConfigManager:
         # Assert
         assert config.has_option("processing", "default_detection_sensitivity")
         assert config.has_option("processing", "default_inpainting_method")
-        assert config.has_option("processing", "preserve_audio")
+        assert not config.has_option("processing", "preserve_audio")
 
     def test_config_default_values(self, temp_config_file):
         """测试配置默认值"""
@@ -177,7 +143,6 @@ class TestConfigManager:
         # Assert
         assert config.get("processing", "default_detection_sensitivity") == "0.5"
         assert config.get("processing", "default_inpainting_method") == "auto"
-        assert config.get("processing", "preserve_audio") == "true"
 
     def test_load_config_handles_unicode(self, temp_config_file):
         """测试配置文件处理Unicode字符"""
@@ -244,8 +209,10 @@ class TestConfigManager:
 
 @pytest.fixture
 def temp_dir():
-    """创建临时目录用于测试"""
-    temp_path = Path(tempfile.mkdtemp())
+    """创建仓库内临时目录用于测试，避免系统 Temp 权限波动。"""
+    RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+    temp_path = RUNTIME_ROOT / f"runtime_{uuid4().hex}"
+    temp_path.mkdir(parents=True, exist_ok=True)
     yield temp_path
     shutil.rmtree(temp_path, ignore_errors=True)
 
@@ -267,8 +234,6 @@ def existing_config_file(temp_dir):
     config.add_section("processing")
     config.set("processing", "default_detection_sensitivity", "0.7")
     config.set("processing", "default_inpainting_method", "telea")
-    config.set("processing", "preserve_audio", "true")
-
     config.add_section("paths")
     config.add_section("advanced")
 

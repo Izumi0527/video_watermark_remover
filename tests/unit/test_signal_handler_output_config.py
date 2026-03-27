@@ -157,7 +157,7 @@ class _DummyAIParamsBuilder:
             return {
                 "output_format": "jpg",
                 "compression_quality": 88,
-                "add_processed_suffix": True,
+                "add_suffix": True,
                 "add_timestamp": False,
                 "preserve_audio": False,
                 "enable_multiprocess": False,
@@ -167,7 +167,7 @@ class _DummyAIParamsBuilder:
         return {
             "output_format": "jpg",
             "compression_quality": 88,
-            "add_processed_suffix": True,
+            "add_suffix": True,
             "add_timestamp": False,
             "preserve_audio": True,
             "enable_multiprocess": False,
@@ -241,7 +241,9 @@ def _build_handler(signal_handler_module):
     )
 
 
-def test_signal_handler_single_file_uses_resolved_output_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_signal_handler_single_file_uses_resolved_output_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _import_signal_handler(monkeypatch)
     handler = _build_handler(signal_handler_module)
     handler.input_file_path = "C:/tmp/source.png"
@@ -249,10 +251,15 @@ def test_signal_handler_single_file_uses_resolved_output_path(monkeypatch: pytes
 
     handler.handle_start_processing()
 
-    assert _normalize(_DummyVideoProcessorThread.last_kwargs["output_path"]) == "C:/tmp/source_processed.jpg"
+    assert (
+        _normalize(_DummyVideoProcessorThread.last_kwargs["output_path"])
+        == "C:/tmp/source_processed.jpg"
+    )
 
 
-def test_signal_handler_batch_processing_rewrites_queue_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_signal_handler_batch_processing_rewrites_queue_output_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _import_signal_handler(monkeypatch)
     handler = _build_handler(signal_handler_module)
     handler.file_queue_manager.add_file("C:/tmp/video.mp4")

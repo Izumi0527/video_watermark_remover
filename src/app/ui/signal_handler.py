@@ -717,7 +717,7 @@ class SignalHandler(QObject):
 
     # ==================== 批处理相关方法 ====================
 
-    def _start_batch_processing(self):
+    def _start_batch_processing(self):  # noqa: C901
         """启动批量处理"""
         self._batch_stop_requested = False
         queue = self.file_queue_manager.get_queue()
@@ -736,7 +736,9 @@ class SignalHandler(QObject):
         (
             ai_params,
             file_ai_params_by_index,
+            file_ai_params_by_file_id,
             file_runtime_performance_by_index,
+            file_runtime_performance_by_file_id,
             batch_config,
             runtime_config,
         ) = self._build_batch_runtime_payloads(
@@ -744,21 +746,70 @@ class SignalHandler(QObject):
             params_builder=params_builder,
             advanced_params=advanced_params,
         )
-        for index, file_runtime_performance in file_runtime_performance_by_index.items():
-            self.file_queue_manager.update_file_runtime_performance(index, file_runtime_performance)
-        for index, file_ai_params in file_ai_params_by_index.items():
-            queue_item = self.file_queue_manager.get_file_info(index) or {}
+        for index, queue_item in enumerate(queue):
+            file_id = str(queue_item.get("file_id", "") or "")
+
+            file_runtime_performance = None
+            if file_id:
+                file_runtime_performance = file_runtime_performance_by_file_id.get(file_id)
+            if file_runtime_performance is None:
+                file_runtime_performance = file_runtime_performance_by_index.get(index)
+            if file_runtime_performance is not None:
+                updated_runtime = False
+                if file_id and hasattr(
+                    self.file_queue_manager, "update_file_runtime_performance_by_id"
+                ):
+                    updated_runtime = bool(
+                        self.file_queue_manager.update_file_runtime_performance_by_id(
+                            file_id,
+                            file_runtime_performance,
+                        )
+                    )
+                if not updated_runtime:
+                    self.file_queue_manager.update_file_runtime_performance(
+                        index, file_runtime_performance
+                    )
+
+            file_ai_params = None
+            if file_id:
+                file_ai_params = file_ai_params_by_file_id.get(file_id)
+            if file_ai_params is None:
+                file_ai_params = file_ai_params_by_index.get(index)
+            if not file_ai_params:
+                continue
+
+            if file_id and hasattr(self.file_queue_manager, "update_file_ai_params_by_id"):
+                self.file_queue_manager.update_file_ai_params_by_id(file_id, file_ai_params)
+            elif hasattr(self.file_queue_manager, "update_file_ai_params"):
+                self.file_queue_manager.update_file_ai_params(index, file_ai_params)
+
             input_path = str(queue_item.get("input_path", "") or "")
             if not input_path:
                 continue
-            self.file_queue_manager.update_file_output_path(
-                index,
-                resolve_output_path(input_path, file_ai_params),
-            )
-            self.file_queue_manager.update_file_output_config(
-                index,
-                self._build_output_config_snapshot(file_ai_params),
-            )
+
+            output_path = resolve_output_path(input_path, file_ai_params)
+            updated_output_path = False
+            if file_id and hasattr(self.file_queue_manager, "update_file_output_path_by_id"):
+                updated_output_path = bool(
+                    self.file_queue_manager.update_file_output_path_by_id(file_id, output_path)
+                )
+            if not updated_output_path:
+                self.file_queue_manager.update_file_output_path(index, output_path)
+
+            output_config_snapshot = self._build_output_config_snapshot(file_ai_params)
+            updated_output_config = False
+            if file_id and hasattr(self.file_queue_manager, "update_file_output_config_by_id"):
+                updated_output_config = bool(
+                    self.file_queue_manager.update_file_output_config_by_id(
+                        file_id,
+                        output_config_snapshot,
+                    )
+                )
+            if not updated_output_config and hasattr(
+                self.file_queue_manager, "update_file_output_config"
+            ):
+                self.file_queue_manager.update_file_output_config(index, output_config_snapshot)
+
         queue = self.file_queue_manager.get_queue()
 
         max_concurrent_files = int(batch_config.get("max_concurrent_files", 1) or 1)
@@ -770,16 +821,15 @@ class SignalHandler(QObject):
             runtime_config=runtime_config,
         )
 
-        # 获取预加载的AI模型
         preloaded_ai_handler = None
         if self.main_window and hasattr(self.main_window, "ai_handler"):
             preloaded_ai_handler = self.main_window.ai_handler
 
-        # 创建批处理线程
         self.batch_processor = BatchProcessorThread(
             queue=queue,
             ai_params=ai_params,
             file_ai_params_by_index=file_ai_params_by_index,
+            file_ai_params_by_file_id=file_ai_params_by_file_id,
             config=self.main_window.config if self.main_window else None,
             preloaded_ai_handler=preloaded_ai_handler,
             max_concurrent_files=max_concurrent_files,
@@ -787,7 +837,6 @@ class SignalHandler(QObject):
             max_retry_count=max_retry_count,
         )
 
-        # 连接信号
         self.batch_processor.current_file_changed.connect(self._on_batch_file_changed)
         self.batch_processor.file_progress.connect(self._on_batch_file_progress)
         self.batch_processor.overall_progress.connect(self._on_batch_overall_progress)
@@ -798,11 +847,56 @@ class SignalHandler(QObject):
         self.batch_processor.start()
         self.logger.info("Batch processing started")
 
+    def _resolve_batch_file_id(self, index: int) -> Optional[str]:
+        """根据批处理线程索引解析稳定 file_id。"""
+        if self.batch_processor is None:
+            return None
+
+        queue = getattr(self.batch_processor, "file_queue", None)
+        if not isinstance(queue, list):
+            queue = getattr(self.batch_processor, "queue", None)
+        if not isinstance(queue, list):
+            return None
+        if index < 0 or index >= len(queue):
+            return None
+
+        item = queue[index]
+        if not isinstance(item, dict):
+            return None
+
+        file_id = str(item.get("file_id", "") or "").strip()
+        return file_id or None
+
     def _on_batch_file_changed(self, index: int, filename: str):
-        """批处理当前文件变化"""
+        """批处理当前文件变化。"""
         if self._batch_stop_requested:
             return
-        self.file_queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
+
+        has_batch_context = self.batch_processor is not None
+        file_id = self._resolve_batch_file_id(index)
+        if has_batch_context and not file_id:
+            self.logger.debug("批处理回调未解析到稳定 file_id，忽略当前文件变化: index=%s", index)
+            return
+
+        if file_id and hasattr(self.file_queue_manager, "update_file_status_by_id"):
+            updated = bool(
+                self.file_queue_manager.update_file_status_by_id(
+                    file_id,
+                    ProcessingStatus.PROCESSING,
+                )
+            )
+            if not updated:
+                self.logger.debug("批处理文件已从队列移除，忽略当前文件变化回调: file_id=%s", file_id)
+                return
+        elif has_batch_context:
+            self.logger.debug(
+                "文件队列管理器缺少 file_id 状态更新接口，忽略当前文件变化: file_id=%s",
+                file_id,
+            )
+            return
+        else:
+            self.file_queue_manager.update_file_status(index, ProcessingStatus.PROCESSING)
+
         self._update_file_queue_display()
         self.preview_panel.show_processing_progress(
             self._build_processing_progress_message(filename)
@@ -810,12 +904,40 @@ class SignalHandler(QObject):
         self.status_updated.emit(self._build_batch_processing_status_message(filename))
 
     def _on_batch_file_progress(self, progress: int, file_index: int):
-        """批处理文件进度更新"""
+        """批处理文件进度更新。"""
         if self._batch_stop_requested:
             return
-        self.file_queue_manager.update_file_status(
-            file_index, ProcessingStatus.PROCESSING, progress
-        )
+
+        has_batch_context = self.batch_processor is not None
+        file_id = self._resolve_batch_file_id(file_index)
+        if has_batch_context and not file_id:
+            self.logger.debug("批处理回调未解析到稳定 file_id，忽略进度更新: index=%s", file_index)
+            return
+
+        if file_id and hasattr(self.file_queue_manager, "update_file_status_by_id"):
+            updated = bool(
+                self.file_queue_manager.update_file_status_by_id(
+                    file_id,
+                    ProcessingStatus.PROCESSING,
+                    progress,
+                )
+            )
+            if not updated:
+                self.logger.debug("批处理文件已从队列移除，忽略进度回调: file_id=%s", file_id)
+                return
+        elif has_batch_context:
+            self.logger.debug(
+                "文件队列管理器缺少 file_id 状态更新接口，忽略进度回调: file_id=%s",
+                file_id,
+            )
+            return
+        else:
+            self.file_queue_manager.update_file_status(
+                file_index,
+                ProcessingStatus.PROCESSING,
+                progress,
+            )
+
         self._update_file_queue_display()
 
     def _on_batch_overall_progress(self, progress: int) -> None:
@@ -824,7 +946,7 @@ class SignalHandler(QObject):
             return
         self.control_panel.update_progress(progress)
 
-    def _on_batch_file_completed(
+    def _on_batch_file_completed(  # noqa: C901
         self,
         index: int,
         output_path: str,
@@ -832,26 +954,129 @@ class SignalHandler(QObject):
         error_message: str,
         processing_details: object,
     ) -> None:
-        """批处理单个文件完成"""
+        """批处理单个文件完成。"""
         final_status = status if isinstance(status, ProcessingStatus) else ProcessingStatus.FAILED
         safe_error = str(error_message or "").strip()
 
+        has_batch_context = self.batch_processor is not None
+        file_id = self._resolve_batch_file_id(index)
+        if has_batch_context and not file_id:
+            self.logger.debug("批处理回调未解析到稳定 file_id，忽略完成回调: index=%s", index)
+            return
+        resolved_file_id = file_id or ""
+
+        supports_lookup_by_id = has_batch_context and hasattr(
+            self.file_queue_manager,
+            "get_file_info_by_id",
+        )
+        supports_details_by_id = has_batch_context and hasattr(
+            self.file_queue_manager,
+            "update_file_processing_details_by_id",
+        )
+        supports_status_by_id = has_batch_context and hasattr(
+            self.file_queue_manager,
+            "update_file_status_by_id",
+        )
+
         if processing_details is not None:
-            self.file_queue_manager.update_file_processing_details(index, processing_details)
+            if supports_details_by_id:
+                updated_details = bool(
+                    self.file_queue_manager.update_file_processing_details_by_id(
+                        resolved_file_id,
+                        processing_details,
+                    )
+                )
+                if not updated_details and supports_lookup_by_id:
+                    if self.file_queue_manager.get_file_info_by_id(resolved_file_id) is None:
+                        self.logger.debug("批处理文件已从队列移除，忽略处理详情回写: file_id=%s", file_id)
+                        return
+                if not updated_details:
+                    self.file_queue_manager.update_file_processing_details(
+                        index, processing_details
+                    )
+            else:
+                self.file_queue_manager.update_file_processing_details(index, processing_details)
+
+        if supports_lookup_by_id:
+            current = self.file_queue_manager.get_file_info_by_id(resolved_file_id)
+            if current is None:
+                self.logger.debug("批处理文件已从队列移除，忽略完成回调: file_id=%s", file_id)
+                return
+        else:
+            current = self.file_queue_manager.get_file_info(index) or {}
 
         if final_status == ProcessingStatus.CANCELLED:
-            current = self.file_queue_manager.get_file_info(index) or {}
             current_progress = int(current.get("progress", 0) or 0)
-            self.file_queue_manager.update_file_status(
-                index, ProcessingStatus.CANCELLED, current_progress, safe_error or "用户取消"
-            )
+            if supports_status_by_id:
+                updated_status = bool(
+                    self.file_queue_manager.update_file_status_by_id(
+                        resolved_file_id,
+                        ProcessingStatus.CANCELLED,
+                        current_progress,
+                        safe_error or "用户取消",
+                    )
+                )
+                if not updated_status and supports_lookup_by_id:
+                    self.logger.debug("批处理文件已从队列移除，忽略取消状态回写: file_id=%s", file_id)
+                    return
+                if not updated_status:
+                    self.file_queue_manager.update_file_status(
+                        index,
+                        ProcessingStatus.CANCELLED,
+                        current_progress,
+                        safe_error or "用户取消",
+                    )
+            else:
+                self.file_queue_manager.update_file_status(
+                    index,
+                    ProcessingStatus.CANCELLED,
+                    current_progress,
+                    safe_error or "用户取消",
+                )
         elif final_status == ProcessingStatus.FAILED:
-            self.file_queue_manager.update_file_status(
-                index, ProcessingStatus.FAILED, 100, safe_error or "处理失败"
-            )
+            if supports_status_by_id:
+                updated_status = bool(
+                    self.file_queue_manager.update_file_status_by_id(
+                        resolved_file_id,
+                        ProcessingStatus.FAILED,
+                        100,
+                        safe_error or "处理失败",
+                    )
+                )
+                if not updated_status and supports_lookup_by_id:
+                    self.logger.debug("批处理文件已从队列移除，忽略失败状态回写: file_id=%s", file_id)
+                    return
+                if not updated_status:
+                    self.file_queue_manager.update_file_status(
+                        index,
+                        ProcessingStatus.FAILED,
+                        100,
+                        safe_error or "处理失败",
+                    )
+            else:
+                self.file_queue_manager.update_file_status(
+                    index,
+                    ProcessingStatus.FAILED,
+                    100,
+                    safe_error or "处理失败",
+                )
         else:
-            # 正常完成或其他状态：清空错误信息
-            self.file_queue_manager.update_file_status(index, final_status, 100, "")
+            if supports_status_by_id:
+                updated_status = bool(
+                    self.file_queue_manager.update_file_status_by_id(
+                        resolved_file_id,
+                        final_status,
+                        100,
+                        "",
+                    )
+                )
+                if not updated_status and supports_lookup_by_id:
+                    self.logger.debug("批处理文件已从队列移除，忽略完成状态回写: file_id=%s", file_id)
+                    return
+                if not updated_status:
+                    self.file_queue_manager.update_file_status(index, final_status, 100, "")
+            else:
+                self.file_queue_manager.update_file_status(index, final_status, 100, "")
 
         self._update_file_queue_display()
 
@@ -925,16 +1150,54 @@ class SignalHandler(QObject):
         self.control_panel.set_start_button_enabled(False)
         self.status_updated.emit("队列已清空")
 
-    def handle_file_remove(self, index: int):
+    def handle_file_remove(self, index: int):  # noqa: C901
         """处理移除文件请求"""
+        target_item = self.file_queue_manager.get_file_info(index)
+        if target_item is None:
+            self.status_updated.emit("未找到要移除的队列项")
+            return
+
+        target_file_id = str(target_item.get("file_id", "") or "").strip()
+        target_status = target_item.get("status")
+
         if (
             self.batch_processor is not None
             and hasattr(self.batch_processor, "isRunning")
             and self.batch_processor.isRunning()
             and not getattr(self.batch_processor, "should_stop", False)
         ):
-            self.log_panel.add_warning_log("批量处理中无法移除队列项，请先停止任务")
-            self.status_updated.emit("批量处理中无法移除队列项")
+            if target_status != ProcessingStatus.WAITING:
+                self.log_panel.add_warning_log("仅允许在批量处理中移除等待中的队列项")
+                self.status_updated.emit("当前队列项已开始处理，无法移除")
+                return
+
+            if not target_file_id or not hasattr(self.batch_processor, "remove_pending_file"):
+                self.log_panel.add_warning_log("当前批处理线程不支持按 file_id 移除等待项")
+                self.status_updated.emit("当前批处理线程不支持移除等待项")
+                return
+
+            removed = bool(self.batch_processor.remove_pending_file(target_file_id))
+            if not removed:
+                self.log_panel.add_warning_log("该等待项已提交执行或正在处理，无法安全移除")
+                self.status_updated.emit("该等待项已提交执行，无法移除")
+                return
+
+            queue_removed = False
+            if hasattr(self.file_queue_manager, "remove_file_by_id"):
+                queue_removed = bool(self.file_queue_manager.remove_file_by_id(target_file_id))
+            if not queue_removed:
+                queue_removed = bool(self.file_queue_manager.remove_file(index))
+            if not queue_removed:
+                self.status_updated.emit("移除等待项失败")
+                return
+
+            self._clear_last_batch_snapshot()
+            queue = self.file_queue_manager.get_queue()
+            if not queue:
+                self.handle_queue_clear()
+            else:
+                self._update_file_queue_display()
+                self.status_updated.emit(f"已移除等待项，队列中还有 {len(queue)} 个文件")
             return
 
         self.file_queue_manager.remove_file(index)
@@ -1103,7 +1366,9 @@ class SignalHandler(QObject):
                 (
                     run_ai_params,
                     computed_item_ai_params,
+                    _computed_item_ai_params_by_file_id,
                     computed_item_runtime_performance,
+                    _computed_item_runtime_performance_by_file_id,
                     batch_config,
                     runtime_config,
                 ) = self._build_batch_runtime_payloads(
@@ -1181,6 +1446,7 @@ class SignalHandler(QObject):
             manifest_items.append(
                 {
                     "index": idx,
+                    "file_id": item.get("file_id"),
                     "input_path": item.get("input_path", ""),
                     "output_path": item_output_path,
                     "status": status_value,
@@ -1268,7 +1534,9 @@ class SignalHandler(QObject):
         return (ai_params, runtime_config)
 
     @staticmethod
-    def _build_output_config_snapshot(ai_params: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def _build_output_config_snapshot(
+        ai_params: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
         """从运行时参数中提取可导出的输出配置快照。"""
         if not ai_params:
             return None
@@ -1299,9 +1567,7 @@ class SignalHandler(QObject):
             dict(file_ai_params_by_index[index]) for index in sorted(file_ai_params_by_index)
         ]
         summary = dict(ordered_file_ai_params[0])
-        legacy_add_suffix = summary.pop("add_processed_suffix", None)
-        if "add_suffix" not in summary and legacy_add_suffix is not None:
-            summary["add_suffix"] = legacy_add_suffix
+        summary.pop("add_processed_suffix", None)
 
         if len(ordered_file_ai_params) == 1:
             return summary
@@ -1337,7 +1603,7 @@ class SignalHandler(QObject):
             [params.get("compression_quality") for params in ordered_file_ai_params],
         )
         summary["add_suffix"] = self._summarize_mixed_values(
-            [params.get("add_suffix", params.get("add_processed_suffix")) for params in ordered_file_ai_params],
+            [params.get("add_suffix") for params in ordered_file_ai_params],
         )
         summary["add_timestamp"] = self._summarize_mixed_values(
             [params.get("add_timestamp") for params in ordered_file_ai_params],
@@ -1345,6 +1611,7 @@ class SignalHandler(QObject):
         summary["preserve_audio"] = self._summarize_mixed_values(
             [params.get("preserve_audio") for params in ordered_file_ai_params],
         )
+        summary.pop("add_processed_suffix", None)
         return summary
 
     def _build_batch_runtime_summary(
@@ -1416,23 +1683,33 @@ class SignalHandler(QObject):
     ) -> tuple[
         dict[str, Any],
         dict[int, dict[str, Any]],
+        dict[str, dict[str, Any]],
         dict[int, dict[str, Any]],
+        dict[str, dict[str, Any]],
         dict[str, Any],
         dict[str, Any],
     ]:
         """为批处理统一构建批次摘要、文件级参数与文件级运行时快照。"""
         file_ai_params_by_index: dict[int, dict[str, Any]] = {}
+        file_ai_params_by_file_id: dict[str, dict[str, Any]] = {}
         file_runtime_performance_by_index: dict[int, dict[str, Any]] = {}
+        file_runtime_performance_by_file_id: dict[str, dict[str, Any]] = {}
 
         for index, item in enumerate(queue):
             input_file_path = item.get("input_path") if isinstance(item, dict) else None
+            file_id = str(item.get("file_id", "") or "").strip() if isinstance(item, dict) else ""
             ai_params, runtime_config = self._build_file_runtime_payload(
                 params_builder=params_builder,
                 advanced_params=advanced_params,
                 input_file_path=input_file_path,
             )
-            file_ai_params_by_index[index] = dict(ai_params)
-            file_runtime_performance_by_index[index] = runtime_config.to_manifest_dict()
+            resolved_ai_params = dict(ai_params)
+            resolved_runtime_config = runtime_config.to_manifest_dict()
+            file_ai_params_by_index[index] = resolved_ai_params
+            file_runtime_performance_by_index[index] = resolved_runtime_config
+            if file_id:
+                file_ai_params_by_file_id[file_id] = dict(resolved_ai_params)
+                file_runtime_performance_by_file_id[file_id] = dict(resolved_runtime_config)
 
         ordered_runtime_performance = [
             file_runtime_performance_by_index[index]
@@ -1453,7 +1730,9 @@ class SignalHandler(QObject):
         return (
             batch_ai_params,
             file_ai_params_by_index,
+            file_ai_params_by_file_id,
             file_runtime_performance_by_index,
+            file_runtime_performance_by_file_id,
             batch_config,
             batch_runtime_config,
         )

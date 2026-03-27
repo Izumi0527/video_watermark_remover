@@ -2406,11 +2406,15 @@ function Resolve-CleanTargets {
         foreach ($target in @(
                 @{ Type = "dir"; Path = ".cache/tmp" },
                 @{ Type = "dir"; Path = ".cache/pytest" },
+                @{ Type = "dir"; Path = ".cache/tests" },
                 @{ Type = "dir"; Path = ".pytest_tmp" },
                 @{ Type = "dir"; Path = ".tmp_test_harness" },
+                @{ Type = "glob"; Path = "pytest-cache-files-*" },
                 @{ Type = "glob"; Path = ".tmp_*" },
+                @{ Type = "glob"; Path = "tmp_*" },
                 @{ Type = "dir"; Path = "test_output" },
-                @{ Type = "dir"; Path = "tests/.cache" }
+                @{ Type = "dir"; Path = "tests/.cache" },
+                @{ Type = "dir"; Path = "tests/test_data/runtime_tmp" }
             )) {
             $targets.Add([pscustomobject]$target) | Out-Null
         }

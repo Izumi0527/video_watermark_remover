@@ -184,10 +184,14 @@ def test_resolve_clean_targets_all_includes_temp_and_cache_targets(tmp_path: Pat
     assert ".pytest_cache" in result["Paths"]
     assert ".cache/tmp" in result["Paths"]
     assert ".cache/pytest" in result["Paths"]
+    assert ".cache/tests" in result["Paths"]
     assert ".pytest_tmp" in result["Paths"]
     assert ".tmp_test_harness" in result["Paths"]
+    assert "pytest-cache-files-*" in result["Paths"]
+    assert "tmp_*" in result["Paths"]
     assert "test_output" in result["Paths"]
     assert "tests/.cache" in result["Paths"]
+    assert "tests/test_data/runtime_tmp" in result["Paths"]
 
 
 def test_resolve_clean_targets_deep_includes_egg_info_metadata(tmp_path: Path) -> None:
@@ -233,14 +237,26 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
         New-Item -ItemType Directory -Path ".cache/pytest/pytest_case" -Force | Out-Null
         Set-Content -LiteralPath ".cache/pytest/pytest_case/temp.txt" -Value "x" -Encoding ASCII
 
+        New-Item -ItemType Directory -Path ".cache/tests/ui-components" -Force | Out-Null
+        Set-Content -LiteralPath ".cache/tests/ui-components/temp.txt" -Value "x" -Encoding ASCII
+
         New-Item -ItemType Directory -Path ".tmp_test_harness/case_local" -Force | Out-Null
         Set-Content -LiteralPath ".tmp_test_harness/case_local/temp.txt" -Value "x" -Encoding ASCII
+
+        New-Item -ItemType Directory -Path "pytest-cache-files-case01/data" -Force | Out-Null
+        Set-Content -LiteralPath "pytest-cache-files-case01/data/temp.txt" -Value "x" -Encoding ASCII
+
+        New-Item -ItemType Directory -Path "tmp_test_preferences/case_local" -Force | Out-Null
+        Set-Content -LiteralPath "tmp_test_preferences/case_local/temp.txt" -Value "x" -Encoding ASCII
 
         New-Item -ItemType Directory -Path "test_output" -Force | Out-Null
         Set-Content -LiteralPath "test_output/result.txt" -Value "x" -Encoding ASCII
 
         New-Item -ItemType Directory -Path "tests/.cache/pytest-task6-local" -Force | Out-Null
         Set-Content -LiteralPath "tests/.cache/pytest-task6-local/temp.txt" -Value "x" -Encoding ASCII
+
+        New-Item -ItemType Directory -Path "tests/test_data/runtime_tmp/e2e" -Force | Out-Null
+        Set-Content -LiteralPath "tests/test_data/runtime_tmp/e2e/temp.txt" -Value "x" -Encoding ASCII
 
         New-Item -ItemType Directory -Path "__pycache__" -Force | Out-Null
         Set-Content -LiteralPath "__pycache__/main.cpython-312.pyc" -Value "x" -Encoding ASCII
@@ -266,9 +282,13 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
             MypyCacheExists = Test-Path ".mypy_cache"
             TempRootExists = Test-Path ".cache/tmp"
             PytestTempExists = Test-Path ".cache/pytest"
+            TestsRuntimeCacheExists = Test-Path ".cache/tests"
             HarnessTempExists = Test-Path ".tmp_test_harness"
+            PytestCacheFilesExists = Test-Path "pytest-cache-files-case01"
+            TmpPatternExists = Test-Path "tmp_test_preferences"
             TestOutputExists = Test-Path "test_output"
             TestsCacheExists = Test-Path "tests/.cache"
+            RuntimeTmpExists = Test-Path "tests/test_data/runtime_tmp"
             RootPycacheExists = Test-Path "__pycache__"
             SrcPycacheExists = Test-Path "src/app/__pycache__"
             TestsPycacheExists = Test-Path "tests/unit/__pycache__"
@@ -282,9 +302,13 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
     assert result["MypyCacheExists"] is False
     assert result["TempRootExists"] is False
     assert result["PytestTempExists"] is False
+    assert result["TestsRuntimeCacheExists"] is False
     assert result["HarnessTempExists"] is False
+    assert result["PytestCacheFilesExists"] is False
+    assert result["TmpPatternExists"] is False
     assert result["TestOutputExists"] is False
     assert result["TestsCacheExists"] is False
+    assert result["RuntimeTmpExists"] is False
     assert result["RootPycacheExists"] is False
     assert result["SrcPycacheExists"] is False
     assert result["TestsPycacheExists"] is False

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 SignalHandler 批处理清单追溯回归测试
 
@@ -36,6 +36,7 @@ class _DummyBatchProcessorThread:
         queue=None,
         ai_params=None,
         file_ai_params_by_index=None,
+        file_ai_params_by_file_id=None,
         config=None,
         preloaded_ai_handler=None,
         max_concurrent_files=4,
@@ -46,6 +47,7 @@ class _DummyBatchProcessorThread:
         self.queue = queue or []
         self.ai_params = ai_params or {}
         self.file_ai_params_by_index = file_ai_params_by_index or {}
+        self.file_ai_params_by_file_id = file_ai_params_by_file_id or {}
         self.config = config
         self.preloaded_ai_handler = preloaded_ai_handler
         self.max_concurrent_files = max_concurrent_files
@@ -296,7 +298,9 @@ def _build_real_batch_processing_details(
     return batch_thread._build_processing_details(fake_processor)
 
 
-def _install_manifest_store(monkeypatch: pytest.MonkeyPatch, signal_handler_module, store: _ManifestStore) -> None:
+def _install_manifest_store(
+    monkeypatch: pytest.MonkeyPatch, signal_handler_module, store: _ManifestStore
+) -> None:
     monkeypatch.setattr(
         signal_handler_module.Path,
         "write_text",
@@ -308,7 +312,9 @@ def _install_manifest_store(monkeypatch: pytest.MonkeyPatch, signal_handler_modu
 def test_batch_processing_details_includes_effective_quality_level(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    details = _build_real_batch_processing_details(monkeypatch, raw_quality_level=999, effective_quality_level=5)
+    details = _build_real_batch_processing_details(
+        monkeypatch, raw_quality_level=999, effective_quality_level=5
+    )
     assert details["quality_level"] == 999
     assert details["requested_quality_level"] == 999
     assert details["effective_quality_level"] == 5
@@ -317,7 +323,9 @@ def test_batch_processing_details_includes_effective_quality_level(
 def test_batch_processing_details_keeps_backend_trace_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    details = _build_real_batch_processing_details(monkeypatch, raw_quality_level=3, effective_quality_level=3)
+    details = _build_real_batch_processing_details(
+        monkeypatch, raw_quality_level=3, effective_quality_level=3
+    )
     details.update(
         {
             "requested_inpainting_backend": "lama",
@@ -331,7 +339,9 @@ def test_batch_processing_details_keeps_backend_trace_fields(
     assert details["inpainting_fallback_reason"] == "lama_runtime_exception"
 
 
-def test_export_manifest_keeps_last_batch_runtime_config_after_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_export_manifest_keeps_last_batch_runtime_config_after_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
 
     builder_result = {
@@ -348,7 +358,7 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(monkey
         "cache_size_mb": 256,
         "output_format": "keep",
         "compression_quality": 85,
-        "add_processed_suffix": True,
+        "add_suffix": True,
         "add_timestamp": False,
         "preserve_audio": True,
     }
@@ -378,36 +388,41 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(monkey
             "inpainting_fallback_reason": "lama_runtime_exception",
         }
     )
-    handler._on_batch_file_completed(0, "first_out.jpg", signal_handler_module.ProcessingStatus.COMPLETED, "", details)
+    handler._on_batch_file_completed(
+        0, "first_out.jpg", signal_handler_module.ProcessingStatus.COMPLETED, "", details
+    )
     handler._on_batch_completed()
 
     manifest_store = _ManifestStore()
     _install_manifest_store(monkeypatch, signal_handler_module, manifest_store)
     manifest_path = Path("virtual_manifest") / "manifest.json"
-    monkeypatch.setattr(handler, "_show_save_dialog", lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"))
+    monkeypatch.setattr(
+        handler,
+        "_show_save_dialog",
+        lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"),
+    )
 
     handler.handle_export_batch_manifest(parent_widget=None)
     manifest = manifest_store.read_json(manifest_path)
+    run_manifest = manifest["run"]
 
     assert manifest["run"]["ai_params_source"] == "last_batch"
     expected_ai_params = dict(builder_result)
-    expected_ai_params.pop("add_processed_suffix", None)
-    expected_ai_params["add_suffix"] = True
-    assert manifest["run"]["ai_params"] == expected_ai_params
-    assert manifest["run"]["runtime_performance"]["requested_processing_mode"] == "auto"
-    assert manifest["run"]["runtime_performance"]["resolved_processing_mode"] == "pipeline"
-    assert manifest["run"]["runtime_performance"]["worker_count"] == 3
-    assert manifest["run"]["runtime_performance"]["enable_multiprocess"] is True
-    assert manifest["run"]["runtime_performance"]["use_pipeline"] is True
-    assert manifest["run"]["runtime_performance"]["gpu_memory_budget_mb"] == 1536
-    assert manifest["run"]["runtime_performance"]["enable_cache"] is True
-    assert manifest["run"]["runtime_performance"]["cache_size_mb"] == 256
+    assert run_manifest["ai_params"] == expected_ai_params
+    assert run_manifest["runtime_performance"]["requested_processing_mode"] == "auto"
+    assert run_manifest["runtime_performance"]["resolved_processing_mode"] == "pipeline"
+    assert run_manifest["runtime_performance"]["worker_count"] == 3
+    assert run_manifest["runtime_performance"]["enable_multiprocess"] is True
+    assert run_manifest["runtime_performance"]["use_pipeline"] is True
+    assert run_manifest["runtime_performance"]["gpu_memory_budget_mb"] == 1536
+    assert run_manifest["runtime_performance"]["enable_cache"] is True
+    assert run_manifest["runtime_performance"]["cache_size_mb"] == 256
     assert manifest["batch"]["max_concurrent_files"] == 1
     assert manifest["batch"]["auto_retry_failed"] is True
     assert manifest["batch"]["max_retry_count"] == 3
-    assert manifest["run"]["runtime_performance"]["batch_max_concurrent_files"] == 1
-    assert manifest["run"]["runtime_performance"]["batch_auto_retry_failed"] is True
-    assert manifest["run"]["runtime_performance"]["batch_max_retry_count"] == 3
+    assert run_manifest["runtime_performance"]["batch_max_concurrent_files"] == 1
+    assert run_manifest["runtime_performance"]["batch_auto_retry_failed"] is True
+    assert run_manifest["runtime_performance"]["batch_max_retry_count"] == 3
 
     first_item = manifest["items"][0]
     assert first_item["output_config"] == {
@@ -423,7 +438,9 @@ def test_export_manifest_keeps_last_batch_runtime_config_after_completion(monkey
     assert first_item["processing_details"]["effective_quality_level"] == 3
     assert first_item["processing_details"]["requested_inpainting_backend"] == "lama"
     assert first_item["processing_details"]["actual_inpainting_backend"] == "opencv"
-    assert first_item["processing_details"]["inpainting_fallback_reason"] == "lama_runtime_exception"
+    assert (
+        first_item["processing_details"]["inpainting_fallback_reason"] == "lama_runtime_exception"
+    )
 
 
 def test_handle_queue_clear_clears_last_batch_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -464,32 +481,179 @@ def test_handle_file_remove_clears_last_batch_snapshot_when_queue_not_empty(
     assert handler._last_batch_runtime_config is None
 
 
-def test_handle_file_remove_blocked_while_batch_processing(
+def test_handle_file_remove_allows_waiting_item_while_batch_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
     handler, *_ = _build_handler(signal_handler_module)
     handler._handle_multiple_files(["first.jpg", "second.jpg"])
 
+    original_queue = handler.file_queue_manager.get_queue()
+    removed_file_id = original_queue[1]["file_id"]
+    handler.file_queue_manager.update_file_status(
+        0, signal_handler_module.ProcessingStatus.PROCESSING
+    )
+
     class _RunningBatchProcessor:
         should_stop = False
-        is_running = True
+
+        def __init__(self, file_queue):
+            self.file_queue = file_queue
+            self.removed = []
 
         @staticmethod
         def isRunning() -> bool:
             return True
 
-    handler.batch_processor = _RunningBatchProcessor()
-    before_queue = handler.file_queue_manager.get_queue()
+        def remove_pending_file(self, file_id: str) -> bool:
+            self.removed.append(file_id)
+            return True
 
-    handler.handle_file_remove(0)
+    handler.batch_processor = _RunningBatchProcessor(original_queue)
+    handler._last_batch_ai_params = {"stale": True}
+    handler._last_batch_ai_params_generated_at = "2026-03-24 10:00:00"
+    handler._last_batch_config = {"max_concurrent_files": 4}
+    handler._last_batch_runtime_config = {"resolved_processing_mode": "pipeline"}
+
+    handler.handle_file_remove(1)
 
     after_queue = handler.file_queue_manager.get_queue()
+    assert len(after_queue) == 1
+    assert after_queue[0]["input_path"] == "first.jpg"
+    assert handler.batch_processor.removed == [removed_file_id]
+    assert handler._last_batch_ai_params is None
+    assert handler._last_batch_config is None
+
+    handler._on_batch_file_progress(50, 1)
+    remaining_item = handler.file_queue_manager.get_file_info(0)
+    assert remaining_item["progress"] == 0
+
+    before_status = remaining_item["status"]
+    before_error = remaining_item["error_message"]
+    before_details = remaining_item.get("processing_details")
+    handler._on_batch_file_completed(
+        1,
+        "removed_out.jpg",
+        signal_handler_module.ProcessingStatus.COMPLETED,
+        "",
+        {"trace_id": "removed-item"},
+    )
+    after_remaining_item = handler.file_queue_manager.get_file_info(0)
+    assert after_remaining_item["status"] == before_status
+    assert after_remaining_item["progress"] == 0
+    assert after_remaining_item["error_message"] == before_error
+    assert after_remaining_item.get("processing_details") == before_details
+
+
+def test_handle_file_remove_still_blocks_processing_item_while_batch_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_handler_module = _build_signal_handler_module(monkeypatch)
+    handler, *_ = _build_handler(signal_handler_module)
+    handler._handle_multiple_files(["first.jpg", "second.jpg"])
+
+    original_queue = handler.file_queue_manager.get_queue()
+
+    class _RunningBatchProcessor:
+        should_stop = False
+
+        def __init__(self, file_queue):
+            self.file_queue = file_queue
+            self.removed = []
+
+        @staticmethod
+        def isRunning() -> bool:
+            return True
+
+        def remove_pending_file(self, file_id: str) -> bool:
+            self.removed.append(file_id)
+            return True
+
+    handler.batch_processor = _RunningBatchProcessor(original_queue)
+    handler.file_queue_manager.update_file_status(
+        0, signal_handler_module.ProcessingStatus.PROCESSING
+    )
+
+    before_queue = handler.file_queue_manager.get_queue()
+    handler.handle_file_remove(0)
+    after_queue = handler.file_queue_manager.get_queue()
+
     assert len(after_queue) == len(before_queue)
-    assert [item["input_path"] for item in after_queue] == [item["input_path"] for item in before_queue]
+    assert [item["input_path"] for item in after_queue] == [
+        item["input_path"] for item in before_queue
+    ]
+    assert handler.batch_processor.removed == []
 
 
-def test_switching_to_single_file_clears_last_batch_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("stale_status_name", "stale_error"),
+    [
+        ("FAILED", "处理失败"),
+        ("CANCELLED", "用户取消"),
+    ],
+)
+def test_handle_file_remove_ignores_stale_failed_or_cancelled_completion_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    stale_status_name: str,
+    stale_error: str,
+) -> None:
+    signal_handler_module = _build_signal_handler_module(monkeypatch)
+    handler, *_ = _build_handler(signal_handler_module)
+    handler._handle_multiple_files(["first.jpg", "second.jpg"])
+
+    original_queue = handler.file_queue_manager.get_queue()
+    removed_file_id = original_queue[1]["file_id"]
+    handler.file_queue_manager.update_file_status(
+        0, signal_handler_module.ProcessingStatus.PROCESSING
+    )
+
+    class _RunningBatchProcessor:
+        should_stop = False
+
+        def __init__(self, file_queue):
+            self.file_queue = file_queue
+            self.removed = []
+
+        @staticmethod
+        def isRunning() -> bool:
+            return True
+
+        def remove_pending_file(self, file_id: str) -> bool:
+            self.removed.append(file_id)
+            return True
+
+    handler.batch_processor = _RunningBatchProcessor(original_queue)
+    handler.handle_file_remove(1)
+
+    after_queue = handler.file_queue_manager.get_queue()
+    assert len(after_queue) == 1
+    assert handler.batch_processor.removed == [removed_file_id]
+
+    remaining_item = handler.file_queue_manager.get_file_info(0)
+    before_status = remaining_item["status"]
+    before_progress = remaining_item["progress"]
+    before_error = remaining_item["error_message"]
+    before_details = remaining_item.get("processing_details")
+
+    stale_status = getattr(signal_handler_module.ProcessingStatus, stale_status_name)
+    handler._on_batch_file_completed(
+        1,
+        "removed_out.jpg",
+        stale_status,
+        stale_error,
+        {"trace_id": f"removed-{stale_status_name.lower()}"},
+    )
+
+    after_remaining_item = handler.file_queue_manager.get_file_info(0)
+    assert after_remaining_item["status"] == before_status
+    assert after_remaining_item["progress"] == before_progress
+    assert after_remaining_item["error_message"] == before_error
+    assert after_remaining_item.get("processing_details") == before_details
+
+
+def test_switching_to_single_file_clears_last_batch_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
     handler, *_ = _build_handler(signal_handler_module)
 
@@ -506,7 +670,9 @@ def test_switching_to_single_file_clears_last_batch_snapshot(monkeypatch: pytest
     assert handler._last_batch_runtime_config is None
 
 
-def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
 
     builder_result = {"stale": True}
@@ -542,7 +708,7 @@ def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(monkeypa
         "cache_size_mb": 512,
         "output_format": "keep",
         "compression_quality": 85,
-        "add_processed_suffix": True,
+        "add_suffix": True,
         "add_timestamp": False,
         "preserve_audio": True,
     }
@@ -551,21 +717,26 @@ def test_replacing_queue_invalidates_stale_batch_snapshot_before_export(monkeypa
     manifest_store = _ManifestStore()
     _install_manifest_store(monkeypatch, signal_handler_module, manifest_store)
     manifest_path = Path("virtual_manifest") / "manifest.json"
-    monkeypatch.setattr(handler, "_show_save_dialog", lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"))
+    monkeypatch.setattr(
+        handler,
+        "_show_save_dialog",
+        lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"),
+    )
 
     handler.handle_export_batch_manifest(parent_widget=None)
     manifest = manifest_store.read_json(manifest_path)
+    run_manifest = manifest["run"]
 
     assert manifest["run"]["ai_params_source"] == "computed_at_export"
     expected_ai_params = dict(builder_result)
-    expected_ai_params.pop("add_processed_suffix", None)
-    expected_ai_params["add_suffix"] = True
-    assert manifest["run"]["ai_params"] == expected_ai_params
-    assert manifest["run"]["runtime_performance"]["requested_processing_mode"] == "auto"
-    assert manifest["run"]["runtime_performance"]["resolved_processing_mode"] == "single_process"
+    assert run_manifest["ai_params"] == expected_ai_params
+    assert run_manifest["runtime_performance"]["requested_processing_mode"] == "auto"
+    assert run_manifest["runtime_performance"]["resolved_processing_mode"] == "single_process"
 
 
-def test_export_manifest_records_file_level_runtime_performance_for_mixed_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_export_manifest_records_file_level_runtime_performance_for_mixed_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signal_handler_module = _build_signal_handler_module(monkeypatch)
 
     class _DummyAIParamsBuilder:
@@ -611,10 +782,16 @@ def test_export_manifest_records_file_level_runtime_performance_for_mixed_queue(
     manifest_store = _ManifestStore()
     _install_manifest_store(monkeypatch, signal_handler_module, manifest_store)
     manifest_path = Path("virtual_manifest") / "manifest.json"
-    monkeypatch.setattr(handler, "_show_save_dialog", lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"))
+    monkeypatch.setattr(
+        handler,
+        "_show_save_dialog",
+        lambda *args, **kwargs: (str(manifest_path), "JSON文件 (*.json)"),
+    )
 
     handler.handle_export_batch_manifest(parent_widget=None)
     manifest = manifest_store.read_json(manifest_path)
 
-    assert manifest["items"][0]["runtime_performance"]["resolved_processing_mode"] == "single_process"
+    assert (
+        manifest["items"][0]["runtime_performance"]["resolved_processing_mode"] == "single_process"
+    )
     assert manifest["items"][1]["runtime_performance"]["resolved_processing_mode"] == "pipeline"

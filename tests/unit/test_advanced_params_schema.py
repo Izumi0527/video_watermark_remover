@@ -25,3 +25,17 @@ def test_advanced_params_defaults_are_single_source_of_truth() -> None:
     assert snapshot.add_suffix is True
     assert snapshot.add_timestamp is False
     assert snapshot.preserve_audio is True
+
+
+def test_advanced_params_snapshot_ignores_legacy_output_aliases() -> None:
+    from app.config.advanced_params import AdvancedParamsSnapshot
+
+    snapshot = AdvancedParamsSnapshot.from_dict(
+        {
+            "output_quality": "low",
+            "add_processed_suffix": False,
+        }
+    )
+
+    assert snapshot.compression_quality == 85
+    assert snapshot.add_suffix is True

@@ -11,7 +11,7 @@
 """
 
 import os
-from typing import List
+from typing import Any, List
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QLabel, QListWidget, QListWidgetItem, QMessageBox, QWidget
@@ -32,7 +32,7 @@ class BatchFileManager:
         """
         self.parent = parent_widget
         self.queue_manager = FileQueueManager()
-        self.ai_params = {}
+        self.ai_params: dict[str, Any] = {}
 
     def show_add_files_dialog(self) -> List[str]:
         """
@@ -221,4 +221,3 @@ class BatchFileManager:
             "waiting": self.queue_manager.get_pending_count(),
             "processing": self.queue_manager.get_processing_count(),
         }
-
