@@ -100,6 +100,7 @@ class BatchProcessingWidget(QWidget):
     def set_ai_params(self, ai_params: Dict[str, Any]):
         """设置AI参数"""
         self.ai_params = ai_params
+        self.file_manager.set_ai_params(ai_params)
 
     def set_config(self, config):
         """设置配置对象，不再从旧 batch 配置读取性能参数。"""

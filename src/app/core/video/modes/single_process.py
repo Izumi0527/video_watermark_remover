@@ -3,6 +3,7 @@ import os
 import cv2
 
 from ...exceptions import ModelLoadError, VideoReadError, VideoWriteError
+from ..output_strategy import create_video_writer, should_preserve_audio
 from ..utils.path import build_temp_path
 
 
@@ -29,11 +30,16 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
             f"Video properties: {frame_width}x{frame_height}, {fps} fps, {total_frames} frames"
         )
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(processor.output_path, fourcc, fps, (frame_width, frame_height))
+        out, selected_codec = create_video_writer(
+            processor.output_path,
+            fps,
+            (frame_width, frame_height),
+            cv2_module=cv2,
+        )
 
-        if not out.isOpened():
+        if out is None or not out.isOpened():
             raise VideoWriteError("无法创建输出视频文件", details=f"输出路径: {processor.output_path}")
+        processor.logger.info("Video writer codec selected: %s", selected_codec)
 
         processor.progress.emit(10)
 
@@ -133,7 +139,13 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
         temp_video_path = processor.output_path
         final_output_path = processor.output_path
 
-        if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
+        audio_preservation_enabled = should_preserve_audio(processor.ai_params)
+        audio_preserved = False
+        if (
+            audio_preservation_enabled
+            and processor.ffmpeg_processor
+            and processor.ffmpeg_processor.is_available()
+        ):
             temp_video_path = build_temp_path(processor.output_path, "temp_video")
 
             if os.path.exists(processor.output_path):
@@ -150,6 +162,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
             )
 
             if audio_success:
+                audio_preserved = True
                 processor.logger.info("Audio merged successfully")
                 processor._emit_detailed_progress("merging_audio", 1, 1)
                 processor.status.emit("✅ 音频合并完成")
@@ -184,11 +197,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
             f"{total_watermark_areas} total watermark areas found"
         )
 
-        audio_status = (
-            "含音频"
-            if (processor.ffmpeg_processor and processor.ffmpeg_processor.is_available())
-            else "无音频"
-        )
+        audio_status = "含音频" if audio_preserved else "无音频"
         processor.status.emit(f"✅ 视频处理完成! 处理了 {processed_frames} 帧 ({audio_status})")
         processor.finished.emit(final_output_path)
 

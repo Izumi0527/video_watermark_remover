@@ -577,9 +577,17 @@ last_output_dir =
 [Processing]
 default_detection_sensitivity = 0.5
 default_inpainting_method = auto
-preserve_audio = yes
-output_quality = high
 gpu_acceleration = auto
+
+# 输出参数、批处理策略与处理模式统一存入用户偏好 JSON 的 advanced_params：
+# "advanced_params": {
+#   "processing_mode": "auto",
+#   "output_format": "keep",
+#   "compression_quality": 85,
+#   "add_suffix": true,
+#   "add_timestamp": false,
+#   "preserve_audio": true
+# }
 
 [YOLO]
 model_type = yolo11x-watermark

@@ -23,6 +23,7 @@ from .audio_extractor import AudioExtractor
 from .audio_merger import AudioMerger
 from .ffmpeg_detector import FFmpegDetector
 from .video_info_extractor import VideoInfoExtractor
+from ..video.output_strategy import resolve_ffmpeg_output_codecs, resolve_ffmpeg_reencode_args
 
 
 class FFmpegAudioProcessor:
@@ -189,16 +190,19 @@ class FFmpegAudioProcessor:
     def _merge_audio_to_processed_video(
         self, processed_video_path: str, audio_path: str, final_output_path: str
     ) -> bool:
-        """将音频合并到处理后的视频，并重新编码为 H.264"""
-        self.logger.info("Step 2: Merging audio with processed video and re-encoding to H.264")
-        # 重新编码为 H.264 以确保最佳兼容性
-        # OpenCV 使用 mp4v 编码器写入的视频兼容性较差，需要重新编码
+        """将音频合并到处理后的视频，并按输出容器选择编码策略。"""
+        codec_config = resolve_ffmpeg_output_codecs(final_output_path)
+        self.logger.info(
+            "Step 2: Merging audio with processed video and re-encoding to %s/%s",
+            codec_config["video_codec"],
+            codec_config["audio_codec"],
+        )
         return self.audio_merger.merge_audio_video(
             processed_video_path,
             audio_path,
             final_output_path,
-            video_codec="libx264",  # 使用 H.264 编码器
-            audio_codec="aac",  # AAC 音频编码器
+            video_codec=codec_config["video_codec"],
+            audio_codec=codec_config["audio_codec"],
         )
 
     def _fallback_copy(self, source_path: str, dest_path: str, reason: str) -> bool:  # noqa: C901
@@ -223,18 +227,17 @@ class FFmpegAudioProcessor:
                 shutil.copy2(source_path, dest_path)
                 return True
 
+            codec_config = resolve_ffmpeg_output_codecs(dest_path)
+            reencode_args = resolve_ffmpeg_reencode_args(dest_path)
             cmd = [
                 ffmpeg_path,
                 "-i",
                 source_path,
                 "-c:v",
-                "libx264",  # H.264 视频编码器
-                "-preset",
-                "medium",  # 编码速度/质量平衡
-                "-crf",
-                "23",  # 质量参数 (18-28, 越小质量越高)
+                codec_config["video_codec"],
+                *reencode_args,
                 "-c:a",
-                "copy",  # 如果有音频，直接复制（虽然 fallback 通常是无音频的）
+                codec_config["audio_codec"],
                 "-y",  # 覆盖输出文件
                 dest_path,
             ]

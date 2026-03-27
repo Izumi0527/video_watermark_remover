@@ -46,18 +46,6 @@ class _DummyVideoProcessorThread:
         pass
 
 
-class _DummyFileQueueManager:
-    def __init__(self, *args, **kwargs):
-        self.queue = []
-
-    def add_file(self, input_path, output_path=None):
-        self.queue.append({"input_path": input_path, "output_path": output_path})
-        return self.queue[-1]
-
-    def get_queue(self):
-        return list(self.queue)
-
-
 class _DummyProcessingStatus:
     WAITING = "waiting"
     PROCESSING = "processing"
@@ -66,11 +54,45 @@ class _DummyProcessingStatus:
     CANCELLED = "cancelled"
 
 
+class _DummyFileQueueManager:
+    def __init__(self, *args, **kwargs):
+        self.queue = []
+
+    def add_file(self, input_path, output_path=None, ai_params=None, runtime_performance=None):
+        self.queue.append(
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "ai_params": dict(ai_params or {}),
+                "runtime_performance": runtime_performance,
+                "status": _DummyProcessingStatus.WAITING,
+                "progress": 0,
+                "error_message": "",
+            }
+        )
+        return self.queue[-1]
+
+    def get_queue(self):
+        return list(self.queue)
+
+    def get_file_info(self, index):
+        return self.queue[index]
+
+    def update_file_runtime_performance(self, index, runtime_performance):
+        self.queue[index]["runtime_performance"] = runtime_performance
+
+    def update_file_output_path(self, index, output_path):
+        self.queue[index]["output_path"] = output_path
+
+    def clear_queue(self):
+        self.queue.clear()
+
+
 class _DummyAIParamsBuilder:
     last_build_from_ui_kwargs = None
 
-    def build_from_ui(self, **_kwargs):
-        type(self).last_build_from_ui_kwargs = dict(_kwargs)
+    def build_from_ui(self, **kwargs):
+        type(self).last_build_from_ui_kwargs = dict(kwargs)
         return {
             "auto_detect": True,
             "enable_multiprocess": True,
@@ -109,6 +131,9 @@ class _DummyControlPanel:
     def update_progress(self, value):
         return None
 
+    def update_detailed_progress(self, value):
+        return None
+
 
 class _DummyFilePanel:
     def set_export_enabled(self, value):
@@ -142,7 +167,43 @@ class _DummyStyleManager:
     pass
 
 
+class _QtSignalDescriptor:
+    def __set_name__(self, owner, name):
+        self._storage_name = f"__signal_{name}"
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        signal = getattr(instance, self._storage_name, None)
+        if signal is None:
+            signal = _DummySignal()
+            setattr(instance, self._storage_name, signal)
+        return signal
+
+
+class _QObject:
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+
+def _install_pyqt_core_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    pyqt6_module = types.ModuleType("PyQt6")
+    qtcore_module = types.ModuleType("PyQt6.QtCore")
+    qtcore_module.QObject = _QObject
+    qtcore_module.QThread = _QObject
+    qtcore_module.pyqtSignal = lambda *args, **kwargs: _QtSignalDescriptor()
+    monkeypatch.setitem(sys.modules, "PyQt6", pyqt6_module)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore_module)
+
+
 def _import_signal_handler_with_patches(monkeypatch: pytest.MonkeyPatch):
+    _install_pyqt_core_stub(monkeypatch)
+
+    ui_utils_module = types.ModuleType("app.ui.utils")
+    ui_utils_module.MEDIA_IMPORT_FILTER = "all files (*)"
+    ui_utils_module.AIParamsBuilder = _DummyAIParamsBuilder
+    monkeypatch.setitem(sys.modules, "app.ui.utils", ui_utils_module)
+
     video_thread_module = types.ModuleType("app.core.video.thread")
     video_thread_module.VideoProcessorThread = _DummyVideoProcessorThread
     monkeypatch.setitem(sys.modules, "app.core.video.thread", video_thread_module)
@@ -158,9 +219,7 @@ def _import_signal_handler_with_patches(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "app.ui.widgets.batch.batch_processor_thread", batch_module)
 
     monkeypatch.delitem(sys.modules, "app.ui.signal_handler", raising=False)
-    signal_handler_module = importlib.import_module("app.ui.signal_handler")
-    monkeypatch.setattr(signal_handler_module, "AIParamsBuilder", _DummyAIParamsBuilder)
-    return signal_handler_module
+    return importlib.import_module("app.ui.signal_handler")
 
 
 def test_signal_handler_uses_snapshot_batch_config_instead_of_hardcoded_defaults(

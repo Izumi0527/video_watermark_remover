@@ -4,6 +4,8 @@ import logging
 import os
 from typing import Any, Dict, List
 
+from ..advanced_params import OUTPUT_FORMAT_LABELS, OUTPUT_FORMAT_OPTIONS
+
 
 class PreferencesValidator:
     """偏好设置验证和实用工具类."""
@@ -42,9 +44,7 @@ class PreferencesValidator:
         """验证处理分类的偏好值."""
         if key == "detection_sensitivity":
             return isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0
-        if key == "output_quality":
-            return value in ["low", "medium", "high"]
-        if key in ["auto_detect", "preserve_audio"]:
+        if key == "auto_detect":
             return isinstance(value, bool)
         return True
 
@@ -59,7 +59,7 @@ class PreferencesValidator:
         return True
 
     def _validate_advanced_params(self, key: str, value: Any) -> bool:
-        """验证统一性能参数分类的偏好值。"""
+        """验证统一高级参数分类的偏好值。"""
         if key == "processing_mode":
             return value in {"auto", "single_process", "multiprocess", "pipeline"}
         if key == "worker_count":
@@ -78,6 +78,16 @@ class PreferencesValidator:
             return isinstance(value, bool)
         if key == "batch_max_retry_count":
             return isinstance(value, int) and value >= 0
+        if key == "output_format":
+            return str(value or "").strip() in set(OUTPUT_FORMAT_OPTIONS) | set(OUTPUT_FORMAT_LABELS.values()) | {"jpeg", "JPEG"}
+        if key == "compression_quality":
+            return isinstance(value, int) and 1 <= value <= 100
+        if key == "add_suffix":
+            return isinstance(value, bool)
+        if key == "add_timestamp":
+            return isinstance(value, bool)
+        if key == "preserve_audio":
+            return isinstance(value, bool)
         return True
 
     def filter_recent_files(self, recent_files: List[str]) -> List[str]:

@@ -36,7 +36,7 @@ tests/test_data/
 
 ### configs/ 目录
 - **test_config.ini** - 测试配置文件
-- **user_prefs_sample.json** - 用户偏好设置样本
+- **user_prefs_sample.json** - 用户偏好设置样本（包含统一 `advanced_params` 结构）
 - **ai_model_config.yaml** - AI模型配置样本
 
 ### models/ 目录

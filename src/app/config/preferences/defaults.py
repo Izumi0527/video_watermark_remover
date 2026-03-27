@@ -21,8 +21,6 @@ class PreferencesDefaults:
             "auto_detect": True,
             "detection_sensitivity": 0.5,
             "default_inpainting_method": "auto",
-            "preserve_audio": True,
-            "output_quality": "high",
         },
         "paths": {
             "last_input_dir": "",

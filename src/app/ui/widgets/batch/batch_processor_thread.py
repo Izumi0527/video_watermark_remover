@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # 导入视频处理线程
+from ....core.video.output_strategy import resolve_output_path
 from ....core.video.thread import VideoProcessorThread
 
 
@@ -54,6 +55,7 @@ class BatchProcessorThread(QThread):
         self,
         queue: Optional[List[Dict[str, Any]]] = None,
         ai_params: Optional[Dict[str, Any]] = None,
+        file_ai_params_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
         config=None,
         preloaded_ai_handler=None,
         max_concurrent_files: int = 4,
@@ -77,6 +79,10 @@ class BatchProcessorThread(QThread):
         super().__init__(parent)
         self.file_queue: List[Dict[str, Any]] = queue or []
         self.ai_params: Dict[str, Any] = ai_params or {}
+        self.file_ai_params_by_index: Dict[int, Dict[str, Any]] = {
+            int(index): dict(params or {})
+            for index, params in (file_ai_params_by_index or {}).items()
+        }
         self.config = config
         self.max_concurrent_files = max_concurrent_files
         self.is_running = False
@@ -461,6 +467,13 @@ class BatchProcessorThread(QThread):
             return None
         return max(1, min(5, normalized))
 
+    def _get_file_ai_params(self, file_index: int) -> Dict[str, Any]:
+        """按文件索引获取实际运行时参数，缺失时回退到批次级默认值。"""
+        file_ai_params = self.file_ai_params_by_index.get(file_index)
+        if isinstance(file_ai_params, dict) and file_ai_params:
+            return file_ai_params
+        return self.ai_params
+
     def _process_single_file(  # noqa: C901
         self, input_path: str, output_path: str, file_index: int
     ) -> tuple[ProcessingStatus, str, Optional[dict]]:
@@ -489,16 +502,18 @@ class BatchProcessorThread(QThread):
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir, exist_ok=True)
 
+            file_ai_params = self._get_file_ai_params(file_index)
+
             # 创建 VideoProcessorThread 进行实际处理
             processor = VideoProcessorThread(
                 input_path=input_path,
                 output_path=output_path,
-                ai_params=self.ai_params,
+                ai_params=file_ai_params,
                 config=self.config,
                 preloaded_ai_handler=self.preloaded_ai_handler,  # 复用预加载的AI模型
-                enable_multiprocess=bool(self.ai_params.get("enable_multiprocess", False)),
-                num_processes=self.ai_params.get("num_processes"),
-                use_pipeline=bool(self.ai_params.get("use_pipeline", False)),
+                enable_multiprocess=bool(file_ai_params.get("enable_multiprocess", False)),
+                num_processes=file_ai_params.get("num_processes"),
+                use_pipeline=bool(file_ai_params.get("use_pipeline", False)),
             )
 
             # 连接进度信号
@@ -594,12 +609,16 @@ class FileQueueManager:
     def __init__(self):
         self.queue: List[Dict[str, Any]] = []
 
-    def add_file(self, input_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
+    def add_file(
+        self,
+        input_path: str,
+        output_path: Optional[str] = None,
+        runtime_performance: Optional[Dict[str, Any]] = None,
+        ai_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """添加文件到队列"""
         if not output_path:
-            # 自动生成输出路径
-            name, ext = os.path.splitext(input_path)
-            output_path = f"{name}_processed{ext}"
+            output_path = resolve_output_path(input_path, ai_params)
 
         file_info = {
             "input_path": input_path,
@@ -609,6 +628,8 @@ class FileQueueManager:
             "error_message": "",
             # 处理详情（来自批处理线程或单文件线程的观测信息）
             "processing_details": None,
+            "runtime_performance": dict(runtime_performance or {}) or None,
+            "output_config": None,
         }
 
         self.queue.append(file_info)
@@ -642,6 +663,21 @@ class FileQueueManager:
         """更新文件的处理详情（用于清单导出追溯）。"""
         if 0 <= index < len(self.queue):
             self.queue[index]["processing_details"] = processing_details
+
+    def update_file_runtime_performance(self, index: int, runtime_performance: Any) -> None:
+        """更新文件的运行时性能快照（用于 manifest 追溯）。"""
+        if 0 <= index < len(self.queue):
+            self.queue[index]["runtime_performance"] = runtime_performance
+
+    def update_file_output_path(self, index: int, output_path: str) -> None:
+        """更新文件的输出路径。"""
+        if 0 <= index < len(self.queue):
+            self.queue[index]["output_path"] = output_path
+
+    def update_file_output_config(self, index: int, output_config: Any) -> None:
+        """更新文件的输出参数快照（用于 manifest 追溯）。"""
+        if 0 <= index < len(self.queue):
+            self.queue[index]["output_config"] = output_config
 
     def get_file_info(self, index: int) -> Optional[Dict[str, Any]]:
         """获取文件信息"""

@@ -6,6 +6,10 @@ import pytest
 from app.config import preferences
 
 
+def _make_config_dir(name: str) -> Path:
+    return Path("virtual_test_preferences") / name
+
+
 def test_defaults_deepcopy():
     base = preferences.PreferencesDefaults.DEFAULT_PREFERENCES
     copy = preferences.PreferencesDefaults.get_default_preferences()
@@ -27,8 +31,8 @@ def test_validator_rules():
     assert v.normalize_splitter_sizes([50, 10]) == [100, 100]
 
 
-def test_storage_roundtrip(tmp_path):
-    config_dir = tmp_path / "prefs_storage"
+def test_storage_roundtrip():
+    config_dir = _make_config_dir("prefs_storage")
     storage = preferences.PreferencesStorage(config_dir=str(config_dir))
     prefs = preferences.PreferencesDefaults.get_default_preferences()
     prefs["ui"]["theme"] = "light"
@@ -37,23 +41,23 @@ def test_storage_roundtrip(tmp_path):
     loaded = storage.load_preferences()
     assert loaded["ui"]["theme"] == "light"
 
-    export_path = tmp_path / "export.json"
+    export_path = config_dir / "export.json"
     assert storage.export_preferences(loaded, str(export_path))
     imported = storage.import_preferences(str(export_path))
     assert imported is not None
     assert imported["ui"]["theme"] == "light"
 
 
-def test_manager_set_get(tmp_path):
-    config_dir = tmp_path / "prefs_manager"
+def test_manager_set_get(preference_memory_fs):
+    config_dir = _make_config_dir("prefs_manager")
     manager = preferences.UserPreferencesManager(config_dir=str(config_dir))
 
-    assert manager.set_preference("processing", "output_quality", "low")
-    assert manager.get_preference("processing", "output_quality") == "low"
+    assert manager.set_preference("advanced_params", "compression_quality", 72)
+    assert manager.get_preference("advanced_params", "compression_quality") == 72
     assert manager.set_preference("ui", "theme", "light")
     assert manager.get_preference("ui", "theme") == "light"
 
-    assert not manager.set_preference("processing", "output_quality", "invalid")
+    assert not manager.set_preference("advanced_params", "compression_quality", 101)
 
     manager.update_window_geometry(0, 0, 800, 600, maximized=True)
     assert manager.get_preference("ui", "window_geometry") == [0, 0, 800, 600]
@@ -67,7 +71,7 @@ def test_manager_set_get(tmp_path):
 
     recent_file = config_dir / "file.txt"
     recent_file.parent.mkdir(parents=True, exist_ok=True)
-    recent_file.write_text("data", encoding="utf-8")
+    preference_memory_fs.write_text(recent_file, "data")
     manager.add_recent_file(str(recent_file))
     assert str(recent_file) in manager.get_recent_files()
 
@@ -78,14 +82,14 @@ def test_manager_set_get(tmp_path):
     assert manager.get_preference("ui", "theme") == "light"
 
 
-def test_global_manager_singleton(tmp_path, monkeypatch):
+def test_global_manager_singleton(monkeypatch):
     import importlib
 
     mod = preferences.manager
     monkeypatch.setattr(mod, "_preferences_manager", None)
 
-    cfg1 = tmp_path / "g1"
-    cfg2 = tmp_path / "g2"
+    cfg1 = _make_config_dir("g1")
+    cfg2 = _make_config_dir("g2")
 
     m1 = mod.get_preferences_manager(str(cfg1))
     m1.set_preference("ui", "theme", "light")
@@ -110,11 +114,10 @@ def test_global_manager_singleton(tmp_path, monkeypatch):
         ({}, "light"),
     ],
 )
-def test_storage_merge_with_default(tmp_path, input_json, expected_theme):
-    cfg = tmp_path / "merge"
-    cfg.mkdir(parents=True, exist_ok=True)
+def test_storage_merge_with_default(input_json, expected_theme, preference_memory_fs):
+    cfg = _make_config_dir("merge")
     prefs_file = cfg / "user_preferences.json"
-    prefs_file.write_text(json.dumps(input_json), encoding="utf-8")
+    preference_memory_fs.write_text(prefs_file, json.dumps(input_json))
 
     storage = preferences.PreferencesStorage(config_dir=str(cfg))
     loaded = storage.load_preferences()

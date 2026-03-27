@@ -22,6 +22,23 @@ PROCESSING_MODE_LABEL_TO_VALUE = {
     **{value: key for key, value in PROCESSING_MODE_LABELS.items()},
     "多进程": "multiprocess",
 }
+OUTPUT_FORMAT_OPTIONS = ("keep", "jpg", "png", "bmp", "tiff")
+OUTPUT_FORMAT_LABELS = {
+    "keep": "保持原格式",
+    "jpg": "JPG",
+    "png": "PNG",
+    "bmp": "BMP",
+    "tiff": "TIFF",
+}
+OUTPUT_FORMAT_LABEL_TO_VALUE = {
+    **{value: key for key, value in OUTPUT_FORMAT_LABELS.items()},
+    "jpeg": "jpg",
+}
+LEGACY_OUTPUT_QUALITY_TO_COMPRESSION = {
+    "low": 60,
+    "medium": 80,
+    "high": 95,
+}
 
 _DEFAULT_AUTO_WORKER_COUNT = 4
 _VIDEO_FILE_EXTENSIONS = {
@@ -101,6 +118,38 @@ def _normalize_worker_count(value: Any) -> int:
     return min(16, normalized)
 
 
+def _normalize_compression_quality(value: Any, default: int) -> int:
+    return _normalize_int(value, default, 1, 100)
+
+
+def normalize_output_format(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in OUTPUT_FORMAT_OPTIONS:
+        return normalized
+
+    lowered = normalized.lower()
+    if lowered in OUTPUT_FORMAT_OPTIONS:
+        return lowered
+
+    if normalized in OUTPUT_FORMAT_LABEL_TO_VALUE:
+        return OUTPUT_FORMAT_LABEL_TO_VALUE[normalized]
+    if lowered in OUTPUT_FORMAT_LABEL_TO_VALUE:
+        return OUTPUT_FORMAT_LABEL_TO_VALUE[lowered]
+
+    return "keep"
+
+
+def output_format_to_label(value: Any) -> str:
+    return OUTPUT_FORMAT_LABELS.get(normalize_output_format(value), OUTPUT_FORMAT_LABELS["keep"])
+
+
+def _normalize_legacy_output_quality(value: Any, default: int) -> int:
+    normalized = str(value or "").strip().lower()
+    if normalized in LEGACY_OUTPUT_QUALITY_TO_COMPRESSION:
+        return LEGACY_OUTPUT_QUALITY_TO_COMPRESSION[normalized]
+    return _normalize_compression_quality(value, default)
+
+
 def _resolve_auto_worker_count() -> int:
     cpu_count = os.cpu_count() or _DEFAULT_AUTO_WORKER_COUNT
     return max(1, min(cpu_count, _DEFAULT_AUTO_WORKER_COUNT))
@@ -125,11 +174,13 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     current: Mapping[str, Any] | None = None,
     advanced: Mapping[str, Any] | None = None,
     batch: Mapping[str, Any] | None = None,
+    processing: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """将旧结构中的性能参数迁移到统一字段。"""
     normalized_current = dict(current or {})
     normalized_advanced = dict(advanced or {})
     normalized_batch = dict(batch or {})
+    normalized_processing = dict(processing or {})
 
     result: dict[str, Any] = {}
 
@@ -184,6 +235,31 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     )
     if batch_max_retry_count is not None:
         result["batch_max_retry_count"] = batch_max_retry_count
+
+    output_format = normalized_current.get("output_format")
+    if output_format is not None:
+        result["output_format"] = output_format
+
+    compression_quality = normalized_current.get("compression_quality")
+    if compression_quality is None:
+        compression_quality = normalized_current.get(
+            "output_quality",
+            normalized_processing.get("output_quality"),
+        )
+    if compression_quality is not None:
+        result["compression_quality"] = compression_quality
+
+    add_suffix = normalized_current.get("add_suffix", normalized_current.get("add_processed_suffix"))
+    if add_suffix is not None:
+        result["add_suffix"] = add_suffix
+
+    add_timestamp = normalized_current.get("add_timestamp")
+    if add_timestamp is not None:
+        result["add_timestamp"] = add_timestamp
+
+    preserve_audio = normalized_current.get("preserve_audio", normalized_processing.get("preserve_audio"))
+    if preserve_audio is not None:
+        result["preserve_audio"] = preserve_audio
 
     return result
 
@@ -330,8 +406,37 @@ class ResolvedPerformanceConfig:
 
 
 @dataclass(frozen=True)
+class ResolvedOutputConfig:
+    """解析后的统一输出配置。"""
+
+    output_format: str
+    compression_quality: int
+    add_suffix: bool
+    add_timestamp: bool
+    preserve_audio: bool
+
+    def to_ai_params(self) -> dict[str, Any]:
+        return {
+            "output_format": self.output_format,
+            "compression_quality": self.compression_quality,
+            "add_suffix": self.add_suffix,
+            "add_timestamp": self.add_timestamp,
+            "preserve_audio": self.preserve_audio,
+        }
+
+    def to_ui_dict(self) -> dict[str, Any]:
+        return {
+            "output_format": output_format_to_label(self.output_format),
+            "compression_quality": self.compression_quality,
+            "add_suffix": self.add_suffix,
+            "add_timestamp": self.add_timestamp,
+            "preserve_audio": self.preserve_audio,
+        }
+
+
+@dataclass(frozen=True)
 class AdvancedParamsSnapshot:
-    """统一高级性能参数快照。"""
+    """统一高级参数快照。"""
 
     processing_mode: str = "auto"
     worker_count: int = 0
@@ -342,6 +447,11 @@ class AdvancedParamsSnapshot:
     batch_max_concurrent_files: int = 1
     batch_auto_retry_failed: bool = True
     batch_max_retry_count: int = 3
+    output_format: str = "keep"
+    compression_quality: int = 85
+    add_suffix: bool = True
+    add_timestamp: bool = False
+    preserve_audio: bool = True
 
     @classmethod
     def defaults(cls) -> "AdvancedParamsSnapshot":
@@ -389,6 +499,23 @@ class AdvancedParamsSnapshot:
                 0,
                 10,
             ),
+            output_format=normalize_output_format(merged.get("output_format", defaults.output_format)),
+            compression_quality=_normalize_legacy_output_quality(
+                merged.get("compression_quality", defaults.compression_quality),
+                defaults.compression_quality,
+            ),
+            add_suffix=_normalize_bool(
+                merged.get("add_suffix", defaults.add_suffix),
+                defaults.add_suffix,
+            ),
+            add_timestamp=_normalize_bool(
+                merged.get("add_timestamp"),
+                defaults.add_timestamp,
+            ),
+            preserve_audio=_normalize_bool(
+                merged.get("preserve_audio"),
+                defaults.preserve_audio,
+            ),
         )
 
     def replace(self, **changes: Any) -> "AdvancedParamsSnapshot":
@@ -398,7 +525,9 @@ class AdvancedParamsSnapshot:
         return asdict(self)
 
     def to_ui_dict(self) -> dict[str, Any]:
-        return self.to_dict()
+        params = self.to_dict()
+        params["output_format"] = output_format_to_label(self.output_format)
+        return params
 
     def _default_processing_context(self) -> ProcessingContext:
         return ProcessingContext(
@@ -456,14 +585,28 @@ class AdvancedParamsSnapshot:
     def to_batch_config(self, context: ProcessingContext | None = None) -> dict[str, Any]:
         return self.resolve(context).to_batch_config()
 
+    def resolve_output_config(self) -> ResolvedOutputConfig:
+        return ResolvedOutputConfig(
+            output_format=self.output_format,
+            compression_quality=self.compression_quality,
+            add_suffix=self.add_suffix,
+            add_timestamp=self.add_timestamp,
+            preserve_audio=self.preserve_audio,
+        )
+
 
 __all__ = [
     "AdvancedParamsSnapshot",
+    "OUTPUT_FORMAT_LABELS",
+    "OUTPUT_FORMAT_OPTIONS",
     "ProcessingContext",
     "PROCESSING_MODE_LABELS",
     "PROCESSING_MODE_OPTIONS",
+    "ResolvedOutputConfig",
     "ResolvedPerformanceConfig",
     "migrate_legacy_performance_preferences",
+    "normalize_output_format",
     "normalize_processing_mode",
+    "output_format_to_label",
     "processing_mode_to_label",
 ]

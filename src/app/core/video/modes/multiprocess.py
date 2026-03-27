@@ -7,11 +7,13 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import queues as mp_queues
 from multiprocessing import synchronize
+from pathlib import Path
 from typing import Any, List, Optional, Tuple, cast
 
 import cv2
 from PyQt6.QtCore import QTimer
 
+from ..output_strategy import should_preserve_audio
 from ..utils.path import build_temp_path
 from ..workers.chunk import init_chunk_worker_ai_handler, process_video_chunk
 
@@ -20,14 +22,19 @@ def _calculate_chunks(
     processor,
     total_frames: int,
     num_processes: int,
+    output_path: str = "",
 ) -> List[Tuple[int, int, str]]:
     chunk_size = total_frames // num_processes
     chunks = []
+    target_suffix = Path(str(output_path)).suffix.lower() or ".mp4"
 
     for i in range(num_processes):
         start = i * chunk_size
         end = total_frames if i == num_processes - 1 else (i + 1) * chunk_size
-        temp_path = os.path.join(tempfile.gettempdir(), f"video_chunk_{i}_{os.getpid()}.mp4")
+        temp_path = os.path.join(
+            tempfile.gettempdir(),
+            f"video_chunk_{i}_{os.getpid()}{target_suffix}",
+        )
         chunks.append((start, end, temp_path))
 
     processor.logger.info(f"Calculated {num_processes} chunks for {total_frames} frames")
@@ -154,7 +161,12 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         # 发射初始详细进度（处理开始）
         processor._emit_detailed_progress("processing_frames", 0, total_frames)
 
-        chunks = _calculate_chunks(processor, total_frames, processor.num_processes)
+        chunks = _calculate_chunks(
+            processor,
+            total_frames,
+            processor.num_processes,
+            output_path=processor.output_path,
+        )
         temp_files = [chunk[2] for chunk in chunks]
 
         manager = multiprocessing.Manager()
@@ -221,7 +233,11 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         temp_merged_path = build_temp_path(processor.output_path, "temp_merged")
         _merge_video_chunks(processor, chunk_paths, temp_merged_path)
 
-        if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
+        if (
+            should_preserve_audio(processor.ai_params)
+            and processor.ffmpeg_processor
+            and processor.ffmpeg_processor.is_available()
+        ):
             processor.status.emit("🎵 正在合并原始音频...")
             processor.progress.emit(97)
 

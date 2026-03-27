@@ -85,6 +85,7 @@ class AdvancedParametersWidget(QWidget):
         self.compression_label: Optional["QLabel"] = None
         self.add_suffix_check: Optional["QCheckBox"] = None
         self.add_timestamp_check: Optional["QCheckBox"] = None
+        self.preserve_audio_check: Optional["QCheckBox"] = None
 
         self._init_ui()
         self._connect_signals()
@@ -189,6 +190,8 @@ class AdvancedParametersWidget(QWidget):
             self.add_suffix_check.toggled.connect(self._on_parameter_changed)
         if self.add_timestamp_check:
             self.add_timestamp_check.toggled.connect(self._on_parameter_changed)
+        if self.preserve_audio_check:
+            self.preserve_audio_check.toggled.connect(self._on_parameter_changed)
 
     def _update_sensitivity_label(self, value):
         """更新敏感度标签"""
@@ -217,7 +220,7 @@ class AdvancedParametersWidget(QWidget):
 
     def get_parameters(self) -> Dict[str, Any]:
         """获取当前参数"""
-        performance_snapshot = AdvancedParamsSnapshot.from_dict(
+        advanced_snapshot = AdvancedParamsSnapshot.from_dict(
             {
                 "processing_mode": (
                     self.processing_mode_combo.currentData() if self.processing_mode_combo else None
@@ -243,6 +246,19 @@ class AdvancedParametersWidget(QWidget):
                     self.batch_max_retry_count_spin.value()
                     if self.batch_max_retry_count_spin
                     else 0
+                ),
+                "output_format": (
+                    self.output_format_combo.currentText() if self.output_format_combo else "保持原格式"
+                ),
+                "compression_quality": (
+                    self.compression_slider.value() if self.compression_slider else 85
+                ),
+                "add_suffix": self.add_suffix_check.isChecked() if self.add_suffix_check else True,
+                "add_timestamp": (
+                    self.add_timestamp_check.isChecked() if self.add_timestamp_check else False
+                ),
+                "preserve_audio": (
+                    self.preserve_audio_check.isChecked() if self.preserve_audio_check else True
                 ),
             }
         )
@@ -282,19 +298,8 @@ class AdvancedParametersWidget(QWidget):
             "enable_enhance_postprocess": (
                 self.enable_enhance_check.isChecked() if self.enable_enhance_check else False
             ),
-            # 性能参数
-            **performance_snapshot.to_ui_dict(),
-            # 输出参数
-            "output_format": (
-                self.output_format_combo.currentText() if self.output_format_combo else ""
-            ),
-            "compression_quality": (
-                self.compression_slider.value() if self.compression_slider else 0
-            ),
-            "add_suffix": self.add_suffix_check.isChecked() if self.add_suffix_check else False,
-            "add_timestamp": (
-                self.add_timestamp_check.isChecked() if self.add_timestamp_check else False
-            ),
+            # 统一高级参数（性能 + 输出）
+            **advanced_snapshot.to_ui_dict(),
         }
 
     def set_parameters(self, parameters: Dict[str, Any]):  # noqa: C901
@@ -371,20 +376,25 @@ class AdvancedParametersWidget(QWidget):
             if self.batch_max_retry_count_spin:
                 self.batch_max_retry_count_spin.setValue(performance_snapshot.batch_max_retry_count)
 
-            if "compression_quality" in parameters and self.compression_slider:
-                self.compression_slider.setValue(parameters["compression_quality"])
+            if self.compression_slider:
+                self.compression_slider.setValue(performance_snapshot.compression_quality)
 
             # 设置输出参数
-            if "output_format" in parameters and self.output_format_combo:
-                index = self.output_format_combo.findText(parameters["output_format"])
+            if self.output_format_combo:
+                index = self.output_format_combo.findText(
+                    performance_snapshot.to_ui_dict()["output_format"]
+                )
                 if index >= 0:
                     self.output_format_combo.setCurrentIndex(index)
 
-            if "add_suffix" in parameters and self.add_suffix_check:
-                self.add_suffix_check.setChecked(parameters["add_suffix"])
+            if self.add_suffix_check:
+                self.add_suffix_check.setChecked(performance_snapshot.add_suffix)
 
-            if "add_timestamp" in parameters and self.add_timestamp_check:
-                self.add_timestamp_check.setChecked(parameters["add_timestamp"])
+            if self.add_timestamp_check:
+                self.add_timestamp_check.setChecked(performance_snapshot.add_timestamp)
+
+            if self.preserve_audio_check:
+                self.preserve_audio_check.setChecked(performance_snapshot.preserve_audio)
 
         finally:
             # 重新连接信号
@@ -467,13 +477,15 @@ class AdvancedParametersWidget(QWidget):
                 self.add_suffix_check.toggled.disconnect(self._on_parameter_changed)
             if self.add_timestamp_check:
                 self.add_timestamp_check.toggled.disconnect(self._on_parameter_changed)
+            if self.preserve_audio_check:
+                self.preserve_audio_check.toggled.disconnect(self._on_parameter_changed)
         except Exception as e:
             # 若部分信号未连接，不影响整体断开流程
             self.logger.debug(f"Signal disconnect warning: {e}")
 
     def reset_to_defaults(self):
         """重置为默认值"""
-        performance_defaults = AdvancedParamsSnapshot.defaults().to_ui_dict()
+        advanced_defaults = AdvancedParamsSnapshot.defaults().to_ui_dict()
         default_params = {
             "detection_sensitivity": 0.5,
             "detection_method": "YOLO v11x 深度学习auto (推荐)",
@@ -487,11 +499,7 @@ class AdvancedParametersWidget(QWidget):
             "enable_smooth_postprocess": True,
             "enable_blend_postprocess": True,
             "enable_enhance_postprocess": False,
-            **performance_defaults,
-            "output_format": "保持原格式",
-            "compression_quality": 85,
-            "add_suffix": True,
-            "add_timestamp": False,
+            **advanced_defaults,
         }
 
         self.set_parameters(default_params)
@@ -512,8 +520,10 @@ class AdvancedParametersWidget(QWidget):
 
         if self.preferences:
             try:
+                snapshot = AdvancedParamsSnapshot.from_dict(current_params)
+                persisted_params = {**current_params, **snapshot.to_dict()}
                 # 保存参数到偏好设置
-                for key, value in current_params.items():
+                for key, value in persisted_params.items():
                     self.preferences.set_preference("advanced_params", key, value)
                 self.preferences.save_preferences()
                 print("[OK] 高级参数已应用")

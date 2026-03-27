@@ -200,7 +200,8 @@ default_prefs = PreferencesDefaults.get_default_preferences()
 assert prefs_manager.config_dir.exists()
 assert prefs_manager.preferences_file.name == 'user_preferences.json'
 assert prefs_manager.get_ui_preferences()['theme'] == default_prefs['ui']['theme']
-assert prefs_manager.get_processing_preferences()['output_quality'] == default_prefs['processing']['output_quality']
+assert prefs_manager.get_advanced_params_preferences()['compression_quality'] == default_prefs['advanced_params']['compression_quality']
+assert prefs_manager.get_advanced_params_preferences()['preserve_audio'] == default_prefs['advanced_params']['preserve_audio']
 assert prefs_manager.get_advanced_preferences()['log_level'] == default_prefs['advanced']['log_level']
 assert prefs_manager.get_batch_preferences()['max_concurrent_files'] == default_prefs['batch']['max_concurrent_files']
 

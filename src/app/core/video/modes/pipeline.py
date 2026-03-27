@@ -12,6 +12,7 @@ from typing import Any, Optional, cast
 import cv2
 from PyQt6.QtCore import QTimer
 
+from ..output_strategy import should_preserve_audio
 from ..utils.backpressure import QueueBudget, calculate_runtime_queue_budget
 from ..utils.path import build_temp_path
 from ..workers.audio import async_audio_extractor
@@ -32,15 +33,34 @@ def _calculate_queue_budget(processor, frame_shape: tuple[int, int]) -> QueueBud
         enable_cache=enable_cache,
         cache_size_mb=cache_size_mb,
         frame_shape=frame_shape,
+        requested_worker_count=processor.num_processes,
     )
+    if (
+        queue_budget.pipeline_viable
+        and queue_budget.effective_worker_count != processor.num_processes
+    ):
+        processor.logger.warning(
+            "Pipeline worker count capped by cache budget: requested=%s effective=%s "
+            "estimated_memory=%.1fMB cache_size_mb=%s",
+            processor.num_processes,
+            queue_budget.effective_worker_count,
+            queue_budget.estimated_total_memory_mb,
+            cache_size_mb,
+        )
+        processor.num_processes = queue_budget.effective_worker_count
     processor.logger.info(
         "Pipeline queue budget resolved: enable_cache=%s cache_size_mb=%s "
-        "frame_queue=%s result_queue=%s writer_buffer=%s",
+        "requested_workers=%s effective_workers=%s viable=%s "
+        "frame_queue=%s result_queue=%s writer_buffer=%s estimated_memory=%.1fMB",
         enable_cache,
         cache_size_mb,
+        queue_budget.requested_worker_count,
+        queue_budget.effective_worker_count,
+        queue_budget.pipeline_viable,
         queue_budget.frame_queue_size,
         queue_budget.result_queue_size,
         queue_budget.writer_buffer_size,
+        queue_budget.estimated_total_memory_mb,
     )
     return queue_budget
 
@@ -114,6 +134,17 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
 
         manager = multiprocessing.Manager()
         queue_budget = _calculate_queue_budget(processor, (height, width))
+        if not queue_budget.pipeline_viable:
+            processor.logger.warning(
+                "Pipeline disabled by cache budget: cache_size_mb=%s estimated_minimum=%.1fMB frame=%sx%s",
+                processor.ai_params.get("cache_size_mb", 512),
+                queue_budget.minimum_viable_memory_mb,
+                width,
+                height,
+            )
+            processor.status.emit("⚠️ 缓存预算不足以运行流水线，切换到单进程模式")
+            processor._process_video_singleprocess()
+            return
         frame_queue = _create_manager_queue(manager, queue_budget.frame_queue_size)
         result_queue = _create_manager_queue(manager, queue_budget.result_queue_size)
         progress_queue = _create_manager_queue(manager)
@@ -123,7 +154,11 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
 
         audio_completion_event = None
         audio_thread = None
-        if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
+        if (
+            should_preserve_audio(processor.ai_params)
+            and processor.ffmpeg_processor
+            and processor.ffmpeg_processor.is_available()
+        ):
             with tempfile.NamedTemporaryFile(
                 suffix=".aac", prefix="audio_temp_", delete=False
             ) as tmp:
@@ -246,7 +281,11 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
         if error_msg:
             processor.logger.warning(error_msg)
 
-        if processor.ffmpeg_processor and processor.ffmpeg_processor.is_available():
+        if (
+            should_preserve_audio(processor.ai_params)
+            and processor.ffmpeg_processor
+            and processor.ffmpeg_processor.is_available()
+        ):
             processor.status.emit("🎵 正在合并原始音频...")
             processor.progress.emit(95)
 

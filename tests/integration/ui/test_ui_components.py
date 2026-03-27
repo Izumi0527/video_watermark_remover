@@ -22,6 +22,10 @@ from typing import Callable, Set, Tuple
 import pytest
 
 pytest.importorskip("PyQt6")
+try:
+    from PyQt6.QtWidgets import QApplication, QLabel, QWidget
+except ImportError as exc:  # pragma: no cover - 环境级依赖问题
+    pytest.skip(f"PyQt6 QtWidgets 不可用: {exc}", allow_module_level=True)
 
 from tests.integration.test_utilities import print_test_header, print_test_result
 
@@ -160,9 +164,12 @@ def test_advanced_parameters() -> None:
             "min_detection_area",
             "inpainting_method",
             "inpainting_radius",
-            "thread_count",
+            "worker_count",
             "enable_gpu",
-            "output_quality",
+            "output_format",
+            "compression_quality",
+            "add_suffix",
+            "add_timestamp",
             "preserve_audio",
         }
 
@@ -183,6 +190,30 @@ def test_advanced_parameters() -> None:
         _fail_test(test_name, f"高级参数测试失败: {exc}")
 
 
+def test_output_tab_format_hint_image_only() -> None:
+    """输出格式应明确提示仅图片生效，避免视频场景语义误导。"""
+    test_name = "输出格式提示语义"
+    print_test_header("测试输出参数提示语义")
+
+    try:
+        from app.ui.widgets.advanced.tabs.output_tab import OutputParametersTab
+
+        app = QApplication.instance() or QApplication([])
+        parent = QWidget()
+        tab = OutputParametersTab.create_tab(parent)
+        label_texts = [label.text() for label in tab.findChildren(QLabel)]
+
+        assert any("仅图片生效" in text for text in label_texts), (
+            "输出格式区域缺少“仅图片生效”提示，视频场景仍可能被误导"
+        )
+
+        # 防止被静态分析误判为未使用变量
+        assert app is not None
+        print_test_result(test_name, True, "输出格式区域包含“仅图片生效”提示")
+    except Exception as exc:
+        _fail_test(test_name, f"输出格式提示测试失败: {exc}")
+
+
 def run_ui_component_tests() -> Tuple[int, int, dict]:
     """运行所有UI组件测试。"""
     tests: Tuple[Tuple[str, Callable[[], None]], ...] = (
@@ -190,6 +221,7 @@ def run_ui_component_tests() -> Tuple[int, int, dict]:
         ("样式管理器", test_style_manager),
         ("用户偏好设置", test_user_preferences),
         ("高级参数结构", test_advanced_parameters),
+        ("输出格式提示语义", test_output_tab_format_hint_image_only),
     )
 
     passed = 0

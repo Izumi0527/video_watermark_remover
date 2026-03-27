@@ -199,7 +199,10 @@ class AIParamsBuilder:
         ai_params.update(performance_params)
 
         # 5. 输出参数
-        output_params = self._build_output_params(advanced_params)
+        output_params = self._build_output_params(
+            advanced_params,
+            input_file_path=input_file_path,
+        )
         ai_params.update(output_params)
 
         # 6. 手动选择区域转换
@@ -385,35 +388,36 @@ class AIParamsBuilder:
         )
         return runtime_config.to_batch_config()
 
-    def _build_output_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        构建输出参数（带验证）
+    def build_resolved_output_config(
+        self,
+        advanced_params: Dict[str, Any],
+        *,
+        input_file_path: Optional[str] = None,
+    ):
+        """从 UI 参数构建统一输出配置。"""
+        snapshot = AdvancedParamsSnapshot.from_dict(advanced_params)
+        return snapshot.resolve_output_config()
 
-        前端参数映射：
-        - output_format → output_format
-        - compression_quality (1-100) → compression_quality
-        - add_suffix → add_processed_suffix
-        - add_timestamp → add_timestamp
-        """
-        params = {}
-
-        # 输出格式（字符串，无需范围验证）
-        params["output_format"] = advanced_params.get("output_format", "保持原格式")
-
-        # 压缩质量（带验证）
-        raw_quality = advanced_params.get("compression_quality", 85)
-        params["compression_quality"] = self._validator.validate("compression_quality", raw_quality)
-
-        # 文件名后缀（布尔值，无需验证）
-        params["add_processed_suffix"] = advanced_params.get("add_suffix", True)
-
-        # 时间戳（布尔值，无需验证）
-        params["add_timestamp"] = advanced_params.get("add_timestamp", False)
-
-        self.logger.debug(
-            f"[输出参数] format={params['output_format']}, " f"quality={params['compression_quality']}"
+    def _build_output_params(
+        self,
+        advanced_params: Dict[str, Any],
+        *,
+        input_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """构建输出参数，并统一收敛到高级参数快照。"""
+        output_config = self.build_resolved_output_config(
+            advanced_params,
+            input_file_path=input_file_path,
         )
-
+        params = output_config.to_ai_params()
+        self.logger.debug(
+            "[输出参数] format=%s, quality=%s, suffix=%s, timestamp=%s, preserve_audio=%s",
+            params["output_format"],
+            params["compression_quality"],
+            params.get("add_suffix", params.get("add_processed_suffix")),
+            params["add_timestamp"],
+            params["preserve_audio"],
+        )
         return params
 
     def _convert_manual_selections(

@@ -1,5 +1,6 @@
 import cv2
 
+from .output_strategy import build_image_write_params
 from ..exceptions import FileReadError, FileSaveError, FrameProcessingError, ModelLoadError
 
 
@@ -66,7 +67,17 @@ def process_image(processor) -> None:
 
         processor.status.emit("💾 保存处理后的图片...")
 
-        if not cv2.imwrite(processor.output_path, processed_image):
+        write_params = build_image_write_params(
+            processor.output_path,
+            processor.ai_params,
+            cv2_module=cv2,
+        )
+        save_success = (
+            cv2.imwrite(processor.output_path, processed_image, write_params)
+            if write_params
+            else cv2.imwrite(processor.output_path, processed_image)
+        )
+        if not save_success:
             raise FileSaveError("保存图片失败", details=f"输出路径: {processor.output_path}")
 
         processor.progress.emit(100)

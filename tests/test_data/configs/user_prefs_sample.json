@@ -1,45 +1,54 @@
 {
-  "theme": "dark",
-  "language": "zh_CN",
-  "auto_save": true,
-  "output_quality": "high",
-  "backup_count": 5,
-  "memory_limit": 2048,
-  "gpu_acceleration": false,
-  "temp_cleanup": true,
-  "log_level": "INFO",
-  "recent_files": [
-    "C:\\Users\\Test\\Videos\\sample1.mp4",
-    "C:\\Users\\Test\\Videos\\sample2.avi",
-    "C:\\Users\\Test\\Videos\\sample3.mov"
-  ],
-  "output_settings": {
-    "format": "mp4",
-    "codec": "h264",
-    "bitrate": "5000k",
-    "fps": 30
+  "ui": {
+    "theme": "dark",
+    "window_geometry": [120, 80, 1600, 900],
+    "window_maximized": false,
+    "splitter_sizes": [620, 380],
+    "active_tab": 0
   },
-  "ai_settings": {
-    "confidence_threshold": 0.8,
-    "processing_mode": "quality",
-    "model_version": "latest"
+  "processing": {
+    "auto_detect": true,
+    "detection_sensitivity": 0.65,
+    "default_inpainting_method": "auto"
   },
-  "ui_settings": {
-    "window_geometry": {
-      "width": 1200,
-      "height": 800,
-      "x": 100,
-      "y": 100
-    },
-    "panel_layout": "horizontal",
-    "show_preview": true,
-    "show_logs": true
+  "paths": {
+    "last_input_dir": "C:/Users/Test/Videos",
+    "last_output_dir": "C:/Users/Test/Videos/output",
+    "recent_files": [
+      "C:/Users/Test/Videos/sample1.mp4",
+      "C:/Users/Test/Videos/sample2.avi",
+      "C:/Users/Test/Videos/sample3.mov"
+    ],
+    "ffmpeg_path": "ffmpeg"
   },
-  "advanced_settings": {
-    "parallel_processing": true,
-    "max_concurrent_jobs": 2,
-    "temp_directory": "temp",
-    "cache_models": true,
-    "experimental_features": false
+  "advanced": {
+    "max_threads": 0,
+    "cache_size_mb": 768,
+    "enable_gpu": true,
+    "log_level": "INFO",
+    "auto_save_interval": 300
+  },
+  "advanced_params": {
+    "processing_mode": "pipeline",
+    "worker_count": 4,
+    "enable_gpu": true,
+    "gpu_memory_limit_mb": 2048,
+    "enable_cache": true,
+    "cache_size_mb": 768,
+    "batch_max_concurrent_files": 2,
+    "batch_auto_retry_failed": true,
+    "batch_max_retry_count": 2,
+    "output_format": "jpg",
+    "compression_quality": 88,
+    "add_suffix": true,
+    "add_timestamp": false,
+    "preserve_audio": true
+  },
+  "batch": {
+    "max_concurrent_files": 2,
+    "auto_retry_failed": true,
+    "max_retry_count": 2,
+    "delete_temp_files": true,
+    "show_progress_details": true
   }
 }

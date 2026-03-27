@@ -20,3 +20,8 @@ def test_advanced_params_defaults_are_single_source_of_truth() -> None:
     assert snapshot.batch_max_concurrent_files == 1
     assert snapshot.batch_auto_retry_failed is True
     assert snapshot.batch_max_retry_count == 3
+    assert snapshot.output_format == "keep"
+    assert snapshot.compression_quality == 85
+    assert snapshot.add_suffix is True
+    assert snapshot.add_timestamp is False
+    assert snapshot.preserve_audio is True

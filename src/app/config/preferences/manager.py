@@ -1,5 +1,6 @@
 """用户偏好设置统一管理接口."""
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -111,23 +112,38 @@ class UserPreferencesManager:
 
     def get_advanced_params_snapshot(self) -> AdvancedParamsSnapshot:
         """获取统一高级性能参数快照，并兼容旧结构迁移。"""
-        current_preferences = self.get_advanced_params_preferences()
-        if current_preferences == PreferencesDefaults.get_advanced_params_defaults():
-            current_preferences = {}
+        current_preferences = self.preferences.get("advanced_params")
+        if isinstance(current_preferences, dict) and (
+            current_preferences != PreferencesDefaults.get_advanced_params_defaults()
+            or self._has_persisted_advanced_params()
+        ):
+            snapshot = AdvancedParamsSnapshot.from_dict(current_preferences)
+            self.preferences["advanced_params"] = snapshot.to_dict()
+            return snapshot
 
         migrated = migrate_legacy_performance_preferences(
-            current=current_preferences,
+            current=None,
             advanced=self.get_advanced_preferences(),
             batch=self.get_batch_preferences(),
+            processing=self.get_processing_preferences(),
         )
         snapshot = AdvancedParamsSnapshot.from_dict(migrated)
-
-        if "advanced_params" not in self.preferences or not isinstance(
-            self.preferences.get("advanced_params"), dict
-        ):
-            self.preferences["advanced_params"] = snapshot.to_dict()
-
+        self.preferences["advanced_params"] = snapshot.to_dict()
         return snapshot
+
+    def _has_persisted_advanced_params(self) -> bool:
+        """判断磁盘上的用户偏好是否显式保存过 advanced_params。"""
+        if not self.storage.preferences_file_exists():
+            return False
+
+        try:
+            with open(self.storage.preferences_file, "r", encoding="utf-8") as file:
+                loaded_preferences = json.load(file)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("读取偏好文件失败，按未持久化 advanced_params 处理: %s", exc)
+            return False
+
+        return isinstance(loaded_preferences.get("advanced_params"), dict)
 
     def update_window_geometry(
         self, x: int, y: int, width: int, height: int, maximized: bool = False

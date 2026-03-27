@@ -7,6 +7,8 @@ from typing import Any, List, Optional, Tuple
 
 import cv2
 
+from ..output_strategy import create_video_writer
+
 
 def frame_writer_worker(  # noqa: C901
     result_queue: queues.Queue,
@@ -38,7 +40,7 @@ def frame_writer_worker(  # noqa: C901
     logger = logging.getLogger(__name__)
 
     # 缓冲区配置
-    max_buffer_size = max(10, int(video_params.get("writer_buffer_size", 50) or 50))
+    max_buffer_size = max(1, int(video_params.get("writer_buffer_size", 50) or 50))
     MIN_SLEEP_MS = 1  # 最小休眠时间
     MAX_SLEEP_MS = 20  # 最大休眠时间
 
@@ -74,18 +76,18 @@ def frame_writer_worker(  # noqa: C901
         width = video_params["width"]
         height = video_params["height"]
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out, selected_codec = create_video_writer(
+            output_path,
+            fps,
+            (width, height),
+            cv2_module=cv2,
+        )
 
-        if not out.isOpened():
-            logger.warning("mp4v codec failed, trying XVID")
-            fourcc = cv2.VideoWriter_fourcc(*"XVID")
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-            if not out.isOpened():
-                error_msg = f"Failed to create video writer (tried mp4v and XVID): {output_path}"
-                logger.error(error_msg)
-                return (False, error_msg)
+        if out is None or not out.isOpened():
+            error_msg = f"Failed to create video writer: {output_path}"
+            logger.error(error_msg)
+            return (False, error_msg)
+        logger.info("Frame writer codec selected: %s", selected_codec)
 
         logger.info(f"Frame writer started: writing to {output_path}")
 
@@ -155,7 +157,7 @@ def frame_writer_worker(  # noqa: C901
         if next_frame_index < total_frames:
             warning_msg = f"Warning: Only {next_frame_index}/{total_frames} frames written"
             logger.warning(warning_msg)
-            return (True, warning_msg)
+            return (False, warning_msg)
 
         return (True, None)
 

@@ -32,6 +32,7 @@ class BatchFileManager:
         """
         self.parent = parent_widget
         self.queue_manager = FileQueueManager()
+        self.ai_params = {}
 
     def show_add_files_dialog(self) -> List[str]:
         """
@@ -49,6 +50,10 @@ class BatchFileManager:
             return selected_files
         return []
 
+    def set_ai_params(self, ai_params) -> None:
+        """同步当前输出参数，供队列预生成输出路径。"""
+        self.ai_params = dict(ai_params or {})
+
     def add_file_to_queue(self, input_path: str) -> bool:
         """
         将文件添加到队列
@@ -63,10 +68,6 @@ class BatchFileManager:
             QMessageBox.warning(self.parent, "警告", f"文件不存在: {input_path}")
             return False
 
-        # 生成输出路径
-        name, ext = os.path.splitext(input_path)
-        output_path = f"{name}_processed{ext}"
-
         # 检查是否已经存在
         queue = self.queue_manager.get_queue()
         for item in queue:
@@ -77,7 +78,7 @@ class BatchFileManager:
                 return False
 
         # 添加到队列
-        self.queue_manager.add_file(input_path, output_path)
+        self.queue_manager.add_file(input_path, ai_params=self.ai_params)
         return True
 
     def add_files_batch(self, file_paths: List[str]) -> int:
@@ -220,3 +221,4 @@ class BatchFileManager:
             "waiting": self.queue_manager.get_pending_count(),
             "processing": self.queue_manager.get_processing_count(),
         }
+

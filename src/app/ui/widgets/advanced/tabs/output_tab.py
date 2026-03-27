@@ -32,6 +32,9 @@ class OutputParametersTab:
         parent_widget.output_format_combo = QComboBox()
         parent_widget.output_format_combo.addItems(["保持原格式", "JPG", "PNG", "BMP", "TIFF"])
         format_layout.addRow("输出格式:", parent_widget.output_format_combo)
+        format_hint_label = QLabel("说明：仅图片生效，视频保持原容器。")
+        format_hint_label.setWordWrap(True)
+        format_layout.addRow("", format_hint_label)
 
         layout.addWidget(format_group)
 
@@ -64,6 +67,17 @@ class OutputParametersTab:
         filename_layout.addWidget(parent_widget.add_timestamp_check)
 
         layout.addWidget(filename_group)
+
+        audio_group = QGroupBox("视频音频")
+        audio_layout = QVBoxLayout(audio_group)
+
+        parent_widget.preserve_audio_check = QCheckBox("保留原始音频（仅视频生效）")
+        parent_widget.preserve_audio_check.setChecked(True)
+        audio_layout.addWidget(parent_widget.preserve_audio_check)
+
+        layout.addWidget(audio_group)
         layout.addStretch()
 
         return tab
+
+

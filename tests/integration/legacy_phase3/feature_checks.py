@@ -186,9 +186,12 @@ def test_advanced_parameters():
             "min_detection_area",
             "inpainting_method",
             "inpainting_radius",
-            "thread_count",
+            "worker_count",
             "enable_gpu",
-            "output_quality",
+            "output_format",
+            "compression_quality",
+            "add_suffix",
+            "add_timestamp",
             "preserve_audio",
         }
 

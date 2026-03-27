@@ -9,6 +9,8 @@ from typing import Any, Optional, Tuple
 
 import cv2
 
+from ..output_strategy import create_video_writer
+
 AIHandler = None
 
 
@@ -92,21 +94,21 @@ def process_video_chunk(
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out, selected_codec = create_video_writer(
+            output_path,
+            fps,
+            (width, height),
+            cv2_module=cv2,
+        )
 
-        if not out.isOpened():
-            logger.warning(f"Chunk {chunk_id}: mp4v codec failed, trying XVID")
-            fourcc = cv2.VideoWriter_fourcc(*"XVID")
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-            if not out.isOpened():
-                cap.release()
-                return (
-                    None,
-                    False,
-                    f"无法创建输出文件（尝试了 mp4v 和 XVID 编码器）: {output_path}",
-                )
+        if out is None or not out.isOpened():
+            cap.release()
+            return (
+                None,
+                False,
+                f"无法创建输出文件: {output_path}",
+            )
+        logger.info("Chunk %s: output codec=%s", chunk_id, selected_codec)
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         total_frames_in_chunk = end_frame - start_frame

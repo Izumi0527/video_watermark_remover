@@ -20,10 +20,11 @@ from typing import Any, List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # 导入配置
-from ..config.advanced_params import ResolvedPerformanceConfig
+from ..config.advanced_params import AdvancedParamsSnapshot, ResolvedPerformanceConfig
 from ..config.styles.colors import DEFAULT_THEME
 
 # 导入视频处理线程
+from ..core.video.output_strategy import resolve_output_path
 from ..core.video.thread import VideoProcessorThread
 
 # 导入帧提取工具
@@ -301,14 +302,6 @@ class SignalHandler(QObject):
                 self._build_start_processing_status_message(self.input_file_path)
             )
 
-            # 准备输出路径
-            import os
-
-            input_dir = os.path.dirname(self.input_file_path)
-            input_filename = os.path.basename(self.input_file_path)
-            input_name, input_ext = os.path.splitext(input_filename)
-            output_path = os.path.join(input_dir, f"{input_name}_processed{input_ext}")
-
             # 获取高级参数
             advanced_params = {}
             if hasattr(self.control_panel, "get_advanced_parameters"):
@@ -326,6 +319,7 @@ class SignalHandler(QObject):
                 input_file_path=self.input_file_path,
                 is_batch=False,
             )
+            output_path = resolve_output_path(self.input_file_path, ai_params)
 
             # 使用预加载的AI模型 (如果可用)
             preloaded_ai_handler = None
@@ -738,40 +732,42 @@ class SignalHandler(QObject):
         if hasattr(self.control_panel, "get_advanced_parameters"):
             advanced_params = self.control_panel.get_advanced_parameters()
 
-        # 构建AI参数
         params_builder = AIParamsBuilder()
-        first_input_path = None
-        if queue:
-            first_item = queue[0]
-            if isinstance(first_item, dict):
-                first_input_path = first_item.get("input_path")
-        ai_params = params_builder.build_from_ui(
-            preferences=self.preferences,
-            advanced_params=advanced_params,
-            manual_selections=self.manual_selections,
-            input_file_path=first_input_path,
-            is_batch=True,
-        )
-        resolved_runtime_config = self._resolve_runtime_performance_config(
+        (
+            ai_params,
+            file_ai_params_by_index,
+            file_runtime_performance_by_index,
+            batch_config,
+            runtime_config,
+        ) = self._build_batch_runtime_payloads(
+            queue=queue,
             params_builder=params_builder,
             advanced_params=advanced_params,
-            input_file_path=first_input_path,
-            is_batch=True,
-            ai_params=ai_params,
         )
-        resolved_batch_config = resolved_runtime_config.to_batch_config()
-        max_concurrent_files = int(resolved_batch_config.get("max_concurrent_files", 1) or 1)
-        auto_retry_failed = bool(resolved_batch_config.get("auto_retry_failed", True))
-        max_retry_count = int(resolved_batch_config.get("max_retry_count", 3) or 0)
-        batch_config: dict[str, Any] = {
-            "max_concurrent_files": max_concurrent_files,
-            "auto_retry_failed": auto_retry_failed,
-            "max_retry_count": max_retry_count,
-        }
+        for index, file_runtime_performance in file_runtime_performance_by_index.items():
+            self.file_queue_manager.update_file_runtime_performance(index, file_runtime_performance)
+        for index, file_ai_params in file_ai_params_by_index.items():
+            queue_item = self.file_queue_manager.get_file_info(index) or {}
+            input_path = str(queue_item.get("input_path", "") or "")
+            if not input_path:
+                continue
+            self.file_queue_manager.update_file_output_path(
+                index,
+                resolve_output_path(input_path, file_ai_params),
+            )
+            self.file_queue_manager.update_file_output_config(
+                index,
+                self._build_output_config_snapshot(file_ai_params),
+            )
+        queue = self.file_queue_manager.get_queue()
+
+        max_concurrent_files = int(batch_config.get("max_concurrent_files", 1) or 1)
+        auto_retry_failed = bool(batch_config.get("auto_retry_failed", True))
+        max_retry_count = int(batch_config.get("max_retry_count", 3) or 0)
         self._remember_last_batch_snapshot(
             ai_params=ai_params,
             batch_config=batch_config,
-            runtime_config=resolved_runtime_config.to_manifest_dict(),
+            runtime_config=runtime_config,
         )
 
         # 获取预加载的AI模型
@@ -783,6 +779,7 @@ class SignalHandler(QObject):
         self.batch_processor = BatchProcessorThread(
             queue=queue,
             ai_params=ai_params,
+            file_ai_params_by_index=file_ai_params_by_index,
             config=self.main_window.config if self.main_window else None,
             preloaded_ai_handler=preloaded_ai_handler,
             max_concurrent_files=max_concurrent_files,
@@ -930,12 +927,23 @@ class SignalHandler(QObject):
 
     def handle_file_remove(self, index: int):
         """处理移除文件请求"""
+        if (
+            self.batch_processor is not None
+            and hasattr(self.batch_processor, "isRunning")
+            and self.batch_processor.isRunning()
+            and not getattr(self.batch_processor, "should_stop", False)
+        ):
+            self.log_panel.add_warning_log("批量处理中无法移除队列项，请先停止任务")
+            self.status_updated.emit("批量处理中无法移除队列项")
+            return
+
         self.file_queue_manager.remove_file(index)
 
         queue = self.file_queue_manager.get_queue()
         if not queue:
             self.handle_queue_clear()
         else:
+            self._clear_last_batch_snapshot()
             self._update_file_queue_display()
             self.status_updated.emit(f"队列中还有 {len(queue)} 个文件")
 
@@ -1056,6 +1064,8 @@ class SignalHandler(QObject):
         ai_params_generated_at: Optional[str] = None
         batch_config: Optional[dict] = None
         runtime_config: Optional[dict] = None
+        computed_item_runtime_performance: dict[int, dict[str, Any]] = {}
+        computed_item_ai_params: dict[int, dict[str, Any]] = {}
 
         if self.batch_processor is not None and hasattr(self.batch_processor, "ai_params"):
             run_ai_params = dict(getattr(self.batch_processor, "ai_params", {}) or {})
@@ -1066,10 +1076,12 @@ class SignalHandler(QObject):
                 "auto_retry_failed": getattr(self.batch_processor, "auto_retry_failed", None),
                 "max_retry_count": getattr(self.batch_processor, "max_retry_count", None),
             }
-            runtime_config = self._build_runtime_config_snapshot(
-                ai_params=run_ai_params,
-                batch_config=batch_config,
-            )
+            runtime_config = dict(self._last_batch_runtime_config or {})
+            if not runtime_config:
+                runtime_config = self._build_runtime_config_snapshot(
+                    ai_params=run_ai_params,
+                    batch_config=batch_config,
+                )
         elif self._last_batch_ai_params is not None:
             run_ai_params = dict(self._last_batch_ai_params)
             ai_params_source = "last_batch"
@@ -1087,27 +1099,18 @@ class SignalHandler(QObject):
                 advanced_params = {}
                 if hasattr(self.control_panel, "get_advanced_parameters"):
                     advanced_params = self.control_panel.get_advanced_parameters()
-                first_input_path = None
-                first_item = queue[0] if queue else None
-                if isinstance(first_item, dict):
-                    first_input_path = first_item.get("input_path")
                 params_builder = AIParamsBuilder()
-                run_ai_params = params_builder.build_from_ui(
-                    preferences=self.preferences,
-                    advanced_params=advanced_params,
-                    manual_selections=self.manual_selections,
-                    input_file_path=first_input_path,
-                    is_batch=True,
-                )
-                resolved_runtime_config = self._resolve_runtime_performance_config(
+                (
+                    run_ai_params,
+                    computed_item_ai_params,
+                    computed_item_runtime_performance,
+                    batch_config,
+                    runtime_config,
+                ) = self._build_batch_runtime_payloads(
+                    queue=queue,
                     params_builder=params_builder,
                     advanced_params=advanced_params,
-                    input_file_path=first_input_path,
-                    is_batch=True,
-                    ai_params=run_ai_params,
                 )
-                batch_config = resolved_runtime_config.to_batch_config()
-                runtime_config = resolved_runtime_config.to_manifest_dict()
                 ai_params_source = "computed_at_export"
                 ai_params_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             except Exception as exc:  # noqa: BLE001
@@ -1161,15 +1164,31 @@ class SignalHandler(QObject):
                 status_value = status.value
             else:
                 status_value = str(status)
+            item_runtime_performance = item.get("runtime_performance")
+            if item_runtime_performance is None:
+                item_runtime_performance = computed_item_runtime_performance.get(idx)
+            item_output_config = item.get("output_config")
+            if item_output_config is None:
+                item_ai_params = computed_item_ai_params.get(idx)
+                if item_ai_params:
+                    item_output_config = self._build_output_config_snapshot(item_ai_params)
+            item_output_path = item.get("output_path", "")
+            if ai_params_source == "computed_at_export":
+                item_ai_params = computed_item_ai_params.get(idx)
+                input_path = str(item.get("input_path", "") or "")
+                if input_path and item_ai_params:
+                    item_output_path = resolve_output_path(input_path, item_ai_params)
             manifest_items.append(
                 {
                     "index": idx,
                     "input_path": item.get("input_path", ""),
-                    "output_path": item.get("output_path", ""),
+                    "output_path": item_output_path,
                     "status": status_value,
                     "progress": int(item.get("progress", 0) or 0),
                     "error_message": item.get("error_message", ""),
                     "processing_details": self._make_json_safe(item.get("processing_details")),
+                    "runtime_performance": self._make_json_safe(item_runtime_performance),
+                    "output_config": self._make_json_safe(item_output_config),
                 }
             )
 
@@ -1223,6 +1242,221 @@ class SignalHandler(QObject):
         self._last_batch_ai_params_generated_at = None
         self._last_batch_config = None
         self._last_batch_runtime_config = None
+
+    def _build_file_runtime_payload(
+        self,
+        *,
+        params_builder: Any,
+        advanced_params: dict,
+        input_file_path: Optional[str],
+    ) -> tuple[dict[str, Any], ResolvedPerformanceConfig]:
+        """构建单文件实际运行时参数与统一性能快照。"""
+        ai_params = params_builder.build_from_ui(
+            preferences=self.preferences,
+            advanced_params=advanced_params,
+            manual_selections=self.manual_selections,
+            input_file_path=input_file_path,
+            is_batch=True,
+        )
+        runtime_config = self._resolve_runtime_performance_config(
+            params_builder=params_builder,
+            advanced_params=advanced_params,
+            input_file_path=input_file_path,
+            is_batch=True,
+            ai_params=ai_params,
+        )
+        return (ai_params, runtime_config)
+
+    @staticmethod
+    def _build_output_config_snapshot(ai_params: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """从运行时参数中提取可导出的输出配置快照。"""
+        if not ai_params:
+            return None
+        snapshot = AdvancedParamsSnapshot.from_dict(ai_params)
+        return snapshot.resolve_output_config().to_ai_params()
+
+    @staticmethod
+    def _summarize_mixed_values(values: list[Any], *, mixed_value: Any = None) -> Any:
+        """若文件级值不一致，则返回 mixed_value。"""
+        if not values:
+            return None
+        first_value = values[0]
+        if all(value == first_value for value in values[1:]):
+            return first_value
+        return mixed_value
+
+    def _build_batch_ai_params_summary(
+        self,
+        *,
+        file_ai_params_by_index: dict[int, dict[str, Any]],
+        runtime_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """为 manifest 与批次级兜底保留一份批次摘要参数。"""
+        if not file_ai_params_by_index:
+            return {}
+
+        ordered_file_ai_params = [
+            dict(file_ai_params_by_index[index]) for index in sorted(file_ai_params_by_index)
+        ]
+        summary = dict(ordered_file_ai_params[0])
+        legacy_add_suffix = summary.pop("add_processed_suffix", None)
+        if "add_suffix" not in summary and legacy_add_suffix is not None:
+            summary["add_suffix"] = legacy_add_suffix
+
+        if len(ordered_file_ai_params) == 1:
+            return summary
+
+        summary["processing_mode"] = self._summarize_mixed_values(
+            [params.get("processing_mode") for params in ordered_file_ai_params],
+            mixed_value="mixed",
+        )
+        summary["resolved_processing_mode"] = runtime_config.get("resolved_processing_mode")
+        summary["enable_multiprocess"] = self._summarize_mixed_values(
+            [params.get("enable_multiprocess") for params in ordered_file_ai_params],
+        )
+        summary["use_pipeline"] = self._summarize_mixed_values(
+            [params.get("use_pipeline") for params in ordered_file_ai_params],
+        )
+        summary["num_processes"] = self._summarize_mixed_values(
+            [params.get("num_processes") for params in ordered_file_ai_params],
+        )
+        summary["gpu_memory_mb"] = self._summarize_mixed_values(
+            [params.get("gpu_memory_mb") for params in ordered_file_ai_params],
+        )
+        summary["enable_cache"] = self._summarize_mixed_values(
+            [params.get("enable_cache") for params in ordered_file_ai_params],
+        )
+        summary["cache_size_mb"] = self._summarize_mixed_values(
+            [params.get("cache_size_mb") for params in ordered_file_ai_params],
+        )
+        summary["output_format"] = self._summarize_mixed_values(
+            [params.get("output_format") for params in ordered_file_ai_params],
+            mixed_value="mixed",
+        )
+        summary["compression_quality"] = self._summarize_mixed_values(
+            [params.get("compression_quality") for params in ordered_file_ai_params],
+        )
+        summary["add_suffix"] = self._summarize_mixed_values(
+            [params.get("add_suffix", params.get("add_processed_suffix")) for params in ordered_file_ai_params],
+        )
+        summary["add_timestamp"] = self._summarize_mixed_values(
+            [params.get("add_timestamp") for params in ordered_file_ai_params],
+        )
+        summary["preserve_audio"] = self._summarize_mixed_values(
+            [params.get("preserve_audio") for params in ordered_file_ai_params],
+        )
+        return summary
+
+    def _build_batch_runtime_summary(
+        self,
+        file_runtime_performance: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """将文件级运行时配置汇总为批次摘要。"""
+        if not file_runtime_performance:
+            return {}
+
+        summary = dict(file_runtime_performance[0])
+        summary["resolution_scope"] = "file_level"
+
+        string_fields = {
+            "requested_processing_mode": "mixed",
+            "resolved_processing_mode": "mixed",
+        }
+        scalar_fields = (
+            "worker_count",
+            "enable_multiprocess",
+            "use_pipeline",
+            "gpu_memory_budget_mb",
+            "enable_cache",
+            "cache_size_mb",
+            "batch_max_concurrent_files",
+            "batch_auto_retry_failed",
+            "batch_max_retry_count",
+        )
+
+        for key, mixed_value in string_fields.items():
+            summary[key] = self._summarize_mixed_values(
+                [config.get(key) for config in file_runtime_performance],
+                mixed_value=mixed_value,
+            )
+
+        for key in scalar_fields:
+            summary[key] = self._summarize_mixed_values(
+                [config.get(key) for config in file_runtime_performance]
+            )
+
+        distinct_requested_modes = sorted(
+            {
+                str(config.get("requested_processing_mode"))
+                for config in file_runtime_performance
+                if config.get("requested_processing_mode") is not None
+            }
+        )
+        if len(distinct_requested_modes) > 1:
+            summary["distinct_requested_processing_modes"] = distinct_requested_modes
+
+        distinct_resolved_modes = sorted(
+            {
+                str(config.get("resolved_processing_mode"))
+                for config in file_runtime_performance
+                if config.get("resolved_processing_mode") is not None
+            }
+        )
+        if len(distinct_resolved_modes) > 1:
+            summary["distinct_resolved_processing_modes"] = distinct_resolved_modes
+
+        return summary
+
+    def _build_batch_runtime_payloads(
+        self,
+        *,
+        queue: list[dict[str, Any]],
+        params_builder: Any,
+        advanced_params: dict,
+    ) -> tuple[
+        dict[str, Any],
+        dict[int, dict[str, Any]],
+        dict[int, dict[str, Any]],
+        dict[str, Any],
+        dict[str, Any],
+    ]:
+        """为批处理统一构建批次摘要、文件级参数与文件级运行时快照。"""
+        file_ai_params_by_index: dict[int, dict[str, Any]] = {}
+        file_runtime_performance_by_index: dict[int, dict[str, Any]] = {}
+
+        for index, item in enumerate(queue):
+            input_file_path = item.get("input_path") if isinstance(item, dict) else None
+            ai_params, runtime_config = self._build_file_runtime_payload(
+                params_builder=params_builder,
+                advanced_params=advanced_params,
+                input_file_path=input_file_path,
+            )
+            file_ai_params_by_index[index] = dict(ai_params)
+            file_runtime_performance_by_index[index] = runtime_config.to_manifest_dict()
+
+        ordered_runtime_performance = [
+            file_runtime_performance_by_index[index]
+            for index in sorted(file_runtime_performance_by_index)
+        ]
+        batch_runtime_config = self._build_batch_runtime_summary(ordered_runtime_performance)
+        batch_ai_params = self._build_batch_ai_params_summary(
+            file_ai_params_by_index=file_ai_params_by_index,
+            runtime_config=batch_runtime_config,
+        )
+        batch_config = {
+            "max_concurrent_files": int(
+                batch_runtime_config.get("batch_max_concurrent_files", 1) or 1
+            ),
+            "auto_retry_failed": bool(batch_runtime_config.get("batch_auto_retry_failed", True)),
+            "max_retry_count": int(batch_runtime_config.get("batch_max_retry_count", 3) or 0),
+        }
+        return (
+            batch_ai_params,
+            file_ai_params_by_index,
+            file_runtime_performance_by_index,
+            batch_config,
+            batch_runtime_config,
+        )
 
     def _resolve_runtime_performance_config(
         self,
