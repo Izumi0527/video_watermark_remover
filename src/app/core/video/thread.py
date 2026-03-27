@@ -18,7 +18,7 @@ from ..exceptions import ModelLoadError, UnsupportedFormatError
 AIHandler = None
 FFmpegAudioProcessor = None
 
-AI_HANDLER_REFRESH_KEYS = (
+AI_HANDLER_RUNTIME_SIGNATURE_KEYS = (
     "device",
     "use_gpu_inpainting",
     "requested_inpainting_backend",
@@ -27,6 +27,7 @@ AI_HANDLER_REFRESH_KEYS = (
     "inpaint_radius",
     "quality_level",
     "min_area_pixels",
+    "gpu_memory_mb",
     "inpainting_model_path",
     "lama_model_path",
     "lama_model_dir",
@@ -104,7 +105,14 @@ def _inject_inpainting_model_path(
 def _ai_handler_needs_refresh(ai_handler: Any, ai_params: Dict[str, Any]) -> bool:
     """判断预加载 AIHandler 是否需要因关键参数变化而重建。"""
     existing_params = getattr(ai_handler, "ai_params", {}) or {}
-    return any(existing_params.get(key) != ai_params.get(key) for key in AI_HANDLER_REFRESH_KEYS)
+    return _build_ai_handler_runtime_signature(
+        existing_params
+    ) != _build_ai_handler_runtime_signature(ai_params)
+
+
+def _build_ai_handler_runtime_signature(ai_params: Dict[str, Any]) -> Dict[str, Any]:
+    """提取会影响 AIHandler 加载与预算行为的运行时签名。"""
+    return {key: ai_params.get(key) for key in AI_HANDLER_RUNTIME_SIGNATURE_KEYS}
 
 
 def _process_image_impl(processor) -> None:

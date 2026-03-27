@@ -21,31 +21,88 @@ class QueueBudget:
     frame_queue_size: int
     result_queue_size: int
     writer_buffer_size: int
+    requested_worker_count: int
+    effective_worker_count: int
+    pipeline_viable: bool
+    estimated_total_memory_mb: float
+    minimum_viable_memory_mb: float
 
 
 def calculate_runtime_queue_budget(
     enable_cache: bool,
     cache_size_mb: int,
     frame_shape: tuple[int, int],
+    requested_worker_count: int = 1,
 ) -> QueueBudget:
     """根据缓存预算推导流水线队列与写入缓冲大小。"""
-    if not enable_cache:
-        return QueueBudget(frame_queue_size=10, result_queue_size=20, writer_buffer_size=20)
-
     height, width = frame_shape[:2]
     frame_bytes = max(1, int(height) * int(width) * 3)
     frame_mb = max(1.0, frame_bytes / (1024 * 1024))
-    normalized_cache_mb = max(64, int(cache_size_mb))
-    approx_frames = max(4, int(normalized_cache_mb / frame_mb))
+    normalized_cache_mb = max(64, int(cache_size_mb)) if enable_cache else 64
+    normalized_requested_workers = max(1, int(requested_worker_count or 1))
 
-    frame_queue_size = max(10, min(80, approx_frames // 8))
-    result_queue_size = max(20, min(160, approx_frames // 4))
-    writer_buffer_size = max(20, min(160, approx_frames // 4))
+    # 预算不仅要覆盖三个显式缓冲区，还要覆盖：
+    # - 读取线程手上的 1 帧
+    # - 每个 worker 在处理中的“输入帧 + 输出帧”两份在途数据
+    reader_inflight_slots = 1
+    worker_inflight_slots_per_worker = 2
+    minimum_queue_slots = 3  # reader/result/writer 每段至少保留 1 个槽位
+    minimum_viable_slots = (
+        reader_inflight_slots + worker_inflight_slots_per_worker + minimum_queue_slots
+    )
+    minimum_viable_memory_mb = minimum_viable_slots * frame_mb
+
+    total_buffer_slots = max(1, int(normalized_cache_mb / frame_mb))
+    total_buffer_slots = min(total_buffer_slots, 240)
+
+    available_worker_slots = total_buffer_slots - reader_inflight_slots - minimum_queue_slots
+    if available_worker_slots < worker_inflight_slots_per_worker:
+        return QueueBudget(
+            frame_queue_size=0,
+            result_queue_size=0,
+            writer_buffer_size=0,
+            requested_worker_count=normalized_requested_workers,
+            effective_worker_count=0,
+            pipeline_viable=False,
+            estimated_total_memory_mb=0.0,
+            minimum_viable_memory_mb=minimum_viable_memory_mb,
+        )
+
+    effective_worker_count = min(
+        normalized_requested_workers,
+        max(1, available_worker_slots // worker_inflight_slots_per_worker),
+    )
+    reserved_inflight_slots = reader_inflight_slots + (
+        effective_worker_count * worker_inflight_slots_per_worker
+    )
+    distributable_queue_slots = max(
+        minimum_queue_slots, total_buffer_slots - reserved_inflight_slots
+    )
+
+    frame_queue_size = max(1, min(80, distributable_queue_slots // 4))
+    remaining_slots = max(2, distributable_queue_slots - frame_queue_size)
+    result_queue_size = max(1, min(160, remaining_slots // 2))
+    writer_buffer_size = max(
+        1,
+        min(160, distributable_queue_slots - frame_queue_size - result_queue_size),
+    )
+    total_estimated_slots = (
+        reader_inflight_slots
+        + (effective_worker_count * worker_inflight_slots_per_worker)
+        + frame_queue_size
+        + result_queue_size
+        + writer_buffer_size
+    )
 
     return QueueBudget(
         frame_queue_size=frame_queue_size,
         result_queue_size=result_queue_size,
         writer_buffer_size=writer_buffer_size,
+        requested_worker_count=normalized_requested_workers,
+        effective_worker_count=effective_worker_count,
+        pipeline_viable=True,
+        estimated_total_memory_mb=(total_estimated_slots * frame_mb),
+        minimum_viable_memory_mb=minimum_viable_memory_mb,
     )
 
 
