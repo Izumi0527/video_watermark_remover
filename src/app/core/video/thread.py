@@ -27,6 +27,7 @@ FFmpegAudioProcessor = None
 AI_HANDLER_RUNTIME_SIGNATURE_KEYS = (
     "device",
     "use_gpu_inpainting",
+    "conf_threshold",
     "requested_inpainting_backend",
     "opencv_inpainting_method",
     "inpainting_algorithm",

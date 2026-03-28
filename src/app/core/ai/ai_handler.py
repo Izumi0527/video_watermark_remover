@@ -13,7 +13,7 @@ AI处理协调器 - 主模块
 
 import logging
 import time
-from typing import Optional, Tuple, cast
+from typing import Any, Optional, Tuple, cast
 
 import cv2
 import numpy as np
@@ -307,258 +307,409 @@ class AIHandler:
             return frame, {"error": "Invalid input frame"}
 
         try:
-            self.last_inpainting_method_used = None
-            self.last_inpainting_backend = None
-            self.last_gpu_inpainting_profile_used = None
-            self.last_gpu_inpainting_retry_info = None
-            self.last_gpu_inpainting_oom_retry_used = False
-            self.last_gpu_inpainting_retry_count = 0
-            self.last_gpu_inpainting_retry_profile_used = None
-            requested_backend = self._derive_requested_inpainting_backend()
-            processing_info = {
-                "original_shape": frame.shape,
-                "detection_method": None,
-                "inpainting_method": None,
-                "inpainting_backend": None,
-                "requested_inpainting_backend": requested_backend,
-                "actual_inpainting_backend": None,
-                "inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
-                "watermark_areas_found": 0,
-                "processing_time": 0,
-                "preprocessing_applied": [],
-                "postprocessing_applied": [],
-                "gpu_inpainting_requested": requested_backend in {"legacy_unet", "lama", "mat"},
-                "gpu_inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
-                "configured_inpainting_asset_ref": getattr(
-                    self, "configured_inpainting_asset_ref", None
-                ),
-                "loaded_inpainting_asset_ref": getattr(self, "loaded_inpainting_asset_ref", None),
-                "configured_inpainting_model_path": self.configured_inpainting_model_path,
-                "loaded_inpainting_model_path": self.loaded_inpainting_model_path,
-                "gpu_inpainting_profile": None,
-                "gpu_inpainting_retry": None,
-                "gpu_inpainting_oom_retry_used": False,
-                "gpu_inpainting_retry_count": 0,
-                "gpu_inpainting_retry_profile": None,
-                "requested_quality_level": self.quality_level,
-                "effective_quality_level": None,
-                "effective_inpaint_radius": None,
-                "gpu_inpainting_runtime_error": None,
-                "device": self.device,
-            }
-
-            start_time = time.time()
-            mask = None
-
-            # 保存原始帧（用于后处理混合）
-            original_frame = frame.copy()
-
-            # ====================================================================
-            # 步骤0: 预处理（在检测前应用）
-            # ====================================================================
-            if any(
-                [
-                    self.enable_blur_preprocess,
-                    self.enable_denoise_preprocess,
-                    self.enable_sharp_preprocess,
-                ]
-            ):
-                frame = apply_preprocessing(
-                    frame,
-                    enable_blur=self.enable_blur_preprocess,
-                    enable_denoise=self.enable_denoise_preprocess,
-                    enable_sharpen=self.enable_sharp_preprocess,
-                )
-                if self.enable_blur_preprocess:
-                    processing_info["preprocessing_applied"].append("blur")
-                if self.enable_denoise_preprocess:
-                    processing_info["preprocessing_applied"].append("denoise")
-                if self.enable_sharp_preprocess:
-                    processing_info["preprocessing_applied"].append("sharpen")
-                self.logger.debug(
-                    f"Applied preprocessing: {processing_info['preprocessing_applied']}"
-                )
-
-            # ====================================================================
-            # 步骤1: 确定水印区域
-            # ====================================================================
-            auto_detect_enabled = bool(watermark_selection_params.get("auto_detect", False))
-            user_mask_data = (
-                None if auto_detect_enabled else watermark_selection_params.get("user_mask")
-            )
-
-            if auto_detect_enabled and watermark_selection_params.get("user_mask") is not None:
-                self.logger.debug("自动检测模式已启用，忽略静态 user_mask 以支持动态水印逐帧跟随")
-
-            if user_mask_data is not None:
-                # 处理用户提供的掩码（可能是区域列表或实际掩码）
-                if isinstance(user_mask_data, list) and len(user_mask_data) > 0:
-                    # (x, y, width, height)矩形列表
-                    mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
-                    for region in user_mask_data:
-                        if len(region) == 4:
-                            x, y, w, h = region
-                            # 确保坐标在图像边界内
-                            x = max(0, min(x, frame.shape[1] - 1))
-                            y = max(0, min(y, frame.shape[0] - 1))
-                            w = max(1, min(w, frame.shape[1] - x))
-                            h = max(1, min(h, frame.shape[0] - y))
-
-                            # 在掩码上绘制矩形
-                            cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
-
-                    processing_info["detection_method"] = "manual_selection"
-                    processing_info["manual_regions_count"] = len(user_mask_data)
-                    self.logger.info(f"Using manual selection with {len(user_mask_data)} regions")
-
-                elif isinstance(user_mask_data, np.ndarray):
-                    # 直接掩码数组
-                    mask = user_mask_data.copy()
-                    if len(mask.shape) == 3:
-                        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-                    processing_info["detection_method"] = "user_provided_mask"
-                    self.logger.info("Using user-provided mask array")
-                else:
-                    self.logger.warning("Invalid user_mask format")
-                    return frame, {"error": "Invalid user_mask format"}
-
-            elif auto_detect_enabled:
-                # 使用水印检测器进行自动检测
-                if self.watermark_detector is None:
-                    self.logger.error("Watermark detector not initialized")
-                    return frame, {"error": "Watermark detector not initialized"}
-
-                _ = watermark_selection_params.get("detection_sensitivity", 0.5)
-                mask = self.watermark_detector.detect_watermark(frame)
-                processing_info["detection_method"] = "automatic_yolo"
-                # 避免逐帧 INFO 噪音：默认只在 DEBUG 记录。
-                detector = self.watermark_detector
-                detector_model_type = getattr(detector, "model_type", None) or "unknown"
-                detector_device = getattr(detector, "device", None) or self.device
-                self.logger.debug(
-                    "Using automatic watermark detection (YOLO %s, device=%s)",
-                    detector_model_type,
-                    detector_device,
-                )
-
-            else:
-                self.logger.info("No watermark detection method specified")
-                return frame, processing_info
-
-            # 步骤2: 验证和处理掩码
-            if mask is not None and np.any(mask):
-                # 计算水印区域数量
-                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                processing_info["watermark_areas_found"] = len(contours)
-
-                # 使用图像修复器应用修复 (自动选择 GPU DL 或 OpenCV)
-                processed_frame = self.inpaint_frame(frame, mask)
-                total_area = sum(cv2.contourArea(c) for c in contours)
-                image_area = frame.shape[0] * frame.shape[1]
-                area_ratio = total_area / image_area if image_area else 0
-
-                # 记录使用的修复方法
-                processing_info["inpainting_method"] = (
-                    self.last_inpainting_method_used or processing_info["inpainting_method"]
-                )
-                processing_info["actual_inpainting_backend"] = (
-                    self.last_inpainting_backend or processing_info["actual_inpainting_backend"]
-                )
-                processing_info["inpainting_backend"] = (
-                    self.last_inpainting_backend or processing_info["inpainting_backend"]
-                )
-                processing_info["watermark_area_ratio"] = area_ratio
-                processing_info["quality_level"] = self.quality_level
-                processing_info["requested_quality_level"] = self.quality_level
-                processing_info["effective_quality_level"] = getattr(
-                    self, "last_effective_quality_level", None
-                )
-                processing_info["effective_inpaint_radius"] = getattr(
-                    self, "last_effective_inpaint_radius", None
-                )
-                processing_info[
-                    "gpu_inpainting_fallback_reason"
-                ] = self.gpu_inpainting_fallback_reason
-                processing_info["inpainting_fallback_reason"] = self.gpu_inpainting_fallback_reason
-                processing_info["gpu_inpainting_runtime_error"] = getattr(
-                    self, "last_gpu_inpainting_runtime_error", None
-                )
-                processing_info["loaded_inpainting_asset_ref"] = getattr(
-                    self, "loaded_inpainting_asset_ref", None
-                )
-                processing_info["loaded_inpainting_model_path"] = self.loaded_inpainting_model_path
-                processing_info["gpu_inpainting_profile"] = getattr(
-                    self,
-                    "last_gpu_inpainting_profile_used",
-                    None,
-                )
-                processing_info["gpu_inpainting_retry"] = getattr(
-                    self,
-                    "last_gpu_inpainting_retry_info",
-                    None,
-                )
-                processing_info["gpu_inpainting_oom_retry_used"] = getattr(
-                    self,
-                    "last_gpu_inpainting_oom_retry_used",
-                    False,
-                )
-                processing_info["gpu_inpainting_retry_count"] = getattr(
-                    self,
-                    "last_gpu_inpainting_retry_count",
-                    0,
-                )
-                processing_info["gpu_inpainting_retry_profile"] = getattr(
-                    self,
-                    "last_gpu_inpainting_retry_profile_used",
-                    None,
-                )
-
-                self.logger.debug(
-                    f"Processed frame with {len(contours)} watermark areas "
-                    f"({area_ratio * 100:.1f}% of image)"
-                )
-
-                # ================================================================
-                # 步骤3: 后处理（在修复后应用）
-                # ================================================================
-                if any(
-                    [
-                        self.enable_smooth_postprocess,
-                        self.enable_blend_postprocess,
-                        self.enable_enhance_postprocess,
-                    ]
-                ):
-                    processed_frame = apply_postprocessing(
-                        original_frame,
-                        processed_frame,
-                        mask,
-                        enable_smooth=self.enable_smooth_postprocess,
-                        enable_blend=self.enable_blend_postprocess,
-                        enable_enhance=self.enable_enhance_postprocess,
-                        **self._build_postprocess_profile(),
-                    )
-                    if self.enable_smooth_postprocess:
-                        processing_info["postprocessing_applied"].append("smooth")
-                    if self.enable_blend_postprocess:
-                        processing_info["postprocessing_applied"].append("blend")
-                    if self.enable_enhance_postprocess:
-                        processing_info["postprocessing_applied"].append("enhance")
-                    self.logger.debug(
-                        f"Applied postprocessing: {processing_info['postprocessing_applied']}"
-                    )
-
-            else:
-                # 未检测到水印或掩码为空
-                processed_frame = frame.copy()
-                processing_info["watermark_areas_found"] = 0
-                self.logger.debug("No watermark areas detected")
-
-            processing_info["processing_time"] = time.time() - start_time
-            return processed_frame, processing_info
+            return self._process_frame_internal(frame, watermark_selection_params)
 
         except Exception as e:
             self.logger.error(f"Error in frame processing: {e}")
             return frame, {"error": str(e)}
+
+    def process_frames_batch(
+        self,
+        frames: list[np.ndarray],
+        watermark_selection_params: dict,
+    ) -> list[Tuple[np.ndarray, dict]]:
+        """对一批帧复用批量检测，再逐帧执行修复。"""
+        if not frames:
+            return []
+
+        auto_detect_enabled = bool(watermark_selection_params.get("auto_detect", False))
+        if not auto_detect_enabled or watermark_selection_params.get("user_mask") is not None:
+            return [self.process_frame(frame, watermark_selection_params) for frame in frames]
+
+        detector = self.watermark_detector
+        if detector is None or not hasattr(detector, "detect_batch"):
+            return [self.process_frame(frame, watermark_selection_params) for frame in frames]
+
+        prepared_frames: list[np.ndarray] = []
+        processing_infos: list[dict] = []
+        for frame in frames:
+            if frame is None or frame.size == 0:
+                return [self.process_frame(item, watermark_selection_params) for item in frames]
+            processing_info = self._create_processing_info(frame)
+            prepared_frames.append(self._apply_preprocessing_if_needed(frame, processing_info))
+            processing_infos.append(processing_info)
+
+        try:
+            masks = detector.detect_batch(prepared_frames)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("批量检测失败，回退逐帧检测: %s", exc)
+            return [self.process_frame(frame, watermark_selection_params) for frame in frames]
+
+        precomputed_inpainting_results = self._try_batch_inpaint_frames(
+            prepared_frames,
+            masks,
+        )
+
+        results: list[Tuple[np.ndarray, dict]] = []
+        for index, (frame, prepared_frame, mask, processing_info) in enumerate(
+            zip(frames, prepared_frames, masks, processing_infos)
+        ):
+            self._reset_runtime_trace_fields()
+            precomputed_result = precomputed_inpainting_results.get(index)
+            results.append(
+                self._finalize_processed_frame(
+                    original_frame=frame,
+                    working_frame=prepared_frame,
+                    mask=mask,
+                    processing_info=processing_info,
+                    watermark_selection_params=watermark_selection_params,
+                    detection_method="automatic_yolo",
+                    precomputed_inpainting_result=precomputed_result,
+                )
+            )
+        return results
+
+    def _try_batch_inpaint_frames(
+        self,
+        frames: list[np.ndarray],
+        masks: list[Optional[np.ndarray]],
+    ) -> dict[int, dict]:
+        """尝试对同批帧执行批量深度修复；失败时回退单帧路径。"""
+        backend = getattr(self, "deep_inpainting_backend", None)
+        if not self.use_gpu_inpainting or backend is None:
+            return {}
+
+        batch_inpaint = getattr(backend, "batch_inpaint_frames", None)
+        if not callable(batch_inpaint):
+            return {}
+
+        candidate_indices = [
+            index for index, mask in enumerate(masks) if mask is not None and np.any(mask)
+        ]
+        if not candidate_indices:
+            return {}
+
+        try:
+            runtime_profile = self.build_gpu_runtime_profile(frames[0].shape)
+            self._update_effective_inpainting_observation_from_gpu_profile(runtime_profile)
+            batch_results = batch_inpaint(
+                [frames[index] for index in candidate_indices],
+                [masks[index] for index in candidate_indices],
+                inpaint_radius=self.inpaint_radius,
+                quality_level=self.quality_level,
+                opencv_method="auto",
+            )
+            backend_trace: Any = getattr(backend, "get_last_trace", lambda: {})()
+            if isinstance(backend_trace, dict):
+                self.logger.info(
+                    "批量 LaMa 修复命中: candidates=%s groups=%s group_sizes=%s resize_limit=%s memory_budget=%s",
+                    backend_trace.get("batch_total_candidates", len(candidate_indices)),
+                    backend_trace.get("batch_group_count", 1),
+                    backend_trace.get("batch_group_sizes", [len(candidate_indices)]),
+                    backend_trace.get("resize_limit", runtime_profile.get("resize_limit")),
+                    backend_trace.get("memory_budget_mb", runtime_profile.get("memory_budget_mb")),
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("批量 LaMa 修复失败，回退逐帧修复: %s", exc)
+            return {}
+
+        if len(batch_results) != len(candidate_indices):
+            self.logger.warning(
+                "批量 LaMa 修复返回数量异常，回退逐帧修复: expected=%s actual=%s",
+                len(candidate_indices),
+                len(batch_results),
+            )
+            return {}
+
+        return {candidate_indices[index]: result for index, result in enumerate(batch_results)}
+
+    def _process_frame_internal(
+        self,
+        frame: np.ndarray,
+        watermark_selection_params: dict,
+    ) -> Tuple[np.ndarray, dict]:
+        self._reset_runtime_trace_fields()
+        processing_info = self._create_processing_info(frame)
+        working_frame = self._apply_preprocessing_if_needed(frame, processing_info)
+        mask, detection_error = self._resolve_mask(
+            working_frame,
+            watermark_selection_params,
+            processing_info,
+        )
+        if detection_error is not None:
+            return frame, {"error": detection_error}
+        return self._finalize_processed_frame(
+            original_frame=frame,
+            working_frame=working_frame,
+            mask=mask,
+            processing_info=processing_info,
+            watermark_selection_params=watermark_selection_params,
+        )
+
+    def _reset_runtime_trace_fields(self) -> None:
+        self.last_inpainting_method_used = None
+        self.last_inpainting_backend = None
+        self.last_gpu_inpainting_profile_used = None
+        self.last_gpu_inpainting_retry_info = None
+        self.last_gpu_inpainting_oom_retry_used = False
+        self.last_gpu_inpainting_retry_count = 0
+        self.last_gpu_inpainting_retry_profile_used = None
+
+    def _create_processing_info(self, frame: np.ndarray) -> dict:
+        requested_backend = self._derive_requested_inpainting_backend()
+        return {
+            "original_shape": frame.shape,
+            "detection_method": None,
+            "inpainting_method": None,
+            "inpainting_backend": None,
+            "requested_inpainting_backend": requested_backend,
+            "actual_inpainting_backend": None,
+            "inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
+            "watermark_areas_found": 0,
+            "processing_time": 0,
+            "preprocessing_applied": [],
+            "postprocessing_applied": [],
+            "gpu_inpainting_requested": requested_backend in {"legacy_unet", "lama", "mat"},
+            "gpu_inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
+            "configured_inpainting_asset_ref": getattr(
+                self, "configured_inpainting_asset_ref", None
+            ),
+            "loaded_inpainting_asset_ref": getattr(self, "loaded_inpainting_asset_ref", None),
+            "configured_inpainting_model_path": self.configured_inpainting_model_path,
+            "loaded_inpainting_model_path": self.loaded_inpainting_model_path,
+            "gpu_inpainting_profile": None,
+            "gpu_inpainting_retry": None,
+            "gpu_inpainting_oom_retry_used": False,
+            "gpu_inpainting_retry_count": 0,
+            "gpu_inpainting_retry_profile": None,
+            "requested_quality_level": self.quality_level,
+            "effective_quality_level": None,
+            "effective_inpaint_radius": None,
+            "gpu_inpainting_runtime_error": None,
+            "device": self.device,
+        }
+
+    def _apply_preprocessing_if_needed(
+        self, frame: np.ndarray, processing_info: dict
+    ) -> np.ndarray:
+        if not any(
+            [
+                self.enable_blur_preprocess,
+                self.enable_denoise_preprocess,
+                self.enable_sharp_preprocess,
+            ]
+        ):
+            return frame
+
+        processed = apply_preprocessing(
+            frame,
+            enable_blur=self.enable_blur_preprocess,
+            enable_denoise=self.enable_denoise_preprocess,
+            enable_sharpen=self.enable_sharp_preprocess,
+        )
+        if self.enable_blur_preprocess:
+            processing_info["preprocessing_applied"].append("blur")
+        if self.enable_denoise_preprocess:
+            processing_info["preprocessing_applied"].append("denoise")
+        if self.enable_sharp_preprocess:
+            processing_info["preprocessing_applied"].append("sharpen")
+        self.logger.debug(f"Applied preprocessing: {processing_info['preprocessing_applied']}")
+        return processed
+
+    def _resolve_mask(  # noqa: C901
+        self,
+        frame: np.ndarray,
+        watermark_selection_params: dict,
+        processing_info: dict,
+        *,
+        precomputed_mask: Optional[np.ndarray] = None,
+    ) -> tuple[Optional[np.ndarray], Optional[str]]:
+        auto_detect_enabled = bool(watermark_selection_params.get("auto_detect", False))
+        user_mask_data = (
+            None if auto_detect_enabled else watermark_selection_params.get("user_mask")
+        )
+
+        if auto_detect_enabled and watermark_selection_params.get("user_mask") is not None:
+            self.logger.debug("自动检测模式已启用，忽略静态 user_mask 以支持动态水印逐帧跟随")
+
+        if user_mask_data is not None:
+            if isinstance(user_mask_data, list) and len(user_mask_data) > 0:
+                mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+                for region in user_mask_data:
+                    if len(region) == 4:
+                        x, y, w, h = region
+                        x = max(0, min(x, frame.shape[1] - 1))
+                        y = max(0, min(y, frame.shape[0] - 1))
+                        w = max(1, min(w, frame.shape[1] - x))
+                        h = max(1, min(h, frame.shape[0] - y))
+                        cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
+
+                processing_info["detection_method"] = "manual_selection"
+                processing_info["manual_regions_count"] = len(user_mask_data)
+                self.logger.info(f"Using manual selection with {len(user_mask_data)} regions")
+                return mask, None
+
+            if isinstance(user_mask_data, np.ndarray):
+                mask = user_mask_data.copy()
+                if len(mask.shape) == 3:
+                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                processing_info["detection_method"] = "user_provided_mask"
+                self.logger.info("Using user-provided mask array")
+                return mask, None
+
+            self.logger.warning("Invalid user_mask format")
+            return None, "Invalid user_mask format"
+
+        if auto_detect_enabled:
+            if self.watermark_detector is None:
+                self.logger.error("Watermark detector not initialized")
+                return None, "Watermark detector not initialized"
+
+            mask = precomputed_mask
+            if mask is None:
+                _ = watermark_selection_params.get("detection_sensitivity", 0.5)
+                mask = self.watermark_detector.detect_watermark(frame)
+            processing_info["detection_method"] = "automatic_yolo"
+            detector = self.watermark_detector
+            detector_model_type = getattr(detector, "model_type", None) or "unknown"
+            detector_device = getattr(detector, "device", None) or self.device
+            self.logger.debug(
+                "Using automatic watermark detection (YOLO %s, device=%s)",
+                detector_model_type,
+                detector_device,
+            )
+            return mask, None
+
+        self.logger.info("No watermark detection method specified")
+        return None, None
+
+    def _finalize_processed_frame(
+        self,
+        *,
+        original_frame: np.ndarray,
+        working_frame: np.ndarray,
+        mask: Optional[np.ndarray],
+        processing_info: dict,
+        watermark_selection_params: dict,
+        detection_method: Optional[str] = None,
+        precomputed_inpainting_result: Optional[dict] = None,
+    ) -> Tuple[np.ndarray, dict]:
+        start_time = time.time()
+        if detection_method:
+            processing_info["detection_method"] = detection_method
+
+        if processing_info["detection_method"] is None and not bool(
+            watermark_selection_params.get("auto_detect", False)
+        ):
+            processing_info["processing_time"] = time.time() - start_time
+            return working_frame, processing_info
+
+        if mask is not None and np.any(mask):
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            processing_info["watermark_areas_found"] = len(contours)
+
+            if (
+                isinstance(precomputed_inpainting_result, dict)
+                and precomputed_inpainting_result.get("frame") is not None
+            ):
+                processed_frame = np.asarray(precomputed_inpainting_result["frame"])
+                self._sync_trace_from_snapshot(precomputed_inpainting_result.get("trace"))
+            else:
+                processed_frame = self.inpaint_frame(working_frame, mask)
+            total_area = sum(cv2.contourArea(c) for c in contours)
+            image_area = working_frame.shape[0] * working_frame.shape[1]
+            area_ratio = total_area / image_area if image_area else 0
+
+            processing_info["inpainting_method"] = (
+                self.last_inpainting_method_used or processing_info["inpainting_method"]
+            )
+            processing_info["actual_inpainting_backend"] = (
+                self.last_inpainting_backend or processing_info["actual_inpainting_backend"]
+            )
+            processing_info["inpainting_backend"] = (
+                self.last_inpainting_backend or processing_info["inpainting_backend"]
+            )
+            processing_info["watermark_area_ratio"] = area_ratio
+            processing_info["quality_level"] = self.quality_level
+            processing_info["requested_quality_level"] = self.quality_level
+            processing_info["effective_quality_level"] = getattr(
+                self, "last_effective_quality_level", None
+            )
+            processing_info["effective_inpaint_radius"] = getattr(
+                self, "last_effective_inpaint_radius", None
+            )
+            processing_info["gpu_inpainting_fallback_reason"] = self.gpu_inpainting_fallback_reason
+            processing_info["inpainting_fallback_reason"] = self.gpu_inpainting_fallback_reason
+            processing_info["gpu_inpainting_runtime_error"] = getattr(
+                self, "last_gpu_inpainting_runtime_error", None
+            )
+            processing_info["loaded_inpainting_asset_ref"] = getattr(
+                self, "loaded_inpainting_asset_ref", None
+            )
+            processing_info["loaded_inpainting_model_path"] = self.loaded_inpainting_model_path
+            processing_info["gpu_inpainting_profile"] = getattr(
+                self,
+                "last_gpu_inpainting_profile_used",
+                None,
+            )
+            processing_info["gpu_inpainting_retry"] = getattr(
+                self,
+                "last_gpu_inpainting_retry_info",
+                None,
+            )
+            processing_info["gpu_inpainting_oom_retry_used"] = getattr(
+                self,
+                "last_gpu_inpainting_oom_retry_used",
+                False,
+            )
+            processing_info["gpu_inpainting_retry_count"] = getattr(
+                self,
+                "last_gpu_inpainting_retry_count",
+                0,
+            )
+            processing_info["gpu_inpainting_retry_profile"] = getattr(
+                self,
+                "last_gpu_inpainting_retry_profile_used",
+                None,
+            )
+
+            self.logger.debug(
+                f"Processed frame with {len(contours)} watermark areas "
+                f"({area_ratio * 100:.1f}% of image)"
+            )
+
+            if any(
+                [
+                    self.enable_smooth_postprocess,
+                    self.enable_blend_postprocess,
+                    self.enable_enhance_postprocess,
+                ]
+            ):
+                processed_frame = apply_postprocessing(
+                    original_frame,
+                    processed_frame,
+                    mask,
+                    enable_smooth=self.enable_smooth_postprocess,
+                    enable_blend=self.enable_blend_postprocess,
+                    enable_enhance=self.enable_enhance_postprocess,
+                    **self._build_postprocess_profile(),
+                )
+                if self.enable_smooth_postprocess:
+                    processing_info["postprocessing_applied"].append("smooth")
+                if self.enable_blend_postprocess:
+                    processing_info["postprocessing_applied"].append("blend")
+                if self.enable_enhance_postprocess:
+                    processing_info["postprocessing_applied"].append("enhance")
+                self.logger.debug(
+                    f"Applied postprocessing: {processing_info['postprocessing_applied']}"
+                )
+        else:
+            processed_frame = working_frame
+            processing_info["watermark_areas_found"] = 0
+            self.logger.debug("No watermark areas detected")
+
+        processing_info["processing_time"] = time.time() - start_time
+        return processed_frame, processing_info
 
     def detect_watermark(self, frame: np.ndarray, sensitivity: float = 0.5) -> Optional[np.ndarray]:
         """
@@ -814,6 +965,14 @@ class AIHandler:
 
     def _resolve_runtime_resize_limit_from_budget(self, memory_budget_mb: int) -> int:
         """把软显存预算映射为更保守的推理尺寸上限。"""
+        requested_backend = self._derive_requested_inpainting_backend()
+        if requested_backend == "lama":
+            if memory_budget_mb <= 1024:
+                return 640
+            if memory_budget_mb <= 1536:
+                return 768
+            return 960
+
         if memory_budget_mb <= 1024:
             return 640
         if memory_budget_mb <= 1536:
@@ -852,47 +1011,55 @@ class AIHandler:
         if self.opencv_inpainting_backend is None:
             return
         trace = self.opencv_inpainting_backend.get_last_trace()
-        self.last_inpainting_backend = trace.get("inpainting_backend", "opencv")
-        self.last_inpainting_method_used = trace.get("inpainting_method")
-        self.last_effective_quality_level = self._normalize_effective_quality_level(
-            trace.get("effective_quality_level")
-        )
-        self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
-            trace.get("effective_inpaint_radius")
-        )
-        self.loaded_inpainting_asset_ref = trace.get("loaded_inpainting_asset_ref")
-        if trace.get("loaded_inpainting_model_path") is not None:
-            self.loaded_inpainting_model_path = trace.get("loaded_inpainting_model_path")
+        self._sync_trace_from_snapshot(trace, default_backend="opencv", default_method=None)
 
     def _sync_trace_from_deep_backend(self) -> None:
         """把 deep backend trace 同步回历史兼容字段。"""
         if self.deep_inpainting_backend is None:
             return
         trace = self.deep_inpainting_backend.get_last_trace()
-        self.last_inpainting_backend = trace.get("inpainting_backend", "gpu_deep_learning_unet")
-        self.last_inpainting_method_used = trace.get("inpainting_method", "gpu_deep_learning_unet")
-        profile_used = trace.get("gpu_inpainting_profile")
+        self._sync_trace_from_snapshot(
+            trace,
+            default_backend="gpu_deep_learning_unet",
+            default_method="gpu_deep_learning_unet",
+        )
+
+    def _sync_trace_from_snapshot(
+        self,
+        trace: Optional[dict],
+        *,
+        default_backend: Optional[str] = None,
+        default_method: Optional[str] = None,
+    ) -> None:
+        """把显式 trace 快照同步回兼容字段。"""
+        normalized_trace = dict(trace or {})
+        self.last_inpainting_backend = normalized_trace.get("inpainting_backend", default_backend)
+        self.last_inpainting_method_used = normalized_trace.get("inpainting_method", default_method)
+        profile_used = normalized_trace.get("gpu_inpainting_profile")
         if isinstance(profile_used, dict):
             self.last_gpu_inpainting_profile_used = dict(profile_used)
-        retry_info = trace.get("gpu_inpainting_retry")
+        retry_info = normalized_trace.get("gpu_inpainting_retry")
         if isinstance(retry_info, dict):
             self.last_gpu_inpainting_retry_info = dict(retry_info)
         self.last_gpu_inpainting_oom_retry_used = bool(
-            trace.get("gpu_inpainting_oom_retry_used", False)
+            normalized_trace.get("gpu_inpainting_oom_retry_used", False)
         )
-        self.last_gpu_inpainting_retry_count = int(trace.get("gpu_inpainting_retry_count", 0))
-        retry_profile = trace.get("gpu_inpainting_retry_profile")
+        self.last_gpu_inpainting_retry_count = int(
+            normalized_trace.get("gpu_inpainting_retry_count", 0)
+        )
+        retry_profile = normalized_trace.get("gpu_inpainting_retry_profile")
         if isinstance(retry_profile, dict):
             self.last_gpu_inpainting_retry_profile_used = dict(retry_profile)
         self.last_effective_quality_level = self._normalize_effective_quality_level(
-            trace.get("effective_quality_level")
+            normalized_trace.get("effective_quality_level")
         )
         self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
-            trace.get("effective_inpaint_radius")
+            normalized_trace.get("effective_inpaint_radius")
         )
-        self.loaded_inpainting_asset_ref = trace.get("loaded_inpainting_asset_ref")
-        if trace.get("loaded_inpainting_model_path") is not None:
-            self.loaded_inpainting_model_path = trace.get("loaded_inpainting_model_path")
+        if normalized_trace.get("loaded_inpainting_asset_ref") is not None:
+            self.loaded_inpainting_asset_ref = normalized_trace.get("loaded_inpainting_asset_ref")
+        if normalized_trace.get("loaded_inpainting_model_path") is not None:
+            self.loaded_inpainting_model_path = normalized_trace.get("loaded_inpainting_model_path")
 
     def _build_runtime_fallback_reason(self) -> str:
         """根据请求 backend 生成运行期降级原因。"""

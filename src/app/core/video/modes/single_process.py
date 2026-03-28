@@ -14,6 +14,39 @@ from ..utils.path import build_temp_path
 _RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
+def _resolve_detection_batch_size(processor, processing_params: dict) -> int:
+    """解析单进程自动检测场景下的小批量窗口大小。"""
+    if not bool(processing_params.get("auto_detect", False)):
+        return 1
+    if processing_params.get("user_mask") is not None:
+        return 1
+
+    ai_handler = getattr(processor, "ai_handler", None)
+    if ai_handler is None or not hasattr(ai_handler, "process_frames_batch"):
+        return 1
+
+    detector = getattr(ai_handler, "watermark_detector", None)
+    if detector is None:
+        return 1
+
+    try:
+        batch_size = int(getattr(detector, "batch_size", 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, batch_size)
+
+
+def _read_frame_batch(cap, batch_size: int) -> list:
+    """从视频流中读取一小批帧，保持原始顺序。"""
+    frames = []
+    for _ in range(max(1, batch_size)):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    return frames
+
+
 def _format_duration(seconds: float) -> str:
     total_seconds = max(0, int(seconds))
     hours = total_seconds // 3600
@@ -100,6 +133,7 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
             "detection_sensitivity": processor.ai_params.get("detection_sensitivity", 0.5),
             "user_mask": processor.ai_params.get("user_mask", None),
         }
+        detection_batch_size = _resolve_detection_batch_size(processor, processing_params)
 
         current_frame = 0
         processed_frames = 0
@@ -110,67 +144,75 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
         processor._emit_detailed_progress("processing_frames", 0, total_frames)
 
         while processor._is_running and cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
+            frame_batch = _read_frame_batch(cap, detection_batch_size)
+            if not frame_batch:
                 break
-
-            current_frame += 1
 
             if processor.ai_handler is None:
                 raise ModelLoadError("AI handler not initialized")
 
-            processed_frame, processing_info = processor.ai_handler.process_frame(
-                frame, processing_params
-            )
-            last_preview_frame = processed_frame
-
-            # 记录最后一次处理信息，便于批处理清单导出追溯
-            processor.last_processing_info = processing_info
-            if (
-                isinstance(processing_info, dict)
-                and "error" not in processing_info
-                and int(processing_info.get("watermark_areas_found", 0) or 0) > 0
-            ):
-                last_effective_processing_info = processing_info
-                processor.last_effective_processing_info = processing_info
-
-            if "error" in processing_info:
-                processor.logger.warning(
-                    f"Frame {current_frame} processing error: {processing_info['error']}"
+            if detection_batch_size > 1 and hasattr(processor.ai_handler, "process_frames_batch"):
+                batch_results = processor.ai_handler.process_frames_batch(
+                    frame_batch, processing_params
                 )
-                processed_frame = frame
             else:
-                processed_frames += 1
-                total_watermark_areas += processing_info.get("watermark_areas_found", 0)
+                batch_results = [
+                    processor.ai_handler.process_frame(frame, processing_params)
+                    for frame in frame_batch
+                ]
 
-            out.write(processed_frame)
+            for frame, result in zip(frame_batch, batch_results):
+                processed_frame, processing_info = result
+                current_frame += 1
+                last_preview_frame = processed_frame
 
-            if total_frames > 0:
-                progress_percentage = int((current_frame / total_frames) * 90) + 10
-                processor.progress.emit(progress_percentage)
+                # 记录最后一次处理信息，便于批处理清单导出追溯
+                processor.last_processing_info = processing_info
+                if (
+                    isinstance(processing_info, dict)
+                    and "error" not in processing_info
+                    and int(processing_info.get("watermark_areas_found", 0) or 0) > 0
+                ):
+                    last_effective_processing_info = processing_info
+                    processor.last_effective_processing_info = processing_info
 
-            if current_frame % max(1, int(fps)) == 0:
-                processor.status.emit(f"🎨 处理中: {current_frame}/{total_frames} 帧")
+                if "error" in processing_info:
+                    processor.logger.warning(
+                        f"Frame {current_frame} processing error: {processing_info['error']}"
+                    )
+                    processed_frame = frame
+                else:
+                    processed_frames += 1
+                    total_watermark_areas += processing_info.get("watermark_areas_found", 0)
 
-            if current_frame % max(1, int(fps / 10)) == 0:
-                processor._emit_detailed_progress(
-                    "processing_frames",
-                    current_frame,
-                    total_frames,
-                    {
-                        "processed_frames": processed_frames,
-                        "total_watermark_areas": total_watermark_areas,
-                    },
+                out.write(processed_frame)
+
+                if total_frames > 0:
+                    progress_percentage = int((current_frame / total_frames) * 90) + 10
+                    processor.progress.emit(progress_percentage)
+
+                if current_frame % max(1, int(fps)) == 0:
+                    processor.status.emit(f"🎨 处理中: {current_frame}/{total_frames} 帧")
+
+                if current_frame % max(1, int(fps / 10)) == 0:
+                    processor._emit_detailed_progress(
+                        "processing_frames",
+                        current_frame,
+                        total_frames,
+                        {
+                            "processed_frames": processed_frames,
+                            "total_watermark_areas": total_watermark_areas,
+                        },
+                    )
+
+                _maybe_log_runtime_heartbeat(
+                    processor,
+                    current_frame=current_frame,
+                    total_frames=total_frames,
                 )
 
-            _maybe_log_runtime_heartbeat(
-                processor,
-                current_frame=current_frame,
-                total_frames=total_frames,
-            )
-
-            if current_frame == 1 or current_frame % 30 == 0 or current_frame == total_frames:
-                processor.preview_update.emit(processed_frame)
+                if current_frame == 1 or current_frame % 30 == 0 or current_frame == total_frames:
+                    processor.preview_update.emit(processed_frame)
 
         if last_preview_frame is not None:
             processor.preview_update.emit(last_preview_frame)

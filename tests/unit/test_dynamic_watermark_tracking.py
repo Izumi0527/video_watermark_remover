@@ -247,6 +247,8 @@ def test_ai_params_builder_gpu_unet_respects_enable_gpu_toggle(
 ) -> None:
     """选择 GPU U-Net 时，enable_gpu 复选框应决定是否启用 GPU 深度学习修复。"""
     _, ai_params_builder_cls = _load_test_targets(monkeypatch)
+    torch_module = sys.modules["torch"]
+    torch_module.cuda.is_available = lambda: True
     builder = ai_params_builder_cls()
 
     enabled_params = builder.build_from_ui(

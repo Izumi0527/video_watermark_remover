@@ -282,6 +282,89 @@ def postprocess_enhance(
     return enhanced
 
 
+def _compute_postprocess_roi(
+    mask: np.ndarray,
+    *,
+    padding: int,
+    area_ratio_threshold: float = 0.6,
+) -> Optional[tuple[int, int, int, int]]:
+    """根据掩码计算后处理 ROI，避免小范围修复时整帧重算。"""
+    if mask is None:
+        return None
+
+    raw_mask = np.asarray(mask)
+    if raw_mask.ndim == 3:
+        raw_mask = raw_mask[..., 0]
+    if raw_mask.ndim != 2 or not np.any(raw_mask):
+        return None
+
+    ys, xs = np.nonzero(raw_mask > 0)
+    if xs.size == 0 or ys.size == 0:
+        return None
+
+    height, width = raw_mask.shape
+    x1 = max(0, int(xs.min()) - padding)
+    y1 = max(0, int(ys.min()) - padding)
+    x2 = min(width, int(xs.max()) + 1 + padding)
+    y2 = min(height, int(ys.max()) + 1 + padding)
+
+    roi_width = max(0, x2 - x1)
+    roi_height = max(0, y2 - y1)
+    if roi_width <= 0 or roi_height <= 0:
+        return None
+
+    roi_area_ratio = (roi_width * roi_height) / float(height * width)
+    if roi_area_ratio >= area_ratio_threshold:
+        return None
+
+    return x1, y1, x2, y2
+
+
+def _run_postprocessing_pipeline(
+    original: np.ndarray,
+    processed: np.ndarray,
+    mask: np.ndarray,
+    *,
+    enable_smooth: bool,
+    enable_blend: bool,
+    enable_enhance: bool,
+    smooth_blur_radius: int,
+    smooth_feather_amount: int,
+    blend_ratio: float,
+    enhance_contrast: float,
+    enhance_brightness: int,
+    enhance_saturation: float,
+) -> np.ndarray:
+    """执行后处理步骤，供整帧与 ROI 路径复用。"""
+    result = processed.copy()
+
+    if enable_smooth:
+        logger.debug("Applying edge smoothing postprocessing")
+        result = postprocess_smooth_edges(
+            original,
+            result,
+            mask,
+            blur_radius=smooth_blur_radius,
+            feather_amount=smooth_feather_amount,
+        )
+
+    if enable_blend:
+        logger.debug("Applying blend postprocessing")
+        result = postprocess_blend(original, result, mask, blend_ratio=blend_ratio)
+
+    if enable_enhance:
+        logger.debug("Applying enhancement postprocessing")
+        result = postprocess_enhance(
+            result,
+            mask,
+            contrast=enhance_contrast,
+            brightness=enhance_brightness,
+            saturation=enhance_saturation,
+        )
+
+    return result
+
+
 def apply_postprocessing(
     original: np.ndarray,
     processed: np.ndarray,
@@ -318,36 +401,48 @@ def apply_postprocessing(
     Returns:
         后处理后的图像
     """
-    result = processed.copy()
+    roi_padding = max(4, int(smooth_blur_radius) * 2, int(smooth_feather_amount) * 2)
+    roi_rect = _compute_postprocess_roi(mask, padding=roi_padding)
 
-    # 边缘平滑
-    if enable_smooth:
-        logger.debug("Applying edge smoothing postprocessing")
-        result = postprocess_smooth_edges(
-            original,
-            result,
-            mask,
-            blur_radius=smooth_blur_radius,
-            feather_amount=smooth_feather_amount,
+    if roi_rect is not None:
+        x1, y1, x2, y2 = roi_rect
+        roi_original = original[y1:y2, x1:x2]
+        roi_processed = processed[y1:y2, x1:x2]
+        roi_mask = mask[y1:y2, x1:x2]
+
+        roi_result = _run_postprocessing_pipeline(
+            roi_original,
+            roi_processed,
+            roi_mask,
+            enable_smooth=enable_smooth,
+            enable_blend=enable_blend,
+            enable_enhance=enable_enhance,
+            smooth_blur_radius=smooth_blur_radius,
+            smooth_feather_amount=smooth_feather_amount,
+            blend_ratio=blend_ratio,
+            enhance_contrast=enhance_contrast,
+            enhance_brightness=enhance_brightness,
+            enhance_saturation=enhance_saturation,
         )
 
-    # 混合
-    if enable_blend:
-        logger.debug("Applying blend postprocessing")
-        result = postprocess_blend(original, result, mask, blend_ratio=blend_ratio)
+        result = processed.copy()
+        result[y1:y2, x1:x2] = roi_result
+        return result
 
-    # 增强
-    if enable_enhance:
-        logger.debug("Applying enhancement postprocessing")
-        result = postprocess_enhance(
-            result,
-            mask,
-            contrast=enhance_contrast,
-            brightness=enhance_brightness,
-            saturation=enhance_saturation,
-        )
-
-    return result
+    return _run_postprocessing_pipeline(
+        original,
+        processed,
+        mask,
+        enable_smooth=enable_smooth,
+        enable_blend=enable_blend,
+        enable_enhance=enable_enhance,
+        smooth_blur_radius=smooth_blur_radius,
+        smooth_feather_amount=smooth_feather_amount,
+        blend_ratio=blend_ratio,
+        enhance_contrast=enhance_contrast,
+        enhance_brightness=enhance_brightness,
+        enhance_saturation=enhance_saturation,
+    )
 
 
 # ============================================================================

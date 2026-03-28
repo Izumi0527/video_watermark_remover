@@ -63,6 +63,24 @@ class LaMaTorchScriptRunner:
 
         return _convert_output_to_bgr_image(output, original_height, original_width)
 
+    def run_batch(
+        self,
+        frames: list[np.ndarray],
+        masks: list[np.ndarray],
+        **_: Any,
+    ) -> list[np.ndarray]:
+        """执行批量 LaMa 推理，降低逐帧调用与张量搬运开销。"""
+        image_tensor, mask_tensor, original_sizes = _prepare_inputs_batch(
+            frames,
+            masks,
+            self.device,
+        )
+
+        with torch.inference_mode():
+            output = self.model(image_tensor, mask_tensor)
+
+        return _convert_batch_output_to_bgr_images(output, original_sizes)
+
 
 def build_lama_runner(
     *,
@@ -207,6 +225,60 @@ def _prepare_inputs(
     mask: np.ndarray,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, int, int]:
+    image_array, mask_array, original_height, original_width = _prepare_input_arrays(frame, mask)
+    image_tensor = torch.from_numpy(image_array).unsqueeze(0).to(device)
+    mask_tensor = torch.from_numpy(mask_array).unsqueeze(0).to(device)
+    return image_tensor, mask_tensor, original_height, original_width
+
+
+def _prepare_inputs_batch(
+    frames: list[np.ndarray],
+    masks: list[np.ndarray],
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, list[tuple[int, int]]]:
+    if not frames or not masks or len(frames) != len(masks):
+        raise LaMaRuntimeError("lama_invalid_batch", "LaMa 批量推理要求 frame/mask 数量一致且非空。")
+
+    prepared_images: list[np.ndarray] = []
+    prepared_masks: list[np.ndarray] = []
+    original_sizes: list[tuple[int, int]] = []
+    max_height = 0
+    max_width = 0
+
+    for frame, mask in zip(frames, masks):
+        image_array, mask_array, original_height, original_width = _prepare_input_arrays(
+            frame, mask
+        )
+        prepared_images.append(image_array)
+        prepared_masks.append(mask_array)
+        original_sizes.append((original_height, original_width))
+        max_height = max(max_height, int(image_array.shape[1]))
+        max_width = max(max_width, int(image_array.shape[2]))
+
+    batch_images = np.stack(
+        [
+            _pad_chw_to_size(image, max_height=max_height, max_width=max_width)
+            for image in prepared_images
+        ],
+        axis=0,
+    )
+    batch_masks = np.stack(
+        [
+            _pad_chw_to_size(mask, max_height=max_height, max_width=max_width)
+            for mask in prepared_masks
+        ],
+        axis=0,
+    )
+
+    image_tensor = torch.from_numpy(np.ascontiguousarray(batch_images)).to(device)
+    mask_tensor = torch.from_numpy(np.ascontiguousarray(batch_masks)).to(device)
+    return image_tensor, mask_tensor, original_sizes
+
+
+def _prepare_input_arrays(
+    frame: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, int, int]:
     image = np.asarray(frame)
     if image.ndim != 3 or image.shape[2] != 3:
         raise LaMaRuntimeError(
@@ -231,11 +303,23 @@ def _prepare_inputs(
 
     padded_image = _pad_chw_to_modulo(chw_image, 8)
     padded_mask = _pad_chw_to_modulo(chw_mask, 8)
+    return padded_image, padded_mask, original_height, original_width
 
-    image_tensor = torch.from_numpy(padded_image).unsqueeze(0).to(device)
-    mask_tensor = torch.from_numpy(padded_mask).unsqueeze(0).to(device)
 
-    return image_tensor, mask_tensor, original_height, original_width
+def _pad_chw_to_size(
+    image: np.ndarray,
+    *,
+    max_height: int,
+    max_width: int,
+) -> np.ndarray:
+    channels, height, width = image.shape
+    if height == max_height and width == max_width:
+        return image
+    return np.pad(
+        image,
+        ((0, 0), (0, max(0, max_height - height)), (0, max(0, max_width - width))),
+        mode="symmetric",
+    )
 
 
 def _pad_chw_to_modulo(image: np.ndarray, modulo: int) -> np.ndarray:
@@ -284,3 +368,39 @@ def _convert_output_to_bgr_image(
     rgb_image = cropped.detach().float().cpu().clamp(0, 1).permute(1, 2, 0).numpy()
     rgb_uint8 = np.clip(rgb_image * 255.0, 0, 255).astype(np.uint8)
     return cv2.cvtColor(rgb_uint8, cv2.COLOR_RGB2BGR)
+
+
+def _convert_batch_output_to_bgr_images(
+    output: Any,
+    original_sizes: list[tuple[int, int]],
+) -> list[np.ndarray]:
+    if isinstance(output, (tuple, list)):
+        if not output:
+            raise LaMaRuntimeError("lama_invalid_output", "LaMa 模型返回了空输出。")
+        output = output[0]
+
+    if not isinstance(output, torch.Tensor):
+        raise LaMaRuntimeError(
+            "lama_invalid_output",
+            f"LaMa 模型返回了不支持的输出类型：{type(output)!r}",
+        )
+
+    if output.ndim == 3:
+        output = output.unsqueeze(0)
+
+    if output.ndim != 4 or output.shape[1] != 3:
+        raise LaMaRuntimeError(
+            "lama_invalid_output",
+            f"LaMa 批量输出 shape 非法：{tuple(output.shape)}",
+        )
+
+    if output.shape[0] != len(original_sizes):
+        raise LaMaRuntimeError(
+            "lama_invalid_output",
+            f"LaMa 批量输出数量异常：batch={int(output.shape[0])} expected={len(original_sizes)}",
+        )
+
+    images: list[np.ndarray] = []
+    for index, (original_height, original_width) in enumerate(original_sizes):
+        images.append(_convert_output_to_bgr_image(output[index], original_height, original_width))
+    return images

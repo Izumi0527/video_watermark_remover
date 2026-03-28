@@ -60,6 +60,7 @@ def _build_base_ai_params() -> dict:
     return {
         "device": "auto",
         "use_gpu_inpainting": True,
+        "conf_threshold": 0.5,
         "requested_inpainting_backend": "lama",
         "opencv_inpainting_method": "auto",
         "inpainting_algorithm": "gpu_dl",
@@ -73,8 +74,9 @@ def _build_base_ai_params() -> dict:
     }
 
 
-
-def test_ai_handler_refreshes_when_gpu_memory_budget_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ai_handler_refreshes_when_gpu_memory_budget_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _install_qtcore_stub(monkeypatch)
     monkeypatch.delitem(sys.modules, "app.core.video.thread", raising=False)
     thread_module = importlib.import_module("app.core.video.thread")
@@ -82,5 +84,19 @@ def test_ai_handler_refreshes_when_gpu_memory_budget_changes(monkeypatch: pytest
     existing = _DummyAIHandler(_build_base_ai_params())
     next_params = _build_base_ai_params()
     next_params["gpu_memory_mb"] = 1024
+
+    assert thread_module._ai_handler_needs_refresh(existing, next_params) is True
+
+
+def test_ai_handler_refreshes_when_conf_threshold_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_qtcore_stub(monkeypatch)
+    monkeypatch.delitem(sys.modules, "app.core.video.thread", raising=False)
+    thread_module = importlib.import_module("app.core.video.thread")
+
+    existing = _DummyAIHandler(_build_base_ai_params())
+    next_params = _build_base_ai_params()
+    next_params["conf_threshold"] = 0.35
 
     assert thread_module._ai_handler_needs_refresh(existing, next_params) is True

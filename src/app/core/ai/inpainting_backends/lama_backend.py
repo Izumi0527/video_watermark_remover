@@ -35,6 +35,23 @@ class _RoiRect:
         return [int(self.x1), int(self.y1), int(self.width), int(self.height)]
 
 
+@dataclass(frozen=True)
+class _PreparedBatchItem:
+    """LaMa 批量推理的单项输入。"""
+
+    original_frame: np.ndarray
+    raw_mask: np.ndarray
+    roi_rect: Optional[_RoiRect]
+    prepared_frame: np.ndarray
+    prepared_mask: np.ndarray
+    target_shape: tuple[int, int]
+    runtime_resize_applied: bool
+
+
+_LAMA_BATCH_BUCKET_STEP = 128
+_LAMA_BATCH_MAX_GROUP_SIZE = 4
+
+
 def _normalize_mask(mask: np.ndarray) -> np.ndarray:
     raw = np.asarray(mask)
     if raw.ndim == 3:
@@ -224,6 +241,87 @@ def _restore_result_size(
     return np.asarray(restored, dtype=np.uint8)
 
 
+def _ceil_to_step(value: int, step: int) -> int:
+    if step <= 1:
+        return int(value)
+    return int(((max(1, int(value)) + step - 1) // step) * step)
+
+
+def _build_prepared_item_bucket_key(item: _PreparedBatchItem) -> tuple[str, int, int]:
+    height, width = item.prepared_frame.shape[:2]
+    bucket_mode = "roi" if item.roi_rect is not None else "full"
+    return (
+        bucket_mode,
+        _ceil_to_step(height, _LAMA_BATCH_BUCKET_STEP),
+        _ceil_to_step(width, _LAMA_BATCH_BUCKET_STEP),
+    )
+
+
+def _group_prepared_batch_items(
+    prepared_items: list[_PreparedBatchItem],
+) -> list[tuple[tuple[str, int, int], list[int]]]:
+    ordered_keys: list[tuple[str, int, int]] = []
+    bucket_to_indices: dict[tuple[str, int, int], list[int]] = {}
+
+    for index, item in enumerate(prepared_items):
+        bucket_key = _build_prepared_item_bucket_key(item)
+        if bucket_key not in bucket_to_indices:
+            bucket_to_indices[bucket_key] = []
+            ordered_keys.append(bucket_key)
+        bucket_to_indices[bucket_key].append(index)
+
+    grouped_items: list[tuple[tuple[str, int, int], list[int]]] = []
+    for bucket_key in ordered_keys:
+        indices = bucket_to_indices[bucket_key]
+        for start in range(0, len(indices), _LAMA_BATCH_MAX_GROUP_SIZE):
+            grouped_items.append((bucket_key, indices[start : start + _LAMA_BATCH_MAX_GROUP_SIZE]))
+
+    return grouped_items
+
+
+def _build_lama_trace(
+    *,
+    backend: "LaMaInpaintingBackend",
+    quality_level: int,
+    inpaint_radius: int,
+    roi_rect: Optional[_RoiRect],
+    memory_budget_mb: Any,
+    normalized_resize_limit: Optional[int],
+    runtime_resize_applied: bool,
+    batch_size: int = 1,
+) -> dict[str, Any]:
+    trace = {
+        "inpainting_backend": backend.backend_id,
+        "inpainting_method": backend.backend_id,
+        "effective_quality_level": int(quality_level),
+        "effective_inpaint_radius": int(inpaint_radius),
+        "configured_inpainting_asset_ref": backend.asset_ref,
+        "loaded_inpainting_asset_ref": backend.loaded_asset_ref,
+        "configured_inpainting_model_path": backend.asset_ref,
+        "loaded_inpainting_model_path": backend.loaded_model_path,
+        "roi_used": roi_rect is not None,
+        "memory_budget_mb": memory_budget_mb,
+        "resize_limit": normalized_resize_limit,
+        "runtime_resize_applied": runtime_resize_applied,
+        "gpu_inpainting_profile": {
+            "quality_level": int(quality_level),
+            "requested_radius": int(inpaint_radius),
+            "memory_budget_mb": memory_budget_mb,
+            "resize_limit": normalized_resize_limit,
+            "batch_size": int(batch_size),
+        },
+        "gpu_inpainting_retry": None,
+        "gpu_inpainting_oom_retry_used": False,
+        "gpu_inpainting_retry_count": 0,
+        "gpu_inpainting_retry_profile": None,
+    }
+    if roi_rect is not None:
+        trace["roi_rect"] = roi_rect.to_xywh()
+        trace["roi_area_ratio"] = float(roi_rect.area_ratio)
+        trace["roi_padding"] = int(roi_rect.padding)
+    return trace
+
+
 class LaMaInpaintingBackend(BaseInpaintingBackend):
     """LaMa backend 的最小适配层。"""
 
@@ -393,23 +491,15 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
                 output_roi[mask_bool] = resolved_crop[mask_bool]
                 output[roi_rect.y1 : roi_rect.y2, roi_rect.x1 : roi_rect.x2] = output_roi
 
-                self._last_trace = {
-                    "inpainting_backend": self.backend_id,
-                    "inpainting_method": self.backend_id,
-                    "effective_quality_level": int(quality_level),
-                    "effective_inpaint_radius": int(inpaint_radius),
-                    "configured_inpainting_asset_ref": self.asset_ref,
-                    "loaded_inpainting_asset_ref": self.loaded_asset_ref,
-                    "configured_inpainting_model_path": self.asset_ref,
-                    "loaded_inpainting_model_path": self.loaded_model_path,
-                    "roi_used": True,
-                    "roi_rect": roi_rect.to_xywh(),
-                    "roi_area_ratio": float(roi_rect.area_ratio),
-                    "roi_padding": int(roi_rect.padding),
-                    "memory_budget_mb": memory_budget_mb,
-                    "resize_limit": normalized_resize_limit,
-                    "runtime_resize_applied": runtime_resize_applied,
-                }
+                self._last_trace = _build_lama_trace(
+                    backend=self,
+                    quality_level=quality_level,
+                    inpaint_radius=inpaint_radius,
+                    roi_rect=roi_rect,
+                    memory_budget_mb=memory_budget_mb,
+                    normalized_resize_limit=normalized_resize_limit,
+                    runtime_resize_applied=runtime_resize_applied,
+                )
 
                 return output
             except Exception:
@@ -437,18 +527,197 @@ class LaMaInpaintingBackend(BaseInpaintingBackend):
             np.asarray(result if result is not None else resized_frame),
             target_shape=frame.shape[:2],
         )
-        self._last_trace = {
-            "inpainting_backend": self.backend_id,
-            "inpainting_method": self.backend_id,
-            "effective_quality_level": int(quality_level),
-            "effective_inpaint_radius": int(inpaint_radius),
-            "configured_inpainting_asset_ref": self.asset_ref,
-            "loaded_inpainting_asset_ref": self.loaded_asset_ref,
-            "configured_inpainting_model_path": self.asset_ref,
-            "loaded_inpainting_model_path": self.loaded_model_path,
-            "roi_used": False,
-            "memory_budget_mb": memory_budget_mb,
-            "resize_limit": normalized_resize_limit,
-            "runtime_resize_applied": runtime_resize_applied,
-        }
+        self._last_trace = _build_lama_trace(
+            backend=self,
+            quality_level=quality_level,
+            inpaint_radius=inpaint_radius,
+            roi_rect=None,
+            memory_budget_mb=memory_budget_mb,
+            normalized_resize_limit=normalized_resize_limit,
+            runtime_resize_applied=runtime_resize_applied,
+        )
         return resolved
+
+    def batch_inpaint_frames(  # noqa: C901
+        self,
+        frames: list[np.ndarray],
+        masks: list[np.ndarray],
+        *,
+        inpaint_radius: int,
+        quality_level: int,
+        opencv_method: str = "auto",
+    ) -> list[dict[str, Any]]:
+        """对同一批帧执行 LaMa 批量推理，降低逐帧调用开销。"""
+        if self.runner is None:
+            raise RuntimeError("LaMa backend not loaded")
+
+        del opencv_method
+        if not frames or not masks or len(frames) != len(masks):
+            raise RuntimeError("LaMa batch inpainting requires aligned frame/mask inputs")
+
+        runtime_profile = self.get_runtime_profile()
+        resize_limit = runtime_profile.get("resize_limit")
+        memory_budget_mb = runtime_profile.get("memory_budget_mb")
+        normalized_resize_limit = max(64, int(resize_limit)) if resize_limit is not None else None
+
+        prepared_items: list[_PreparedBatchItem] = []
+        for frame, mask in zip(frames, masks):
+            raw_mask = _normalize_mask(mask)
+            roi_rect = _compute_roi_rect(
+                frame,
+                raw_mask,
+                inpaint_radius=inpaint_radius,
+                quality_level=quality_level,
+            )
+            if roi_rect is not None:
+                cropped_frame = frame[roi_rect.y1 : roi_rect.y2, roi_rect.x1 : roi_rect.x2]
+                cropped_mask = raw_mask[roi_rect.y1 : roi_rect.y2, roi_rect.x1 : roi_rect.x2]
+                resized_frame, resized_mask, runtime_resize_applied = _resize_inputs_if_needed(
+                    cropped_frame,
+                    cropped_mask,
+                    resize_limit=normalized_resize_limit,
+                )
+                prepared_items.append(
+                    _PreparedBatchItem(
+                        original_frame=frame,
+                        raw_mask=raw_mask,
+                        roi_rect=roi_rect,
+                        prepared_frame=resized_frame,
+                        prepared_mask=resized_mask,
+                        target_shape=cropped_frame.shape[:2],
+                        runtime_resize_applied=runtime_resize_applied,
+                    )
+                )
+                continue
+
+            resized_frame, resized_mask, runtime_resize_applied = _resize_inputs_if_needed(
+                frame,
+                raw_mask,
+                resize_limit=normalized_resize_limit,
+            )
+            prepared_items.append(
+                _PreparedBatchItem(
+                    original_frame=frame,
+                    raw_mask=raw_mask,
+                    roi_rect=None,
+                    prepared_frame=resized_frame,
+                    prepared_mask=resized_mask,
+                    target_shape=frame.shape[:2],
+                    runtime_resize_applied=runtime_resize_applied,
+                )
+            )
+
+        runner_batch = getattr(self.runner, "run_batch", None)
+        grouped_items = _group_prepared_batch_items(prepared_items)
+        grouped_results: dict[int, dict[str, Any]] = {}
+        batch_group_sizes: list[int] = []
+        batch_group_buckets: list[dict[str, Any]] = []
+
+        for group_index, (bucket_key, item_indices) in enumerate(grouped_items, start=1):
+            group_items = [prepared_items[index] for index in item_indices]
+            group_size = len(group_items)
+            batch_group_sizes.append(group_size)
+            batch_group_buckets.append(
+                {
+                    "mode": bucket_key[0],
+                    "height": bucket_key[1],
+                    "width": bucket_key[2],
+                    "size": group_size,
+                }
+            )
+
+            if callable(runner_batch):
+                batch_outputs = runner_batch(
+                    [item.prepared_frame for item in group_items],
+                    [item.prepared_mask for item in group_items],
+                    inpaint_radius=inpaint_radius,
+                    quality_level=quality_level,
+                    device=self.torch_device,
+                    asset_ref=self.asset_ref,
+                    memory_budget_mb=memory_budget_mb,
+                    resize_limit=normalized_resize_limit,
+                )
+            else:
+                batch_outputs = [
+                    self.runner(
+                        item.prepared_frame,
+                        item.prepared_mask,
+                        inpaint_radius=inpaint_radius,
+                        quality_level=quality_level,
+                        device=self.torch_device,
+                        asset_ref=self.asset_ref,
+                        memory_budget_mb=memory_budget_mb,
+                        resize_limit=normalized_resize_limit,
+                    )
+                    for item in group_items
+                ]
+
+            if len(batch_outputs) != group_size:
+                raise RuntimeError(
+                    "LaMa batch output count mismatch: "
+                    f"expected={group_size} actual={len(batch_outputs)}"
+                )
+
+            for item_index, item, raw_output in zip(item_indices, group_items, batch_outputs):
+                resolved = _restore_result_size(
+                    np.asarray(raw_output if raw_output is not None else item.prepared_frame),
+                    target_shape=item.target_shape,
+                )
+                if item.roi_rect is not None:
+                    mask_roi = item.raw_mask[
+                        item.roi_rect.y1 : item.roi_rect.y2,
+                        item.roi_rect.x1 : item.roi_rect.x2,
+                    ]
+                    mask_bool = _dilate_mask_if_needed(mask_roi > 0, inpaint_radius=inpaint_radius)
+                    output = item.original_frame.copy()
+                    output_roi = output[
+                        item.roi_rect.y1 : item.roi_rect.y2,
+                        item.roi_rect.x1 : item.roi_rect.x2,
+                    ]
+                    output_roi[mask_bool] = resolved[mask_bool]
+                    output[
+                        item.roi_rect.y1 : item.roi_rect.y2,
+                        item.roi_rect.x1 : item.roi_rect.x2,
+                    ] = output_roi
+                else:
+                    output = resolved
+
+                trace = _build_lama_trace(
+                    backend=self,
+                    quality_level=quality_level,
+                    inpaint_radius=inpaint_radius,
+                    roi_rect=item.roi_rect,
+                    memory_budget_mb=memory_budget_mb,
+                    normalized_resize_limit=normalized_resize_limit,
+                    runtime_resize_applied=item.runtime_resize_applied,
+                    batch_size=group_size,
+                )
+                trace["batch_group_index"] = group_index
+                trace["batch_group_count"] = len(grouped_items)
+                trace["batch_total_candidates"] = len(prepared_items)
+                trace["batch_bucket"] = {
+                    "mode": bucket_key[0],
+                    "height": bucket_key[1],
+                    "width": bucket_key[2],
+                }
+                profile = trace.get("gpu_inpainting_profile")
+                if isinstance(profile, dict):
+                    profile["batch_group_index"] = group_index
+                    profile["batch_group_count"] = len(grouped_items)
+                    profile["batch_total_candidates"] = len(prepared_items)
+                    profile["batch_bucket_mode"] = bucket_key[0]
+                    profile["batch_bucket_height"] = bucket_key[1]
+                    profile["batch_bucket_width"] = bucket_key[2]
+
+                grouped_results[item_index] = {"frame": output, "trace": trace}
+
+        results = [grouped_results[index] for index in range(len(prepared_items))]
+
+        if results:
+            aggregate_trace = dict(results[-1]["trace"])
+            aggregate_trace["batch_group_count"] = len(grouped_items)
+            aggregate_trace["batch_group_sizes"] = list(batch_group_sizes)
+            aggregate_trace["batch_total_candidates"] = len(prepared_items)
+            aggregate_trace["batch_group_buckets"] = list(batch_group_buckets)
+            self._last_trace = aggregate_trace
+        return results
