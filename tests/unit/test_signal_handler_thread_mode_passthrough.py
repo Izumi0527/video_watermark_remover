@@ -34,6 +34,9 @@ class _DummyVideoProcessorThread:
 
     def __init__(self, *args, **kwargs):
         type(self).last_kwargs = dict(kwargs)
+        self._running = False
+        self.stop_called = False
+        self.wait_calls = []
         self.progress = _DummySignal()
         self.status = _DummySignal()
         self.finished = _DummySignal()
@@ -42,16 +45,19 @@ class _DummyVideoProcessorThread:
         self.detailed_progress = _DummySignal()
 
     def start(self):
+        self._running = True
         return None
 
     def stop(self):
+        self.stop_called = True
         return None
 
     def wait(self, timeout=None):
-        return True
+        self.wait_calls.append(timeout)
+        return not self._running
 
     def isRunning(self):
-        return False
+        return self._running
 
 
 class _DummyBatchProcessorThread:
@@ -93,10 +99,20 @@ class _DummyPreviewPanel:
     def update_processing_preview_from_bgr(self, frame):
         return None
 
+    def set_image(self, path):
+        return None
+
+    def set_manual_selection_image(self, path):
+        return None
+
 
 class _DummyControlPanel:
+    def __init__(self):
+        self.processing_states = []
+        self.reset_progress_calls = 0
+
     def set_processing_state(self, value):
-        return None
+        self.processing_states.append(value)
 
     def get_advanced_parameters(self):
         return {}
@@ -107,10 +123,16 @@ class _DummyControlPanel:
     def update_detailed_progress(self, value):
         return None
 
+    def reset_progress(self):
+        self.reset_progress_calls += 1
+
 
 class _DummyFilePanel:
+    def __init__(self):
+        self.export_enabled_values = []
+
     def set_export_enabled(self, value):
-        return None
+        self.export_enabled_values.append(value)
 
     def hide_queue(self):
         return None
@@ -126,14 +148,23 @@ class _DummyFilePanel:
 
 
 class _DummyLogPanel:
+    def __init__(self):
+        self.warning_logs = []
+        self.error_messages = []
+        self.status_messages = []
+        self.success_messages = []
+
     def add_status_message(self, _message):
-        return None
+        self.status_messages.append(_message)
 
     def add_error_message(self, _message):
-        return None
+        self.error_messages.append(_message)
 
     def add_warning_log(self, message):
-        return None
+        self.warning_logs.append(message)
+
+    def add_success_message(self, message):
+        self.success_messages.append(message)
 
 
 class _DummyStyleManager:
@@ -183,3 +214,101 @@ def test_signal_handler_passes_video_mode_params_to_video_processor_thread(
     assert kwargs.get("enable_multiprocess") is True
     assert kwargs.get("use_pipeline") is True
     assert kwargs.get("num_processes") == 3
+
+
+def test_handle_stop_processing_does_not_block_when_thread_still_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_handler_module = _import_signal_handler_with_patches(monkeypatch)
+    SignalHandler = signal_handler_module.SignalHandler
+
+    control_panel = _DummyControlPanel()
+    file_panel = _DummyFilePanel()
+    handler = SignalHandler(
+        file_panel=file_panel,
+        preview_panel=_DummyPreviewPanel(),
+        control_panel=control_panel,
+        log_panel=_DummyLogPanel(),
+        preferences=_DummyPreferences(),
+        style_manager=_DummyStyleManager(),
+        main_window=None,
+    )
+    status_messages = []
+    handler.status_updated.connect(lambda msg: status_messages.append(msg))
+
+    handler.input_file_path = "demo.mp4"
+    handler.handle_start_processing()
+
+    thread = handler.video_processor_thread
+    assert thread is not None
+    thread._running = True
+
+    handler.handle_stop_processing()
+
+    assert thread.stop_called is True
+    assert thread.wait_calls == []
+    assert handler.video_processor_thread is thread
+    assert status_messages[-1] == "停止请求已发送，等待线程安全退出"
+    assert control_panel.processing_states[-1] is True
+    assert control_panel.reset_progress_calls == 0
+    assert file_panel.export_enabled_values[-1] is False
+
+
+def test_handle_stop_processing_cleans_up_when_thread_not_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_handler_module = _import_signal_handler_with_patches(monkeypatch)
+    SignalHandler = signal_handler_module.SignalHandler
+
+    control_panel = _DummyControlPanel()
+    handler = SignalHandler(
+        file_panel=_DummyFilePanel(),
+        preview_panel=_DummyPreviewPanel(),
+        control_panel=control_panel,
+        log_panel=_DummyLogPanel(),
+        preferences=_DummyPreferences(),
+        style_manager=_DummyStyleManager(),
+        main_window=None,
+    )
+    status_messages = []
+    handler.status_updated.connect(lambda msg: status_messages.append(msg))
+
+    handler.input_file_path = "demo.mp4"
+    handler.handle_start_processing()
+
+    thread = handler.video_processor_thread
+    assert thread is not None
+    thread._running = False
+
+    handler.handle_stop_processing()
+
+    assert thread.stop_called is True
+    assert handler.video_processor_thread is None
+    assert status_messages[-1] == "处理已停止"
+    assert control_panel.processing_states[-1] is False
+    assert control_panel.reset_progress_calls == 1
+
+
+def test_stale_finished_callback_does_not_override_active_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_handler_module = _import_signal_handler_with_patches(monkeypatch)
+    SignalHandler = signal_handler_module.SignalHandler
+
+    handler = SignalHandler(
+        file_panel=_DummyFilePanel(),
+        preview_panel=_DummyPreviewPanel(),
+        control_panel=_DummyControlPanel(),
+        log_panel=_DummyLogPanel(),
+        preferences=_DummyPreferences(),
+        style_manager=_DummyStyleManager(),
+        main_window=None,
+    )
+
+    active_thread = _DummyVideoProcessorThread()
+    stale_thread = _DummyVideoProcessorThread()
+    handler.video_processor_thread = active_thread
+
+    handler._on_processing_finished_with_thread("", stale_thread)
+
+    assert handler.video_processor_thread is active_thread

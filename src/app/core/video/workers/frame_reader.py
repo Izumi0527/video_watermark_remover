@@ -1,10 +1,39 @@
 import logging
+import queue
 from multiprocessing import queues, synchronize
 from typing import Optional
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
+
+
+def _put_frame_with_stop_awareness(
+    frame_queue: queues.Queue,
+    frame_index: int,
+    frame: NDArray[np.uint8],
+    stop_event: synchronize.Event,
+    logger: logging.Logger,
+) -> bool:
+    """在背压场景下快速响应取消请求，避免 stop 时长时间阻塞。"""
+    while not stop_event.is_set():
+        try:
+            frame_queue.put((frame_index, frame), timeout=0.2)
+            return True
+        except queue.Full:
+            continue
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to put frame %s into queue: %r", frame_index, exc)
+            return False
+    return False
+
+
+def _put_end_signal(frame_queue: queues.Queue, logger: logging.Logger) -> None:
+    """发送读取结束信号；失败仅记录调试信息。"""
+    try:
+        frame_queue.put(None, timeout=1)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Frame reader end signal skipped: %r", exc, exc_info=True)
 
 
 def extract_video_first_frame(video_path: str) -> Optional[NDArray[np.uint8]]:
@@ -104,7 +133,7 @@ def frame_reader_worker(
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             logger.error(f"Failed to open video: {video_path}")
-            frame_queue.put(None)
+            _put_end_signal(frame_queue, logger)
             return
 
         logger.info(f"Frame reader started: {total_frames} frames to read")
@@ -119,21 +148,26 @@ def frame_reader_worker(
                 logger.warning(f"Failed to read frame {frame_index}")
                 break
 
-            try:
-                frame_queue.put((frame_index, frame), timeout=10)
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"Failed to put frame {frame_index} into queue: {e}")
+            if not _put_frame_with_stop_awareness(
+                frame_queue, frame_index, frame, stop_event, logger
+            ):
+                if stop_event.is_set():
+                    logger.info(
+                        "Frame reader stopping while waiting queue slot at frame %s", frame_index
+                    )
+                else:
+                    logger.error("Failed to put frame %s into queue", frame_index)
                 break
 
             if frame_index % 100 == 0:
                 logger.debug(f"Frame reader: {frame_index}/{total_frames} frames read")
 
-        frame_queue.put(None)
+        _put_end_signal(frame_queue, logger)
         logger.info("Frame reader completed")
 
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Frame reader error: {e}")
-        frame_queue.put(None)
+        logger.error(f"Frame reader error: {e!r}")
+        _put_end_signal(frame_queue, logger)
 
     finally:
         if cap:

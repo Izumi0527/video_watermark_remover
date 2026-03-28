@@ -18,6 +18,26 @@ from ..utils.path import build_temp_path
 from ..workers.chunk import init_chunk_worker_ai_handler, process_video_chunk
 
 
+def _is_cancel_requested(processor) -> bool:
+    """统一判断是否收到用户取消请求。"""
+    if not getattr(processor, "_is_running", True):
+        return True
+    stop_event = getattr(processor, "_stop_event", None)
+    return bool(stop_event and stop_event.is_set())
+
+
+def _finalize_multiprocess_cancel(processor, temp_merged_path: Optional[str] = None) -> str:
+    """统一处理多进程模式取消收尾，避免误回退到单进程。"""
+    processor.status.emit("⚠️ 处理已取消")
+    if temp_merged_path and os.path.exists(temp_merged_path):
+        try:
+            os.remove(temp_merged_path)
+        except Exception as e:  # noqa: BLE001
+            processor.logger.debug("取消后清理临时合并文件失败: %s", e)
+    processor.logger.info("Multiprocess processing cancelled by user")
+    return ""
+
+
 def _calculate_chunks(
     processor,
     total_frames: int,
@@ -140,6 +160,10 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
     """
     temp_files: List[str] = []
     progress_queue: Optional[mp_queues.Queue[Any]] = None
+    temp_merged_path: Optional[str] = None
+    cancel_requested = False
+    fallback_error: Optional[Exception] = None
+    completed_output_path: Optional[str] = None
 
     try:
         processor.status.emit("📊 分析视频信息...")
@@ -224,62 +248,70 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
         chunk_paths = [r[0] for r in results if r[0] is not None]
         chunk_paths.sort()
 
-        processor.status.emit("🔗 正在合并视频块...")
-        processor.progress.emit(95)
+        if _is_cancel_requested(processor):
+            cancel_requested = True
+        else:
+            processor.status.emit("🔗 正在合并视频块...")
+            processor.progress.emit(95)
 
-        # 发射合并视频块阶段进度
-        processor._emit_detailed_progress("merging_audio", 0, 1, {"sub_phase": "merging_chunks"})
-
-        temp_merged_path = build_temp_path(processor.output_path, "temp_merged")
-        _merge_video_chunks(processor, chunk_paths, temp_merged_path)
-
-        if (
-            should_preserve_audio(processor.ai_params)
-            and processor.ffmpeg_processor
-            and processor.ffmpeg_processor.is_available()
-        ):
-            processor.status.emit("🎵 正在合并原始音频...")
-            processor.progress.emit(97)
-
-            # 发射音频合并阶段进度
-            processor._emit_detailed_progress("merging_audio", 0, 1, {"sub_phase": "merging_audio"})
-
-            audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
-                original_video_path=processor.input_path,
-                processed_video_path=temp_merged_path,
-                final_output_path=processor.output_path,
+            # 发射合并视频块阶段进度
+            processor._emit_detailed_progress(
+                "merging_audio", 0, 1, {"sub_phase": "merging_chunks"}
             )
 
-            if audio_success:
-                processor.logger.info("Audio merged successfully")
-                if os.path.exists(temp_merged_path):
-                    os.remove(temp_merged_path)
+            temp_merged_path = build_temp_path(processor.output_path, "temp_merged")
+            _merge_video_chunks(processor, chunk_paths, temp_merged_path)
+
+            if (
+                should_preserve_audio(processor.ai_params)
+                and processor.ffmpeg_processor
+                and processor.ffmpeg_processor.is_available()
+            ):
+                processor.status.emit("🎵 正在合并原始音频...")
+                processor.progress.emit(97)
+
+                # 发射音频合并阶段进度
+                processor._emit_detailed_progress(
+                    "merging_audio", 0, 1, {"sub_phase": "merging_audio"}
+                )
+
+                audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
+                    original_video_path=processor.input_path,
+                    processed_video_path=temp_merged_path,
+                    final_output_path=processor.output_path,
+                )
+
+                if audio_success:
+                    processor.logger.info("Audio merged successfully")
+                    if os.path.exists(temp_merged_path):
+                        os.remove(temp_merged_path)
+                else:
+                    processor.logger.warning("Audio merge failed, using video-only output")
+                    if os.path.exists(temp_merged_path):
+                        if os.path.exists(processor.output_path):
+                            os.remove(processor.output_path)
+                        os.replace(temp_merged_path, processor.output_path)
             else:
-                processor.logger.warning("Audio merge failed, using video-only output")
-                if os.path.exists(temp_merged_path):
-                    if os.path.exists(processor.output_path):
-                        os.remove(processor.output_path)
-                    os.replace(temp_merged_path, processor.output_path)
-        else:
-            if os.path.exists(processor.output_path):
-                os.remove(processor.output_path)
-            os.replace(temp_merged_path, processor.output_path)
+                if os.path.exists(processor.output_path):
+                    os.remove(processor.output_path)
+                os.replace(temp_merged_path, processor.output_path)
 
-        processor.progress.emit(100)
-        processor.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")
+            processor.progress.emit(100)
+            processor.status.emit(f"✅ 多进程处理完成! 处理了 {total_frames} 帧")
 
-        # 发射完成阶段进度
-        processor._emit_detailed_progress("completed", total_frames, total_frames)
+            # 发射完成阶段进度
+            processor._emit_detailed_progress("completed", total_frames, total_frames)
 
-        processor.logger.info(f"Multiprocess video processing completed: {processor.output_path}")
-        processor.finished.emit(processor.output_path)
+            processor.logger.info(
+                f"Multiprocess video processing completed: {processor.output_path}"
+            )
+            completed_output_path = processor.output_path
 
     except Exception as e:  # noqa: BLE001
-        processor.logger.error(
-            f"Multiprocess processing failed, falling back to single-process: {e}"
-        )
-        processor.status.emit("⚠️ 多进程失败，切换到单进程模式")
-        processor._process_video_singleprocess()
+        if _is_cancel_requested(processor):
+            cancel_requested = True
+        else:
+            fallback_error = e
 
     finally:
         if processor._progress_timer:
@@ -297,3 +329,21 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
                     processor.logger.debug(f"Removed temp file: {temp_file}")
                 except Exception as e:  # noqa: BLE001
                     processor.logger.warning(f"Failed to remove temp file {temp_file}: {e}")
+
+    if cancel_requested:
+        processor.finished.emit(
+            _finalize_multiprocess_cancel(processor, temp_merged_path=temp_merged_path)
+        )
+        return
+
+    if fallback_error is not None:
+        processor.logger.error(
+            "Multiprocess processing failed, falling back to single-process: %s",
+            fallback_error,
+        )
+        processor.status.emit("⚠️ 多进程失败，切换到单进程模式")
+        processor._process_video_singleprocess()
+        return
+
+    if completed_output_path is not None:
+        processor.finished.emit(completed_output_path)

@@ -104,6 +104,7 @@ class SignalHandler(QObject):
         self._last_batch_ai_params_generated_at: Optional[str] = None
         self._last_batch_config: Optional[dict] = None
         self._last_batch_runtime_config: Optional[dict] = None
+        self._single_stop_requested = False
 
         # 设置日志
         self.logger = logging.getLogger(__name__)
@@ -284,6 +285,15 @@ class SignalHandler(QObject):
             self.log_panel.add_warning_log("请先选择要处理的文件")
             return
 
+        if self.video_processor_thread:
+            if self.video_processor_thread.isRunning():
+                self.log_panel.add_warning_log("当前任务尚未完全结束，请稍候后再开始新任务")
+                self.logger.warning(
+                    "Start requested while previous processing thread still running"
+                )
+                return
+            self.video_processor_thread = None
+
         try:
             self.control_panel.set_processing_state(True)
             self.preview_panel.show_processing_progress(
@@ -336,23 +346,31 @@ class SignalHandler(QObject):
                 num_processes=ai_params.get("num_processes"),
                 use_pipeline=bool(ai_params.get("use_pipeline", False)),
             )
+            self._single_stop_requested = False
 
             # 连接信号
-            self.video_processor_thread.progress.connect(self.control_panel.update_progress)
-            self.video_processor_thread.status.connect(self.log_panel.add_status_message)
-            self.video_processor_thread.finished.connect(self._on_processing_finished)
-            self.video_processor_thread.error.connect(self._on_processing_error)
-            self.video_processor_thread.preview_update.connect(
+            worker_thread = self.video_processor_thread
+            worker_thread.progress.connect(self.control_panel.update_progress)
+            worker_thread.status.connect(self.log_panel.add_status_message)
+            worker_thread.finished.connect(
+                lambda output_path, thread=worker_thread: self._on_processing_finished_with_thread(
+                    output_path, thread
+                )
+            )
+            worker_thread.error.connect(
+                lambda error_msg, thread=worker_thread: self._on_processing_error_with_thread(
+                    error_msg, thread
+                )
+            )
+            worker_thread.preview_update.connect(
                 self.preview_panel.update_processing_preview_from_bgr
             )
 
             # 连接详细进度信号 (Phase 4 Stage 1.4)
-            self.video_processor_thread.detailed_progress.connect(
-                self.control_panel.update_detailed_progress
-            )
+            worker_thread.detailed_progress.connect(self.control_panel.update_detailed_progress)
 
             # 启动处理线程
-            self.video_processor_thread.start()
+            worker_thread.start()
 
             self.logger.info("Processing started with detailed progress tracking")
 
@@ -360,12 +378,28 @@ class SignalHandler(QObject):
             error_msg = f"处理启动失败: {str(e)}"
             self.log_panel.add_error_message(error_msg)
             self.control_panel.set_processing_state(False)
+            self.control_panel.reset_progress()
             self.logger.error(error_msg)
 
     def _on_processing_finished(self, output_path: str):
         """处理完成回调 (Phase 4 Stage 1.4)"""
+        # 兼容旧连接方式：默认允许收尾
+        return self._on_processing_finished_with_thread(output_path, None)
+
+    def _on_processing_finished_with_thread(
+        self,
+        output_path: str,
+        source_thread: Optional[VideoProcessorThread],
+    ) -> None:
+        """处理完成回调（带线程实例防抖，避免旧线程回调污染新状态）"""
+        if source_thread is not None and self.video_processor_thread is not source_thread:
+            self.logger.debug("忽略过期处理线程的完成回调")
+            return
+
         self.control_panel.set_processing_state(False)
-        self.video_processor_thread = None
+        self.control_panel.reset_progress()
+        self._release_video_processor_thread_if_stopped(source_thread)
+        self._single_stop_requested = False
         if output_path:
             self.log_panel.add_success_message(f"处理完成: {output_path}")
             self.status_updated.emit("处理完成")
@@ -386,12 +420,40 @@ class SignalHandler(QObject):
 
     def _on_processing_error(self, error_msg: str):
         """处理错误回调 (Phase 4 Stage 1.4)"""
+        return self._on_processing_error_with_thread(error_msg, None)
+
+    def _on_processing_error_with_thread(
+        self,
+        error_msg: str,
+        source_thread: Optional[VideoProcessorThread],
+    ) -> None:
+        """处理错误回调（带线程实例防抖，避免旧线程回调污染新状态）"""
+        if source_thread is not None and self.video_processor_thread is not source_thread:
+            self.logger.debug("忽略过期处理线程的错误回调")
+            return
+
         self.control_panel.set_processing_state(False)
+        self.control_panel.reset_progress()
         self.log_panel.add_error_message(f"处理失败: {error_msg}")
         self.status_updated.emit("处理失败")
         self.output_file_path = None
         self.file_panel.set_export_enabled(False)
-        self.video_processor_thread = None
+        self._release_video_processor_thread_if_stopped(source_thread)
+        self._single_stop_requested = False
+
+    def _release_video_processor_thread_if_stopped(
+        self,
+        source_thread: Optional[VideoProcessorThread],
+    ) -> None:
+        """仅在线程真正停止后释放引用，避免清理阶段跨线程对象销毁。"""
+        thread = source_thread or self.video_processor_thread
+        if thread is None:
+            return
+        if thread.isRunning():
+            self.logger.debug("处理线程仍在运行，延迟释放线程引用")
+            return
+        if self.video_processor_thread is thread:
+            self.video_processor_thread = None
 
     def handle_stop_processing(self) -> None:
         """处理停止处理请求 (Phase 4 Stage 1.4)"""
@@ -403,16 +465,26 @@ class SignalHandler(QObject):
             self.batch_processor.stop()
             stopped_msg = "批量停止请求已发送"
 
-        if self.video_processor_thread:
-            self.video_processor_thread.stop()
-            self.video_processor_thread.wait(5000)  # 等待最多5秒
-            if self.video_processor_thread.isRunning():
-                self.logger.warning("停止处理超时：处理线程仍在运行")
+        thread = self.video_processor_thread
+        if thread:
+            thread.stop()
+            if thread.isRunning():
+                # 不在 UI 线程同步 wait，避免阻塞与生命周期竞态
+                self._single_stop_requested = True
+                stopped_msg = "停止请求已发送，等待线程安全退出"
+                self.logger.info("停止请求已发送：处理线程正在退出")
             else:
                 self.video_processor_thread = None
+                self._single_stop_requested = False
+                self.control_panel.set_processing_state(False)
+                self.control_panel.reset_progress()  # 同时重置详细进度
+        else:
+            self.control_panel.set_processing_state(False)
+            self.control_panel.reset_progress()  # 同时重置详细进度
 
-        self.control_panel.set_processing_state(False)
-        self.control_panel.reset_progress()  # 同时重置详细进度
+        if not (thread and thread.isRunning()):
+            self.control_panel.set_processing_state(False)
+
         self.status_updated.emit(stopped_msg)
         self.output_file_path = None
         self.file_panel.set_export_enabled(False)

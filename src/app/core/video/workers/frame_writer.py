@@ -1,6 +1,7 @@
 import gc
 import heapq
 import logging
+import queue
 import time
 from multiprocessing import queues, synchronize
 from typing import Any, List, Optional, Tuple
@@ -136,9 +137,14 @@ def frame_writer_worker(  # noqa: C901
                 if next_frame_index % 50 == 0:
                     gc.collect()
 
+            except (queue.Empty, TimeoutError):
+                if stop_event.is_set():
+                    break
+                continue
             except Exception as e:  # noqa: BLE001
-                if "timeout" not in str(e).lower():
-                    logger.warning(f"Frame writer error: {e}")
+                if stop_event.is_set():
+                    break
+                logger.warning("Frame writer error: %r", e)
                 continue
 
         # 写入剩余的帧
@@ -153,6 +159,14 @@ def frame_writer_worker(  # noqa: C901
                 break
 
         logger.info(f"Frame writer completed: {next_frame_index}/{total_frames} frames written")
+
+        if stop_event.is_set():
+            logger.info(
+                "Frame writer stopped by user request: %s/%s frames written",
+                next_frame_index,
+                total_frames,
+            )
+            return (False, "cancelled")
 
         if next_frame_index < total_frames:
             warning_msg = f"Warning: Only {next_frame_index}/{total_frames} frames written"

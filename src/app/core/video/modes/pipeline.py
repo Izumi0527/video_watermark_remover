@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from multiprocessing import queues as mp_queues
 from multiprocessing import synchronize
 from typing import Any, Optional, cast
@@ -19,6 +20,26 @@ from ..workers.audio import async_audio_extractor
 from ..workers.frame_processor import frame_processor_worker, init_worker_ai_handler
 from ..workers.frame_reader import frame_reader_worker
 from ..workers.frame_writer import frame_writer_worker
+
+
+def _is_cancel_requested(processor) -> bool:
+    """统一判断是否收到用户取消请求。"""
+    if not getattr(processor, "_is_running", True):
+        return True
+    stop_event = getattr(processor, "_stop_event", None)
+    return bool(stop_event and stop_event.is_set())
+
+
+def _finalize_pipeline_cancel(processor, temp_output_path: Optional[str] = None) -> str:
+    """统一处理流水线取消收尾，避免误回退到其他模式。"""
+    processor.status.emit("⚠️ 处理已取消")
+    if temp_output_path and os.path.exists(temp_output_path):
+        try:
+            os.remove(temp_output_path)
+        except Exception as e:  # noqa: BLE001
+            processor.logger.debug("取消后清理流水线临时文件失败: %s", e)
+    processor.logger.info("Pipeline processing cancelled by user")
+    return ""
 
 
 def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_queues.Queue[Any]:
@@ -101,6 +122,21 @@ def _check_pipeline_progress(
         processor.logger.warning(f"Pipeline progress polling error: {e}")
 
 
+def _wait_processor_futures(processor, processor_futures: list[Any]) -> None:
+    """等待处理进程完成；若已收到取消请求则快速退出等待，避免 UI stop 超时。"""
+    pending = list(processor_futures)
+    while pending:
+        next_pending: list[Any] = []
+        for future in pending:
+            try:
+                future.result(timeout=0.2)
+            except FuturesTimeoutError:
+                if _is_cancel_requested(processor):
+                    return
+                next_pending.append(future)
+        pending = next_pending
+
+
 def process_video_pipeline(processor) -> None:  # noqa: C901
     """
     流水线视频处理
@@ -110,6 +146,10 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
     result_queue: Optional[mp_queues.Queue[Any]] = None
     progress_queue: Optional[mp_queues.Queue[Any]] = None
     audio_temp_path = None
+    temp_output_path: Optional[str] = None
+    cancel_requested = False
+    fallback_error: Optional[Exception] = None
+    completed_output_path: Optional[str] = None
 
     try:
         processor.status.emit("📊 分析视频信息...")
@@ -264,87 +304,90 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
         processor._reader_thread.join()
         processor.logger.info("Frame reader completed")
 
-        for i, future in enumerate(processor_futures):
-            future.result()
+        _wait_processor_futures(processor, processor_futures)
         processor.logger.info("All processor workers completed")
 
         processor._writer_thread.join()
         processor.logger.info("Frame writer completed")
 
-        if not writer_result:
-            raise Exception("Writer thread failed to return result")
-
-        success, error_msg = writer_result[0]
-        if not success:
-            raise Exception(f"Frame writer failed: {error_msg}")
-
-        if error_msg:
-            processor.logger.warning(error_msg)
-
-        if (
-            should_preserve_audio(processor.ai_params)
-            and processor.ffmpeg_processor
-            and processor.ffmpeg_processor.is_available()
-        ):
-            processor.status.emit("🎵 正在合并原始音频...")
-            processor.progress.emit(95)
-
-            # 发射音频合并阶段进度
-            processor._emit_detailed_progress("merging_audio", 0, 1)
-
-            audio_timeout = max(10, total_frames / 100)
-            audio_source = processor.input_path
-
-            if audio_completion_event:
-                if audio_completion_event.wait(timeout=audio_timeout):
-                    processor.logger.info(f"Using extracted audio: {audio_temp_path}")
-                    audio_source = audio_temp_path
-                else:
-                    processor.logger.warning(
-                        f"Audio extraction incomplete (timeout={audio_timeout:.1f}s), using original video"
-                    )
-
-            audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
-                original_video_path=audio_source,
-                processed_video_path=temp_output_path,
-                final_output_path=processor.output_path,
-            )
-
-            if audio_temp_path and os.path.exists(audio_temp_path):
-                try:
-                    os.remove(audio_temp_path)
-                    processor.logger.debug(f"Removed temp audio: {audio_temp_path}")
-                except Exception as e:  # noqa: BLE001
-                    processor.logger.warning(f"Failed to remove temp audio: {e}")
-
-            if audio_success:
-                processor.logger.info("Audio merged successfully")
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
-            else:
-                processor.logger.warning("Audio merge failed, using video-only output")
-                if os.path.exists(temp_output_path):
-                    if os.path.exists(processor.output_path):
-                        os.remove(processor.output_path)
-                    os.replace(temp_output_path, processor.output_path)
+        if _is_cancel_requested(processor):
+            cancel_requested = True
         else:
-            if os.path.exists(processor.output_path):
-                os.remove(processor.output_path)
-            os.replace(temp_output_path, processor.output_path)
+            if not writer_result:
+                raise Exception("Writer thread failed to return result")
 
-        processor.progress.emit(100)
-        processor.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
+            success, error_msg = writer_result[0]
+            if not success:
+                raise Exception(f"Frame writer failed: {error_msg}")
 
-        # 发射完成阶段进度
-        processor._emit_detailed_progress("completed", total_frames, total_frames)
+            if error_msg:
+                processor.logger.warning(error_msg)
 
-        processor.logger.info(f"Pipeline video processing completed: {processor.output_path}")
-        processor.finished.emit(processor.output_path)
+            if (
+                should_preserve_audio(processor.ai_params)
+                and processor.ffmpeg_processor
+                and processor.ffmpeg_processor.is_available()
+            ):
+                processor.status.emit("🎵 正在合并原始音频...")
+                processor.progress.emit(95)
+
+                # 发射音频合并阶段进度
+                processor._emit_detailed_progress("merging_audio", 0, 1)
+
+                audio_timeout = max(10, total_frames / 100)
+                audio_source = processor.input_path
+
+                if audio_completion_event:
+                    if audio_completion_event.wait(timeout=audio_timeout):
+                        processor.logger.info(f"Using extracted audio: {audio_temp_path}")
+                        audio_source = audio_temp_path
+                    else:
+                        processor.logger.warning(
+                            f"Audio extraction incomplete (timeout={audio_timeout:.1f}s), using original video"
+                        )
+
+                audio_success = processor.ffmpeg_processor.process_video_with_audio_preservation(
+                    original_video_path=audio_source,
+                    processed_video_path=temp_output_path,
+                    final_output_path=processor.output_path,
+                )
+
+                if audio_temp_path and os.path.exists(audio_temp_path):
+                    try:
+                        os.remove(audio_temp_path)
+                        processor.logger.debug(f"Removed temp audio: {audio_temp_path}")
+                    except Exception as e:  # noqa: BLE001
+                        processor.logger.warning(f"Failed to remove temp audio: {e}")
+
+                if audio_success:
+                    processor.logger.info("Audio merged successfully")
+                    if os.path.exists(temp_output_path):
+                        os.remove(temp_output_path)
+                else:
+                    processor.logger.warning("Audio merge failed, using video-only output")
+                    if os.path.exists(temp_output_path):
+                        if os.path.exists(processor.output_path):
+                            os.remove(processor.output_path)
+                        os.replace(temp_output_path, processor.output_path)
+            else:
+                if os.path.exists(processor.output_path):
+                    os.remove(processor.output_path)
+                os.replace(temp_output_path, processor.output_path)
+
+            processor.progress.emit(100)
+            processor.status.emit(f"✅ 流水线处理完成! 处理了 {total_frames} 帧")
+
+            # 发射完成阶段进度
+            processor._emit_detailed_progress("completed", total_frames, total_frames)
+
+            processor.logger.info(f"Pipeline video processing completed: {processor.output_path}")
+            completed_output_path = processor.output_path
 
     except Exception as e:  # noqa: BLE001
-        processor.logger.error(f"Pipeline processing failed, falling back to chunk mode: {e}")
-        processor.status.emit("⚠️ 流水线失败，切换到分块模式")
-        processor._process_video_multiprocess()
+        if _is_cancel_requested(processor):
+            cancel_requested = True
+        else:
+            fallback_error = e
 
     finally:
         if processor._progress_timer:
@@ -379,3 +422,20 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
                 processor.logger.debug(f"Cleaned up temp audio in finally: {audio_temp_path}")
             except Exception as e:  # noqa: BLE001
                 processor.logger.warning(f"Failed to clean up temp audio in finally: {e}")
+
+    if cancel_requested:
+        processor.finished.emit(
+            _finalize_pipeline_cancel(processor, temp_output_path=temp_output_path)
+        )
+        return
+
+    if fallback_error is not None:
+        processor.logger.error(
+            "Pipeline processing failed, falling back to chunk mode: %s", fallback_error
+        )
+        processor.status.emit("⚠️ 流水线失败，切换到分块模式")
+        processor._process_video_multiprocess()
+        return
+
+    if completed_output_path is not None:
+        processor.finished.emit(completed_output_path)
