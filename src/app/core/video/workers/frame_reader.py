@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from ..runtime_guard import is_resource_exhaustion_error
+
 
 def _put_frame_with_stop_awareness(
     frame_queue: queues.Queue,
@@ -23,6 +25,8 @@ def _put_frame_with_stop_awareness(
         except queue.Full:
             continue
         except Exception as exc:  # noqa: BLE001
+            if is_resource_exhaustion_error(exc):
+                stop_event.set()
             logger.error("Failed to put frame %s into queue: %r", frame_index, exc)
             return False
     return False

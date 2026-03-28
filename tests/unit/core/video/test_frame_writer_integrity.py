@@ -49,18 +49,32 @@ class _FakeResultQueueWithEmpty:
 
 
 class _FakeStopEvent:
+    def __init__(self) -> None:
+        self.set_called = False
+
     def is_set(self) -> bool:
         return False
+
+    def set(self) -> None:
+        self.set_called = True
 
 
 class _FakeStoppedEvent:
     def is_set(self) -> bool:
         return True
 
+    def set(self) -> None:
+        return None
+
 
 class _FakeProgressQueue:
     def put(self, *_args, **_kwargs) -> None:
         return None
+
+
+class _FakeMemoryErrorQueue:
+    def get(self, timeout=None):  # noqa: ARG002
+        raise MemoryError("queue memory pressure")
 
 
 def test_frame_writer_returns_failure_when_frames_missing(monkeypatch) -> None:
@@ -166,3 +180,38 @@ def test_frame_writer_returns_cancelled_when_stop_event_is_set(monkeypatch) -> N
 
     assert success is False
     assert error_message == "cancelled"
+
+
+def test_frame_writer_memory_pressure_sets_stop_event(monkeypatch) -> None:
+    fake_cv2 = type(
+        "_FakeCV2",
+        (),
+        {
+            "VideoWriter": object,
+            "VideoWriter_fourcc": staticmethod(lambda *_args: 0),
+        },
+    )()
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    monkeypatch.delitem(sys.modules, "app.core.video.workers.frame_writer", raising=False)
+    frame_writer = importlib.import_module("app.core.video.workers.frame_writer")
+
+    monkeypatch.setattr(
+        frame_writer,
+        "create_video_writer",
+        lambda *_args, **_kwargs: (_FakeWriter(), "mp4v"),
+    )
+
+    stop_event = _FakeStopEvent()
+    success, error_message = frame_writer.frame_writer_worker(
+        result_queue=_FakeMemoryErrorQueue(),
+        output_path="C:/tmp/out.mp4",
+        video_params={"fps": 25, "width": 16, "height": 16},
+        total_frames=1,
+        stop_event=stop_event,
+        progress_queue=_FakeProgressQueue(),
+    )
+
+    assert success is False
+    assert error_message is not None
+    assert "memory" in error_message.lower()
+    assert stop_event.set_called is True

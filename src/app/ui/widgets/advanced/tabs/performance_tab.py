@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .....config.advanced_params import PROCESSING_MODE_OPTIONS, processing_mode_to_label
+from .....config.advanced_params import PROCESSING_MODE_UI_OPTIONS, processing_mode_to_label
 
 
 class PerformanceParametersTab:
@@ -31,9 +31,13 @@ class PerformanceParametersTab:
         thread_layout = QFormLayout(thread_group)
 
         parent_widget.processing_mode_combo = QComboBox()
-        for mode in PROCESSING_MODE_OPTIONS:
+        for mode in PROCESSING_MODE_UI_OPTIONS:
             parent_widget.processing_mode_combo.addItem(processing_mode_to_label(mode), mode)
         thread_layout.addRow("处理模式:", parent_widget.processing_mode_combo)
+        thread_layout.addRow(
+            "",
+            QLabel("说明：处理模式为单选；“多进程分块”和“流水线”不能同时启用。"),
+        )
 
         parent_widget.worker_count_spin = QSpinBox()
         parent_widget.worker_count_spin.setMinimum(0)

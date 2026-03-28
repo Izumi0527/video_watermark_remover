@@ -74,3 +74,18 @@ def test_manager_ignores_legacy_processing_output_preferences() -> None:
 
     assert snapshot.preserve_audio is True
     assert snapshot.compression_quality == 85
+
+
+def test_manager_migrates_legacy_runtime_mode_flags_to_processing_mode() -> None:
+    config_dir = _make_config_dir("legacy_runtime_mode_flags")
+    manager = UserPreferencesManager(config_dir=str(config_dir / "prefs"))
+    manager.preferences["advanced_params"] = {
+        "use_pipeline": True,
+        "enable_multiprocess": True,
+        "worker_count": 4,
+    }
+
+    snapshot = manager.get_advanced_params_snapshot()
+
+    assert snapshot.processing_mode == "pipeline"
+    assert snapshot.worker_count == 4

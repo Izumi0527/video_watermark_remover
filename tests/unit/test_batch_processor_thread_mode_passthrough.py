@@ -4,8 +4,8 @@ BatchProcessorThread 内部：VideoProcessorThread 模式参数透传回归测�
 
 目标：
 - 批处理中每个文件创建 VideoProcessorThread 时也必须透传：
-  enable_multiprocess / use_pipeline / num_processes
-否则批处理里的单个视频仍会静默走默认 single-process 慢路径。
+  runtime_performance（统一运行时快照）
+否则批处理里的单个视频仍会静默走旧的散装模式参数。
 """
 
 from __future__ import annotations
@@ -48,9 +48,12 @@ def test_batch_processor_thread_passes_video_mode_params_to_video_processor_thre
     batch = BatchProcessorThread(
         queue=[],
         ai_params={
-            "enable_multiprocess": True,
-            "use_pipeline": True,
-            "num_processes": 2,
+            "processing_mode": "pipeline",
+            "resolved_processing_mode": "single_process",
+            "enable_multiprocess": False,
+            "use_pipeline": False,
+            "num_processes": 1,
+            "mode_restriction_reason": "gpu_deep_backend_serial_only",
         },
         config=None,
         preloaded_ai_handler=None,
@@ -67,6 +70,7 @@ def test_batch_processor_thread_passes_video_mode_params_to_video_processor_thre
     result = batch._process_single_file(str(input_path), str(output_path), 0)
 
     assert result[0] == ProcessingStatus.CANCELLED
-    assert captured.get("enable_multiprocess") is True
-    assert captured.get("use_pipeline") is True
-    assert captured.get("num_processes") == 2
+    runtime_performance = captured.get("runtime_performance") or {}
+    assert runtime_performance.get("requested_processing_mode") == "pipeline"
+    assert runtime_performance.get("resolved_processing_mode") == "single_process"
+    assert runtime_performance.get("worker_count") == 1

@@ -12,8 +12,10 @@ from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
+from ...config.advanced_params import ResolvedPerformanceConfig
 from ...utils import IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 from ..exceptions import ModelLoadError, UnsupportedFormatError
+from .runtime_guard import resolve_video_runtime_mode
 
 AIHandler = None
 FFmpegAudioProcessor = None
@@ -203,21 +205,54 @@ class VideoProcessorThread(QThread):
         enable_multiprocess: bool = False,
         num_processes: Optional[int] = None,
         use_pipeline: bool = False,
+        runtime_performance: Optional[Dict[str, Any]] = None,
         parent: Optional[QThread] = None,
     ) -> None:
         super().__init__(parent)
         self.input_path = input_path
         self.output_path = output_path
         self.ai_params = _inject_inpainting_model_path(ai_params, config)
+        self.runtime_performance = dict(runtime_performance or {})
         self.config = config
         self.ai_handler: Optional[Any] = preloaded_ai_handler
         ffmpeg_processor_class = _resolve_ffmpeg_audio_processor_class()
         self.ffmpeg_processor: Optional[Any] = ffmpeg_processor_class(config)
         self._is_running = True
-
-        self.enable_multiprocess = enable_multiprocess
-        self.num_processes = num_processes or min(multiprocessing.cpu_count(), 4)
-        self.use_pipeline = use_pipeline
+        requested_num_processes = num_processes or min(multiprocessing.cpu_count(), 4)
+        runtime_ai_params = dict(self.ai_params)
+        if self.runtime_performance:
+            runtime_ai_params.setdefault(
+                "processing_mode", self.runtime_performance.get("requested_processing_mode")
+            )
+            runtime_ai_params.setdefault(
+                "resolved_processing_mode", self.runtime_performance.get("resolved_processing_mode")
+            )
+            runtime_ai_params.setdefault(
+                "enable_multiprocess", self.runtime_performance.get("enable_multiprocess")
+            )
+            runtime_ai_params.setdefault(
+                "use_pipeline", self.runtime_performance.get("use_pipeline")
+            )
+            runtime_ai_params.setdefault(
+                "num_processes", self.runtime_performance.get("worker_count")
+            )
+            runtime_ai_params.setdefault(
+                "mode_restriction_reason", self.runtime_performance.get("mode_restriction_reason")
+            )
+        runtime_ai_params.setdefault("enable_multiprocess", enable_multiprocess)
+        runtime_ai_params.setdefault("use_pipeline", use_pipeline)
+        runtime_ai_params.setdefault("num_processes", requested_num_processes)
+        runtime_decision = resolve_video_runtime_mode(runtime_ai_params)
+        self.ai_params.update(runtime_decision.to_ai_params_overrides())
+        self.runtime_performance = ResolvedPerformanceConfig.from_runtime_sources(
+            ai_params=self.ai_params
+        ).to_manifest_dict()
+        self.enable_multiprocess = runtime_decision.enable_multiprocess
+        self.num_processes = runtime_decision.worker_count
+        self.use_pipeline = runtime_decision.use_pipeline
+        self.runtime_processing_mode = runtime_decision.effective_mode
+        self.runtime_processing_guard_reason = runtime_decision.reason
+        self.requested_runtime_processing_mode = runtime_decision.requested_mode
         self._progress_timer: Optional[QTimer] = None
         self._stop_event: Optional[MpEvent] = None
 
@@ -231,6 +266,13 @@ class VideoProcessorThread(QThread):
 
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"VideoProcessorThread initialized for {input_path}")
+        if self.runtime_processing_guard_reason:
+            self.logger.warning(
+                "运行模式安全护栏已触发: requested=%s effective=%s reason=%s",
+                self.requested_runtime_processing_mode,
+                self.runtime_processing_mode,
+                self.runtime_processing_guard_reason,
+            )
 
         if preloaded_ai_handler:
             self.logger.info("使用预加载的AI模型，处理速度将得到优化")
@@ -331,6 +373,8 @@ class VideoProcessorThread(QThread):
                 self.logger.debug("打印处理配置快照失败: %s", exc)
 
             file_ext = os.path.splitext(self.input_path)[1].lower()
+            if self.runtime_processing_guard_reason:
+                self.status.emit("⚠️ 检测到高风险 GPU 深度修复组合，已自动切换到单进程模式")
 
             if file_ext in IMAGE_FILE_EXTENSIONS:
                 self._process_image()

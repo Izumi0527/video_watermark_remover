@@ -4,6 +4,8 @@ import logging
 from multiprocessing import queues, synchronize
 from typing import Any, Optional
 
+from ..runtime_guard import is_resource_exhaustion_error
+
 AIHandler = None
 
 
@@ -153,6 +155,10 @@ def frame_processor_worker(
                 _report_progress_non_blocking(progress_queue, worker_id, processed_count, logger)
 
             except Exception as e:
+                if is_resource_exhaustion_error(e):
+                    stop_event.set()
+                    logger.error("Worker %s resource exhaustion: %r", worker_id, e)
+                    break
                 if not _is_timeout_error(e):
                     logger.warning(f"Worker {worker_id} processing error: {e}")
                 continue

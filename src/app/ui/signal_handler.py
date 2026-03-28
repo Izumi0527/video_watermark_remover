@@ -329,6 +329,13 @@ class SignalHandler(QObject):
                 input_file_path=self.input_file_path,
                 is_batch=False,
             )
+            runtime_performance = self._resolve_runtime_performance_config(
+                params_builder=params_builder,
+                advanced_params=advanced_params,
+                input_file_path=self.input_file_path,
+                is_batch=False,
+                ai_params=ai_params,
+            ).to_manifest_dict()
             output_path = resolve_output_path(self.input_file_path, ai_params)
 
             # 使用预加载的AI模型 (如果可用)
@@ -345,6 +352,7 @@ class SignalHandler(QObject):
                 enable_multiprocess=bool(ai_params.get("enable_multiprocess", False)),
                 num_processes=ai_params.get("num_processes"),
                 use_pipeline=bool(ai_params.get("use_pipeline", False)),
+                runtime_performance=runtime_performance,
             )
             self._single_stop_requested = False
 
@@ -1809,7 +1817,7 @@ class SignalHandler(QObject):
             batch_runtime_config,
         )
 
-    def _resolve_runtime_performance_config(
+    def _resolve_runtime_performance_config(  # noqa: C901
         self,
         *,
         params_builder: Any,
@@ -1829,6 +1837,16 @@ class SignalHandler(QObject):
                 )
                 if isinstance(resolved_runtime_config, ResolvedPerformanceConfig):
                     return resolved_runtime_config
+                to_manifest_dict = getattr(resolved_runtime_config, "to_manifest_dict", None)
+                if callable(to_manifest_dict):
+                    manifest = to_manifest_dict()
+                    if isinstance(manifest, dict):
+                        try:
+                            return ResolvedPerformanceConfig(**manifest)
+                        except TypeError:
+                            self.logger.debug(
+                                "builder.build_resolved_performance_config 返回了不完整 manifest，回退兼容路径"
+                            )
             except TypeError:
                 self.logger.debug("builder.build_resolved_performance_config 不支持新签名，回退兼容路径")
 

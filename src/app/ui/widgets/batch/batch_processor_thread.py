@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ....config.advanced_params import ResolvedPerformanceConfig
+
 # 导入视频处理线程
 from ....core.video.output_strategy import resolve_output_path
 from ....core.video.thread import VideoProcessorThread
@@ -579,6 +581,15 @@ class BatchProcessorThread(QThread):
                 file_index,
                 file_id=normalized_file_id,
             )
+            runtime_performance = {}
+            if 0 <= file_index < len(self.file_queue):
+                runtime_performance = dict(
+                    self.file_queue[file_index].get("runtime_performance") or {}
+                )
+            if not runtime_performance:
+                runtime_performance = ResolvedPerformanceConfig.from_runtime_sources(
+                    ai_params=file_ai_params
+                ).to_manifest_dict()
 
             # 创建 VideoProcessorThread 进行实际处理
             processor = VideoProcessorThread(
@@ -590,6 +601,7 @@ class BatchProcessorThread(QThread):
                 enable_multiprocess=bool(file_ai_params.get("enable_multiprocess", False)),
                 num_processes=file_ai_params.get("num_processes"),
                 use_pipeline=bool(file_ai_params.get("use_pipeline", False)),
+                runtime_performance=runtime_performance,
             )
 
             # 连接进度信号

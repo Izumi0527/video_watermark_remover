@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Tuple
 import cv2
 
 from ..output_strategy import create_video_writer
+from ..runtime_guard import is_resource_exhaustion_error
 
 
 def frame_writer_worker(  # noqa: C901
@@ -144,6 +145,11 @@ def frame_writer_worker(  # noqa: C901
             except Exception as e:  # noqa: BLE001
                 if stop_event.is_set():
                     break
+                if is_resource_exhaustion_error(e):
+                    stop_event.set()
+                    error_msg = f"Frame writer memory error: {e}"
+                    logger.error(error_msg)
+                    return (False, error_msg)
                 logger.warning("Frame writer error: %r", e)
                 continue
 

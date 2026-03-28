@@ -9,9 +9,10 @@
 
 """
 
+import sys
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 
 @dataclass(frozen=True)
@@ -28,18 +29,101 @@ class QueueBudget:
     minimum_viable_memory_mb: float
 
 
+@dataclass(frozen=True)
+class RuntimeModeConstraint:
+    """运行模式的资源约束解析结果。"""
+
+    requested_worker_count: int
+    effective_worker_count: int
+    pipeline_allowed: bool
+    deep_gpu_backend: bool
+    reserved_memory_mb: int
+    serialization_overhead_factor: float
+    reason: Optional[str] = None
+
+
+_DEEP_GPU_BACKENDS = {"lama", "legacy_unet", "mat"}
+
+
+def resolve_runtime_mode_constraint(
+    *,
+    ai_params: Optional[Mapping[str, Any]],
+    requested_worker_count: int,
+    platform_name: Optional[str] = None,
+) -> RuntimeModeConstraint:
+    """解析特定 AI 后端下的运行时约束。"""
+    normalized_requested_workers = max(1, int(requested_worker_count or 1))
+    normalized_platform = str(platform_name or sys.platform).lower()
+    normalized_ai_params = dict(ai_params or {})
+    requested_backend = (
+        str(normalized_ai_params.get("requested_inpainting_backend", "") or "").strip().lower()
+    )
+    use_gpu_inpainting = bool(normalized_ai_params.get("use_gpu_inpainting", False))
+    deep_gpu_backend = use_gpu_inpainting and requested_backend in _DEEP_GPU_BACKENDS
+
+    if not deep_gpu_backend:
+        return RuntimeModeConstraint(
+            requested_worker_count=normalized_requested_workers,
+            effective_worker_count=normalized_requested_workers,
+            pipeline_allowed=True,
+            deep_gpu_backend=False,
+            reserved_memory_mb=0,
+            serialization_overhead_factor=1.0,
+            reason=None,
+        )
+
+    gpu_memory_budget_mb = max(256, int(normalized_ai_params.get("gpu_memory_mb", 2048) or 2048))
+    serialization_overhead_factor = 3.0 if normalized_platform.startswith("win") else 2.0
+    reserved_memory_mb = max(256, min(gpu_memory_budget_mb // 2, 2048))
+
+    return RuntimeModeConstraint(
+        requested_worker_count=normalized_requested_workers,
+        effective_worker_count=1,
+        pipeline_allowed=False,
+        deep_gpu_backend=True,
+        reserved_memory_mb=reserved_memory_mb,
+        serialization_overhead_factor=serialization_overhead_factor,
+        reason="gpu_deep_backend_serial_only",
+    )
+
+
 def calculate_runtime_queue_budget(
     enable_cache: bool,
     cache_size_mb: int,
     frame_shape: tuple[int, int],
     requested_worker_count: int = 1,
+    runtime_constraint: Optional[RuntimeModeConstraint] = None,
 ) -> QueueBudget:
     """根据缓存预算推导流水线队列与写入缓冲大小。"""
+    constraint = runtime_constraint or RuntimeModeConstraint(
+        requested_worker_count=max(1, int(requested_worker_count or 1)),
+        effective_worker_count=max(1, int(requested_worker_count or 1)),
+        pipeline_allowed=True,
+        deep_gpu_backend=False,
+        reserved_memory_mb=0,
+        serialization_overhead_factor=1.0,
+        reason=None,
+    )
+    if not constraint.pipeline_allowed:
+        return QueueBudget(
+            frame_queue_size=0,
+            result_queue_size=0,
+            writer_buffer_size=0,
+            requested_worker_count=constraint.requested_worker_count,
+            effective_worker_count=constraint.effective_worker_count,
+            pipeline_viable=False,
+            estimated_total_memory_mb=0.0,
+            minimum_viable_memory_mb=0.0,
+        )
+
     height, width = frame_shape[:2]
     frame_bytes = max(1, int(height) * int(width) * 3)
-    frame_mb = max(1.0, frame_bytes / (1024 * 1024))
+    frame_mb = max(1.0, frame_bytes / (1024 * 1024)) * max(
+        1.0, float(constraint.serialization_overhead_factor)
+    )
     normalized_cache_mb = max(64, int(cache_size_mb)) if enable_cache else 64
-    normalized_requested_workers = max(1, int(requested_worker_count or 1))
+    normalized_cache_mb = max(64, normalized_cache_mb - int(constraint.reserved_memory_mb))
+    normalized_requested_workers = max(1, int(constraint.effective_worker_count or 1))
 
     # 预算不仅要覆盖三个显式缓冲区，还要覆盖：
     # - 读取线程手上的 1 帧
@@ -61,7 +145,7 @@ def calculate_runtime_queue_budget(
             frame_queue_size=0,
             result_queue_size=0,
             writer_buffer_size=0,
-            requested_worker_count=normalized_requested_workers,
+            requested_worker_count=constraint.requested_worker_count,
             effective_worker_count=0,
             pipeline_viable=False,
             estimated_total_memory_mb=0.0,
@@ -98,7 +182,7 @@ def calculate_runtime_queue_budget(
         frame_queue_size=frame_queue_size,
         result_queue_size=result_queue_size,
         writer_buffer_size=writer_buffer_size,
-        requested_worker_count=normalized_requested_workers,
+        requested_worker_count=constraint.requested_worker_count,
         effective_worker_count=effective_worker_count,
         pipeline_viable=True,
         estimated_total_memory_mb=(total_estimated_slots * frame_mb),
@@ -297,5 +381,7 @@ __all__ = [
     "AdaptiveBackpressure",
     "BackpressureController",
     "QueueBudget",
+    "RuntimeModeConstraint",
     "calculate_runtime_queue_budget",
+    "resolve_runtime_mode_constraint",
 ]

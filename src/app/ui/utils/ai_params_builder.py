@@ -16,6 +16,7 @@ AI参数构建器
 
 import logging
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -155,6 +156,16 @@ class AIParamsBuilder:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self._validator = get_validator()
+
+    def _is_cuda_available(self) -> bool:
+        """判断当前环境是否可用 CUDA。"""
+        try:
+            torch_module = sys.modules.get("torch")
+            if torch_module is None:
+                return False
+            return bool(torch_module.cuda.is_available())
+        except Exception:  # noqa: BLE001
+            return False
 
     def build_from_ui(
         self,
@@ -301,8 +312,11 @@ class AIParamsBuilder:
         # GPU 修复开关（布尔值）：仅当用户选择了 GPU 深度学习 U-Net 时才启用。
         # 否则即使勾选了“启用 GPU”，也应尊重 OpenCV 算法选择，避免“修复算法看起来不生效”。
         enable_gpu = bool(advanced_params.get("enable_gpu", True))
+        cuda_available = self._is_cuda_available()
         params["use_gpu_inpainting"] = bool(
-            enable_gpu and params["requested_inpainting_backend"] in {"legacy_unet", "lama", "mat"}
+            enable_gpu
+            and cuda_available
+            and params["requested_inpainting_backend"] in {"legacy_unet", "lama", "mat"}
         )
 
         # 后处理选项（布尔值，无需验证）
@@ -365,12 +379,25 @@ class AIParamsBuilder:
     ) -> ResolvedPerformanceConfig:
         """从 UI 参数构建统一运行时性能配置。"""
         snapshot = AdvancedParamsSnapshot.from_dict(advanced_params)
+        inpainting_method = advanced_params.get("inpainting_method", "LaMa 深度学习修复（推荐）")
+        normalized_algorithm = self._map_inpainting_method(inpainting_method)
+        requested_inpainting_backend = self._resolve_requested_inpainting_backend(
+            inpainting_method,
+            normalized_algorithm,
+        )
+        use_gpu_inpainting = bool(
+            advanced_params.get("enable_gpu", snapshot.enable_gpu)
+            and self._is_cuda_available()
+            and requested_inpainting_backend in {"legacy_unet", "lama", "mat"}
+        )
         context = ProcessingContext(
             input_file_path=input_file_path,
             is_batch=is_batch,
             prefer_pipeline=True,
             cpu_count=os.cpu_count() or 4,
             gpu_enabled=bool(advanced_params.get("enable_gpu", snapshot.enable_gpu)),
+            requested_inpainting_backend=requested_inpainting_backend,
+            use_gpu_inpainting=use_gpu_inpainting,
         )
         return snapshot.resolve(context)
 

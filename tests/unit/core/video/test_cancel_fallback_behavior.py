@@ -528,6 +528,102 @@ def test_pipeline_fallback_starts_after_timer_cleanup(monkeypatch: pytest.Monkey
     assert timeline.index("timer_stop") < timeline.index("fallback")
 
 
+def test_pipeline_memory_pressure_fallbacks_to_singleprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_common_import_stubs(monkeypatch)
+
+    audio_module = types.ModuleType("app.core.video.workers.audio")
+    audio_module.async_audio_extractor = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "app.core.video.workers.audio", audio_module)
+
+    frame_processor_module = types.ModuleType("app.core.video.workers.frame_processor")
+    frame_processor_module.frame_processor_worker = lambda *args, **kwargs: None
+    frame_processor_module.init_worker_ai_handler = lambda *args, **kwargs: None
+    monkeypatch.setitem(
+        sys.modules, "app.core.video.workers.frame_processor", frame_processor_module
+    )
+
+    frame_reader_module = types.ModuleType("app.core.video.workers.frame_reader")
+    frame_reader_module.frame_reader_worker = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "app.core.video.workers.frame_reader", frame_reader_module)
+
+    frame_writer_module = types.ModuleType("app.core.video.workers.frame_writer")
+    frame_writer_module.frame_writer_worker = lambda *args, **kwargs: (
+        False,
+        "frame_writer_memory_pressure",
+    )
+    monkeypatch.setitem(sys.modules, "app.core.video.workers.frame_writer", frame_writer_module)
+
+    monkeypatch.delitem(sys.modules, "app.core.video.modes.pipeline", raising=False)
+    pipeline_module = importlib.import_module("app.core.video.modes.pipeline")
+
+    class _FakePipelineExecutor:
+        def __init__(self, *args, **kwargs):  # noqa: ARG002
+            return None
+
+        def submit(self, *args, **kwargs):  # noqa: ARG002
+            return _FakeFuture()
+
+        def shutdown(self, wait=False):  # noqa: ARG002
+            return None
+
+    monkeypatch.setattr(pipeline_module.multiprocessing, "Manager", lambda: _FakeManager())
+    monkeypatch.setattr(pipeline_module, "ProcessPoolExecutor", _FakePipelineExecutor)
+    monkeypatch.setattr(pipeline_module.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(pipeline_module, "should_preserve_audio", lambda _params: False)
+    monkeypatch.setattr(
+        pipeline_module,
+        "_calculate_queue_budget",
+        lambda _processor, _shape: SimpleNamespace(
+            pipeline_viable=True,
+            frame_queue_size=2,
+            result_queue_size=2,
+            writer_buffer_size=2,
+            effective_worker_count=1,
+            requested_worker_count=1,
+            estimated_total_memory_mb=1.0,
+            minimum_viable_memory_mb=1.0,
+        ),
+    )
+
+    class _DummyProcessor:
+        def __init__(self) -> None:
+            self.input_path = "input.mp4"
+            self.output_path = "output.mp4"
+            self.ai_params = {}
+            self.config = None
+            self.num_processes = 1
+            self._is_running = True
+            self._progress_timer = None
+            self._stop_event = None
+            self._reader_thread = None
+            self._writer_thread = None
+            self._processor_pool = None
+            self.ffmpeg_processor = SimpleNamespace(is_available=lambda: False)
+            self.logger = _FakeLogger()
+            self.status = _DummyEmitter()
+            self.progress = _DummyEmitter()
+            self.finished = _DummyEmitter()
+            self._singleprocess_fallback_called = False
+            self._chunk_fallback_called = False
+
+        def _emit_detailed_progress(self, *args, **kwargs) -> None:  # noqa: ARG002
+            return None
+
+        def _process_video_singleprocess(self) -> None:
+            self._singleprocess_fallback_called = True
+
+        def _process_video_multiprocess(self) -> None:
+            self._chunk_fallback_called = True
+
+    processor = _DummyProcessor()
+    pipeline_module.process_video_pipeline(processor)
+
+    assert processor._singleprocess_fallback_called is True
+    assert processor._chunk_fallback_called is False
+
+
 def test_multiprocess_cancel_finishes_after_timer_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

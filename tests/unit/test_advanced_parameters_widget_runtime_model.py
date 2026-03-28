@@ -35,3 +35,25 @@ def test_widget_reads_and_writes_unified_performance_params(qtbot) -> None:
     assert params["batch_max_retry_count"] == 2
     assert widget.worker_count_spin is not None
     assert widget.worker_count_spin.minimum() == 0
+
+    assert widget.processing_mode_combo is not None
+    mode_values = {
+        widget.processing_mode_combo.itemData(index)
+        for index in range(widget.processing_mode_combo.count())
+    }
+    assert "single_process" in mode_values
+    assert "multiprocess" in mode_values
+    assert "pipeline" in mode_values
+    assert "auto" not in mode_values
+
+
+def test_widget_falls_back_to_single_process_when_loading_legacy_auto_mode(qtbot) -> None:
+    from app.ui.widgets.advanced.advanced_parameters_widget import AdvancedParametersWidget
+
+    widget = AdvancedParametersWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_parameters({"processing_mode": "auto"})
+
+    params = widget.get_parameters()
+    assert params["processing_mode"] == "single_process"

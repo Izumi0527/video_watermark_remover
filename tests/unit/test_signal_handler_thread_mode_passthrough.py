@@ -4,8 +4,8 @@ SignalHandler 单文件入口：VideoProcessorThread 模式参数透传回归测
 
 目标：
 - 单文件开始处理时，SignalHandler 创建 VideoProcessorThread 必须透传：
-  enable_multiprocess / use_pipeline / num_processes
-否则 UI 的性能参数无法真正影响运行时策略。
+  runtime_performance（统一运行时快照）
+否则 UI 的性能参数虽然在界面中是单值模式，运行时仍会退回分散布尔字段。
 """
 
 from __future__ import annotations
@@ -78,10 +78,33 @@ class _DummyAIParamsBuilder:
     def build_from_ui(self, **_kwargs):
         return {
             "auto_detect": True,
-            "enable_multiprocess": True,
-            "use_pipeline": True,
-            "num_processes": 3,
+            "processing_mode": "pipeline",
+            "resolved_processing_mode": "single_process",
+            "enable_multiprocess": False,
+            "use_pipeline": False,
+            "num_processes": 1,
+            "mode_restriction_reason": "gpu_deep_backend_serial_only",
         }
+
+    def build_resolved_performance_config(self, **_kwargs):
+        class _ResolvedConfig:
+            def to_manifest_dict(self):
+                return {
+                    "requested_processing_mode": "pipeline",
+                    "resolved_processing_mode": "single_process",
+                    "worker_count": 1,
+                    "enable_multiprocess": False,
+                    "use_pipeline": False,
+                    "gpu_memory_budget_mb": 2048,
+                    "enable_cache": True,
+                    "cache_size_mb": 512,
+                    "batch_max_concurrent_files": 1,
+                    "batch_auto_retry_failed": True,
+                    "batch_max_retry_count": 3,
+                    "mode_restriction_reason": "gpu_deep_backend_serial_only",
+                }
+
+        return _ResolvedConfig()
 
 
 class _DummyPreferences:
@@ -192,7 +215,7 @@ def _import_signal_handler_with_patches(monkeypatch: pytest.MonkeyPatch):
     return signal_handler_module
 
 
-def test_signal_handler_passes_video_mode_params_to_video_processor_thread(
+def test_signal_handler_passes_runtime_performance_to_video_processor_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     signal_handler_module = _import_signal_handler_with_patches(monkeypatch)
@@ -211,9 +234,11 @@ def test_signal_handler_passes_video_mode_params_to_video_processor_thread(
     handler.handle_start_processing()
 
     kwargs = _DummyVideoProcessorThread.last_kwargs or {}
-    assert kwargs.get("enable_multiprocess") is True
-    assert kwargs.get("use_pipeline") is True
-    assert kwargs.get("num_processes") == 3
+    runtime_performance = kwargs.get("runtime_performance") or {}
+    assert runtime_performance.get("requested_processing_mode") == "pipeline"
+    assert runtime_performance.get("resolved_processing_mode") == "single_process"
+    assert runtime_performance.get("worker_count") == 1
+    assert runtime_performance.get("mode_restriction_reason") == "gpu_deep_backend_serial_only"
 
 
 def test_handle_stop_processing_does_not_block_when_thread_still_running(

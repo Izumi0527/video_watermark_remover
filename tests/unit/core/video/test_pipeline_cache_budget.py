@@ -106,6 +106,45 @@ def test_pipeline_queue_budget_caps_worker_count_within_cache_budget() -> None:
     assert budget.estimated_total_memory_mb <= 256
 
 
+def test_runtime_constraint_caps_workers_for_deep_gpu_backend_on_windows() -> None:
+    from app.core.video.utils.backpressure import resolve_runtime_mode_constraint
+
+    constraint = resolve_runtime_mode_constraint(
+        ai_params={
+            "requested_inpainting_backend": "lama",
+            "use_gpu_inpainting": True,
+            "gpu_memory_mb": 2048,
+        },
+        requested_worker_count=4,
+        platform_name="win32",
+    )
+
+    assert constraint.deep_gpu_backend is True
+    assert constraint.effective_worker_count == 1
+    assert constraint.pipeline_allowed is False
+    assert constraint.reserved_memory_mb >= 256
+    assert constraint.serialization_overhead_factor > 1.0
+
+
+def test_runtime_constraint_keeps_pipeline_for_opencv_backend() -> None:
+    from app.core.video.utils.backpressure import resolve_runtime_mode_constraint
+
+    constraint = resolve_runtime_mode_constraint(
+        ai_params={
+            "requested_inpainting_backend": "opencv",
+            "use_gpu_inpainting": False,
+        },
+        requested_worker_count=4,
+        platform_name="win32",
+    )
+
+    assert constraint.deep_gpu_backend is False
+    assert constraint.effective_worker_count == 4
+    assert constraint.pipeline_allowed is True
+    assert constraint.reserved_memory_mb == 0
+    assert constraint.serialization_overhead_factor == 1.0
+
+
 def test_pipeline_runtime_budget_applies_effective_worker_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

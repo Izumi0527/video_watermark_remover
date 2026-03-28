@@ -11,7 +11,9 @@ from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any, Mapping
 
-PROCESSING_MODE_OPTIONS = ("auto", "single_process", "multiprocess", "pipeline")
+EXPLICIT_PROCESSING_MODE_OPTIONS = ("single_process", "multiprocess", "pipeline")
+PROCESSING_MODE_OPTIONS = ("auto", *EXPLICIT_PROCESSING_MODE_OPTIONS)
+PROCESSING_MODE_UI_OPTIONS = EXPLICIT_PROCESSING_MODE_OPTIONS
 PROCESSING_MODE_LABELS = {
     "auto": "自动",
     "single_process": "单进程",
@@ -35,6 +37,7 @@ OUTPUT_FORMAT_LABEL_TO_VALUE = {
     "jpeg": "jpg",
 }
 _DEFAULT_AUTO_WORKER_COUNT = 4
+_GPU_DEEP_BACKENDS = {"lama", "legacy_unet", "mat"}
 _VIDEO_FILE_EXTENSIONS = {
     ".mp4",
     ".mov",
@@ -91,6 +94,8 @@ def normalize_processing_mode(value: Any) -> str:
         "single-process": "single_process",
         "multi": "multiprocess",
         "multiprocessing": "multiprocess",
+        "multiprocesschunk": "multiprocess",
+        "chunk": "multiprocess",
     }
     compact = lowered.replace("_", "").replace("-", "").replace(" ", "")
     return aliases.get(compact, "auto")
@@ -156,6 +161,41 @@ def _looks_like_video_input(input_file_path: str | None) -> bool:
     return Path(str(input_file_path)).suffix.lower() in _VIDEO_FILE_EXTENSIONS
 
 
+def _resolve_mode_restriction_reason(
+    *,
+    requested_inpainting_backend: Any,
+    use_gpu_inpainting: Any,
+) -> str | None:
+    normalized_backend = str(requested_inpainting_backend or "").strip().lower()
+    if _normalize_bool(use_gpu_inpainting, False) and normalized_backend in _GPU_DEEP_BACKENDS:
+        return "gpu_deep_backend_serial_only"
+    return None
+
+
+def _apply_mode_restriction(
+    *,
+    resolved_processing_mode: str,
+    worker_count: int,
+    enable_multiprocess: bool,
+    use_pipeline: bool,
+    requested_inpainting_backend: Any,
+    use_gpu_inpainting: Any,
+) -> tuple[str, int, bool, bool, str | None]:
+    reason = _resolve_mode_restriction_reason(
+        requested_inpainting_backend=requested_inpainting_backend,
+        use_gpu_inpainting=use_gpu_inpainting,
+    )
+    if reason and resolved_processing_mode in {"multiprocess", "pipeline"}:
+        return ("single_process", 1, False, False, reason)
+    return (
+        resolved_processing_mode,
+        worker_count,
+        enable_multiprocess,
+        use_pipeline,
+        None,
+    )
+
+
 def migrate_legacy_performance_preferences(  # noqa: C901
     *,
     current: Mapping[str, Any] | None = None,
@@ -170,6 +210,16 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     result: dict[str, Any] = {}
 
     processing_mode = normalized_current.get("processing_mode")
+    if processing_mode is None:
+        use_pipeline = _normalize_bool(normalized_current.get("use_pipeline"), False)
+        enable_multiprocess = _normalize_bool(
+            normalized_current.get("enable_multiprocess"),
+            use_pipeline,
+        )
+        if use_pipeline:
+            processing_mode = "pipeline"
+        elif enable_multiprocess:
+            processing_mode = "multiprocess"
     if processing_mode is not None:
         result["processing_mode"] = processing_mode
 
@@ -253,6 +303,8 @@ class ProcessingContext:
     prefer_pipeline: bool = True
     cpu_count: int = _DEFAULT_AUTO_WORKER_COUNT
     gpu_enabled: bool = True
+    requested_inpainting_backend: str = "opencv"
+    use_gpu_inpainting: bool = False
 
     def normalized_cpu_count(self) -> int:
         return _normalize_cpu_count(self.cpu_count)
@@ -277,6 +329,7 @@ class ResolvedPerformanceConfig:
     batch_max_concurrent_files: int
     batch_auto_retry_failed: bool
     batch_max_retry_count: int
+    mode_restriction_reason: str | None = None
 
     @classmethod
     def from_runtime_sources(
@@ -322,6 +375,21 @@ class ResolvedPerformanceConfig:
         elif worker_count <= 0:
             worker_count = _resolve_auto_worker_count()
 
+        (
+            resolved_processing_mode,
+            worker_count,
+            enable_multiprocess,
+            use_pipeline,
+            mode_restriction_reason,
+        ) = _apply_mode_restriction(
+            resolved_processing_mode=resolved_processing_mode,
+            worker_count=worker_count,
+            enable_multiprocess=enable_multiprocess,
+            use_pipeline=use_pipeline,
+            requested_inpainting_backend=normalized_ai_params.get("requested_inpainting_backend"),
+            use_gpu_inpainting=normalized_ai_params.get("use_gpu_inpainting"),
+        )
+
         return cls(
             requested_processing_mode=requested_processing_mode,
             resolved_processing_mode=resolved_processing_mode,
@@ -357,6 +425,7 @@ class ResolvedPerformanceConfig:
                 0,
                 10,
             ),
+            mode_restriction_reason=mode_restriction_reason,
         )
 
     def to_ai_params(self) -> dict[str, Any]:
@@ -369,6 +438,7 @@ class ResolvedPerformanceConfig:
             "gpu_memory_mb": self.gpu_memory_budget_mb,
             "enable_cache": self.enable_cache,
             "cache_size_mb": self.cache_size_mb,
+            "mode_restriction_reason": self.mode_restriction_reason,
         }
 
     def to_batch_config(self) -> dict[str, Any]:
@@ -418,7 +488,7 @@ class ResolvedOutputConfig:
 class AdvancedParamsSnapshot:
     """统一高级参数快照。"""
 
-    processing_mode: str = "auto"
+    processing_mode: str = "single_process"
     worker_count: int = 0
     enable_gpu: bool = True
     gpu_memory_limit_mb: int = 2048
@@ -547,18 +617,35 @@ class AdvancedParamsSnapshot:
         current_context = context or self._default_processing_context()
         resolved_mode = self.resolve_processing_mode(current_context)
         resolved_worker_count = self.resolve_worker_count(current_context)
+        enable_multiprocess = resolved_mode in {"multiprocess", "pipeline"}
+        use_pipeline = resolved_mode == "pipeline"
+        (
+            resolved_mode,
+            resolved_worker_count,
+            enable_multiprocess,
+            use_pipeline,
+            mode_restriction_reason,
+        ) = _apply_mode_restriction(
+            resolved_processing_mode=resolved_mode,
+            worker_count=resolved_worker_count,
+            enable_multiprocess=enable_multiprocess,
+            use_pipeline=use_pipeline,
+            requested_inpainting_backend=current_context.requested_inpainting_backend,
+            use_gpu_inpainting=current_context.use_gpu_inpainting,
+        )
         return ResolvedPerformanceConfig(
             requested_processing_mode=self.processing_mode,
             resolved_processing_mode=resolved_mode,
             worker_count=resolved_worker_count,
-            enable_multiprocess=resolved_mode in {"multiprocess", "pipeline"},
-            use_pipeline=resolved_mode == "pipeline",
+            enable_multiprocess=enable_multiprocess,
+            use_pipeline=use_pipeline,
             gpu_memory_budget_mb=self.gpu_memory_limit_mb,
             enable_cache=self.enable_cache,
             cache_size_mb=self.cache_size_mb,
             batch_max_concurrent_files=self.batch_max_concurrent_files,
             batch_auto_retry_failed=self.batch_auto_retry_failed,
             batch_max_retry_count=self.batch_max_retry_count,
+            mode_restriction_reason=mode_restriction_reason,
         )
 
     def to_ai_params(self, context: ProcessingContext | None = None) -> dict[str, Any]:
@@ -584,6 +671,7 @@ __all__ = [
     "ProcessingContext",
     "PROCESSING_MODE_LABELS",
     "PROCESSING_MODE_OPTIONS",
+    "PROCESSING_MODE_UI_OPTIONS",
     "ResolvedOutputConfig",
     "ResolvedPerformanceConfig",
     "migrate_legacy_performance_preferences",

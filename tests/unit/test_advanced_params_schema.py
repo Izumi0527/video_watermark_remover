@@ -11,7 +11,7 @@ def test_advanced_params_defaults_are_single_source_of_truth() -> None:
 
     snapshot = AdvancedParamsSnapshot.defaults()
 
-    assert snapshot.processing_mode == "auto"
+    assert snapshot.processing_mode == "single_process"
     assert snapshot.worker_count == 0
     assert snapshot.enable_gpu is True
     assert snapshot.gpu_memory_limit_mb == 2048

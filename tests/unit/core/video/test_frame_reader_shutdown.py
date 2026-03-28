@@ -53,6 +53,30 @@ class _StopEventAfterRetry:
         return self._calls >= 3
 
 
+class _TrackableStopEvent:
+    def __init__(self) -> None:
+        self._set = False
+        self.set_called = False
+
+    def is_set(self) -> bool:
+        return self._set
+
+    def set(self) -> None:
+        self._set = True
+        self.set_called = True
+
+
+class _MemoryErrorQueue:
+    def __init__(self) -> None:
+        self.put_items = []
+
+    def put(self, item, timeout=None):  # noqa: ARG002
+        self.put_items.append(item)
+        if item is None:
+            return None
+        raise MemoryError("manager queue memory pressure")
+
+
 def test_frame_reader_exits_quickly_when_queue_full_and_stop_requested(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "cv2", _FakeCv2())
     monkeypatch.delitem(sys.modules, "app.core.video.workers.frame_reader", raising=False)
@@ -69,3 +93,22 @@ def test_frame_reader_exits_quickly_when_queue_full_and_stop_requested(monkeypat
     )
 
     assert any(item is None for item, _ in fake_queue.put_items)
+
+
+def test_frame_reader_sets_stop_event_on_memory_error(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "cv2", _FakeCv2())
+    monkeypatch.delitem(sys.modules, "app.core.video.workers.frame_reader", raising=False)
+    frame_reader = importlib.import_module("app.core.video.workers.frame_reader")
+
+    fake_queue = _MemoryErrorQueue()
+    stop_event = _TrackableStopEvent()
+
+    frame_reader.frame_reader_worker(
+        video_path="C:/tmp/in.mp4",
+        frame_queue=fake_queue,
+        total_frames=5,
+        stop_event=stop_event,
+    )
+
+    assert stop_event.set_called is True
+    assert any(item is None for item in fake_queue.put_items)

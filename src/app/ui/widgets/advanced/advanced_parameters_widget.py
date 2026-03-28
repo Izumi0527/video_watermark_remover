@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ....config.advanced_params import AdvancedParamsSnapshot, processing_mode_to_label
+from ....config.advanced_params import AdvancedParamsSnapshot
 
 # 导入Tab页面实现
 from .advanced_parameters_tabs import (
@@ -163,7 +163,7 @@ class AdvancedParametersWidget(QWidget):
             self.processing_mode_combo.currentTextChanged.connect(self._on_parameter_changed)
         if self.worker_count_spin:
             self.worker_count_spin.valueChanged.connect(self._on_parameter_changed)
-        if self.thread_count_spin:
+        if self.thread_count_spin and self.thread_count_spin is not self.worker_count_spin:
             self.thread_count_spin.valueChanged.connect(self._on_parameter_changed)
         if self.enable_gpu_check:
             self.enable_gpu_check.toggled.connect(self._on_parameter_changed)
@@ -351,8 +351,10 @@ class AdvancedParametersWidget(QWidget):
             # 设置性能参数
             performance_snapshot = AdvancedParamsSnapshot.from_dict(parameters)
             if self.processing_mode_combo:
-                display_text = processing_mode_to_label(performance_snapshot.processing_mode)
-                index = self.processing_mode_combo.findText(display_text)
+                index = self.processing_mode_combo.findData(performance_snapshot.processing_mode)
+                if index < 0:
+                    # 兼容旧配置中的 auto：UI 已收敛为显式单值模式，这里安全回落到单进程。
+                    index = self.processing_mode_combo.findData("single_process")
                 if index >= 0:
                     self.processing_mode_combo.setCurrentIndex(index)
             if self.worker_count_spin:
@@ -449,7 +451,7 @@ class AdvancedParametersWidget(QWidget):
                 self.processing_mode_combo.currentTextChanged.disconnect(self._on_parameter_changed)
             if self.worker_count_spin:
                 self.worker_count_spin.valueChanged.disconnect(self._on_parameter_changed)
-            if self.thread_count_spin:
+            if self.thread_count_spin and self.thread_count_spin is not self.worker_count_spin:
                 self.thread_count_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.enable_gpu_check:
                 self.enable_gpu_check.toggled.disconnect(self._on_parameter_changed)

@@ -6,7 +6,13 @@ from typing import Any, Dict, List
 
 from ..advanced_params import OUTPUT_FORMAT_LABELS, OUTPUT_FORMAT_OPTIONS
 
-_VALID_PROCESSING_MODES = {"auto", "single_process", "multiprocess", "pipeline"}
+_VALID_PROCESSING_MODES = {
+    "auto",
+    "single_process",
+    "multiprocess",
+    "multiprocess_chunk",
+    "pipeline",
+}
 _BOOL_ADVANCED_PARAM_KEYS = {
     "enable_gpu",
     "enable_cache",

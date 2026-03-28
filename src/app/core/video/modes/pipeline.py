@@ -14,7 +14,12 @@ import cv2
 from PyQt6.QtCore import QTimer
 
 from ..output_strategy import should_preserve_audio
-from ..utils.backpressure import QueueBudget, calculate_runtime_queue_budget
+from ..runtime_guard import is_resource_exhaustion_error
+from ..utils.backpressure import (
+    QueueBudget,
+    calculate_runtime_queue_budget,
+    resolve_runtime_mode_constraint,
+)
 from ..utils.path import build_temp_path
 from ..workers.audio import async_audio_extractor
 from ..workers.frame_processor import frame_processor_worker, init_worker_ai_handler
@@ -50,12 +55,25 @@ def _create_manager_queue(manager: Any, maxsize: Optional[int] = None) -> mp_que
 def _calculate_queue_budget(processor, frame_shape: tuple[int, int]) -> QueueBudget:
     enable_cache = bool(processor.ai_params.get("enable_cache", True))
     cache_size_mb = int(processor.ai_params.get("cache_size_mb", 512) or 512)
+    runtime_constraint = resolve_runtime_mode_constraint(
+        ai_params=processor.ai_params,
+        requested_worker_count=processor.num_processes,
+    )
     queue_budget = calculate_runtime_queue_budget(
         enable_cache=enable_cache,
         cache_size_mb=cache_size_mb,
         frame_shape=frame_shape,
         requested_worker_count=processor.num_processes,
+        runtime_constraint=runtime_constraint,
     )
+    if not runtime_constraint.pipeline_allowed:
+        processor.logger.warning(
+            "Pipeline disabled by runtime constraint: requested_workers=%s backend=%s reason=%s",
+            processor.num_processes,
+            processor.ai_params.get("requested_inpainting_backend"),
+            runtime_constraint.reason,
+        )
+        return queue_budget
     if (
         queue_budget.pipeline_viable
         and queue_budget.effective_worker_count != processor.num_processes
@@ -129,7 +147,10 @@ def _wait_processor_futures(processor, processor_futures: list[Any]) -> None:
         next_pending: list[Any] = []
         for future in pending:
             try:
-                future.result(timeout=0.2)
+                try:
+                    future.result(timeout=0.2)
+                except TypeError:
+                    future.result()
             except FuturesTimeoutError:
                 if _is_cancel_requested(processor):
                     return
@@ -430,6 +451,14 @@ def process_video_pipeline(processor) -> None:  # noqa: C901
         return
 
     if fallback_error is not None:
+        if is_resource_exhaustion_error(fallback_error):
+            processor.logger.error(
+                "Pipeline processing hit resource exhaustion, falling back to single-process: %s",
+                fallback_error,
+            )
+            processor.status.emit("⚠️ 流水线资源不足，切换到单进程模式")
+            processor._process_video_singleprocess()
+            return
         processor.logger.error(
             "Pipeline processing failed, falling back to chunk mode: %s", fallback_error
         )
