@@ -24,6 +24,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ...config.advanced_params import (
+    build_processing_mode_runtime_hint,
+    build_processing_mode_runtime_summary,
+)
+
 
 class DetailedProgressWidget(QWidget):
     """
@@ -97,20 +102,37 @@ class DetailedProgressWidget(QWidget):
         phase_container.setObjectName("phase_container")
         phase_container.setFrameShape(QFrame.Shape.StyledPanel)
 
-        phase_layout = QHBoxLayout(phase_container)
+        phase_layout = QVBoxLayout(phase_container)
         phase_layout.setContentsMargins(10, 5, 10, 5)
+        phase_layout.setSpacing(4)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
 
         # 阶段图标
         self.phase_icon_label = QLabel("⏸️")
         self.phase_icon_label.setObjectName("phase_icon")
-        phase_layout.addWidget(self.phase_icon_label)
+        header_layout.addWidget(self.phase_icon_label)
 
         # 阶段文本
         self.phase_text_label = QLabel("空闲")
         self.phase_text_label.setObjectName("phase_text")
-        phase_layout.addWidget(self.phase_text_label)
+        header_layout.addWidget(self.phase_text_label)
 
-        phase_layout.addStretch()
+        header_layout.addStretch()
+
+        phase_layout.addLayout(header_layout)
+
+        self.runtime_summary_label = QLabel("运行模式：--")
+        self.runtime_summary_label.setObjectName("runtime_summary_text")
+        self.runtime_summary_label.setWordWrap(True)
+        phase_layout.addWidget(self.runtime_summary_label)
+
+        self.runtime_hint_label = QLabel("")
+        self.runtime_hint_label.setObjectName("runtime_hint_text")
+        self.runtime_hint_label.setWordWrap(True)
+        phase_layout.addWidget(self.runtime_hint_label)
 
         main_layout.addWidget(phase_container)
 
@@ -206,11 +228,25 @@ class DetailedProgressWidget(QWidget):
         time_elapsed = progress_data.get("time_elapsed", 0.0)
         eta = progress_data.get("eta", 0.0)
         percentage = progress_data.get("percentage", 0)
+        restriction_reason = progress_data.get("mode_restriction_reason") or progress_data.get(
+            "runtime_processing_guard_reason"
+        )
+        runtime_summary = progress_data.get(
+            "runtime_mode_summary"
+        ) or build_processing_mode_runtime_summary(
+            requested_mode=progress_data.get("requested_processing_mode"),
+            resolved_mode=progress_data.get("resolved_processing_mode"),
+        )
+        runtime_hint = progress_data.get("runtime_mode_hint") or build_processing_mode_runtime_hint(
+            restriction_reason
+        )
 
         # 更新阶段指示器
         phase_config = self.PHASE_CONFIG.get(phase, self.PHASE_CONFIG["idle"])
         self.phase_icon_label.setText(phase_config["icon"])
         self.phase_text_label.setText(phase_config["text"])
+        self.runtime_summary_label.setText(runtime_summary)
+        self.runtime_hint_label.setText(runtime_hint)
 
         # 更新进度条
         self.progress_bar.setValue(percentage)

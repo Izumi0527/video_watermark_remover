@@ -12,7 +12,11 @@ from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
-from ...config.advanced_params import ResolvedPerformanceConfig
+from ...config.advanced_params import (
+    ResolvedPerformanceConfig,
+    build_processing_mode_runtime_hint,
+    build_processing_mode_runtime_summary,
+)
 from ...utils import IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
 from ..exceptions import ModelLoadError, UnsupportedFormatError
 from .runtime_guard import resolve_video_runtime_mode
@@ -315,6 +319,16 @@ class VideoProcessorThread(QThread):
             "time_elapsed": time_elapsed,
             "eta": eta,
             "percentage": int((current_frame / total_frames) * 100) if total_frames > 0 else 0,
+            "requested_processing_mode": self.requested_runtime_processing_mode,
+            "resolved_processing_mode": self.runtime_processing_mode,
+            "mode_restriction_reason": self.runtime_processing_guard_reason,
+            "runtime_mode_summary": build_processing_mode_runtime_summary(
+                requested_mode=self.requested_runtime_processing_mode,
+                resolved_mode=self.runtime_processing_mode,
+            ),
+            "runtime_mode_hint": build_processing_mode_runtime_hint(
+                self.runtime_processing_guard_reason
+            ),
         }
 
         if additional_info:

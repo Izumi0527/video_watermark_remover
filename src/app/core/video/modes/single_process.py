@@ -1,10 +1,62 @@
 import os
+import time
 
 import cv2
 
+from ....config.advanced_params import (
+    build_processing_mode_runtime_hint,
+    build_processing_mode_runtime_summary,
+)
 from ...exceptions import ModelLoadError, VideoReadError, VideoWriteError
 from ..output_strategy import create_video_writer, should_preserve_audio
 from ..utils.path import build_temp_path
+
+_RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+
+def _format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _maybe_log_runtime_heartbeat(processor, *, current_frame: int, total_frames: int) -> None:
+    now = time.time()
+    last_log_at = float(getattr(processor, "_last_runtime_heartbeat_at", 0.0) or 0.0)
+    if now - last_log_at < _RUNTIME_HEARTBEAT_INTERVAL_SECONDS:
+        return
+
+    setattr(processor, "_last_runtime_heartbeat_at", now)
+    started_at = float(getattr(processor, "_start_time", 0.0) or 0.0)
+    elapsed = max(0.0, now - started_at)
+    speed = (current_frame / elapsed) if elapsed > 0 else 0.0
+    eta = 0.0
+    if speed > 0 and total_frames > current_frame:
+        eta = (total_frames - current_frame) / speed
+
+    runtime_summary = build_processing_mode_runtime_summary(
+        requested_mode=getattr(processor, "requested_runtime_processing_mode", None),
+        resolved_mode=getattr(processor, "runtime_processing_mode", None),
+    )
+    runtime_hint = build_processing_mode_runtime_hint(
+        getattr(processor, "runtime_processing_guard_reason", None)
+    )
+    hint_suffix = f"；{runtime_hint}" if runtime_hint else ""
+    progress_percentage = int((current_frame / total_frames) * 100) if total_frames > 0 else 0
+    processor.logger.info(
+        "单进程处理心跳: frame=%s/%s progress=%s%% speed=%.2f fps eta=%s %s%s",
+        current_frame,
+        total_frames,
+        progress_percentage,
+        speed,
+        _format_duration(eta),
+        runtime_summary,
+        hint_suffix,
+    )
 
 
 def process_video_singleprocess(processor) -> None:  # noqa: C901
@@ -110,6 +162,12 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
                         "total_watermark_areas": total_watermark_areas,
                     },
                 )
+
+            _maybe_log_runtime_heartbeat(
+                processor,
+                current_frame=current_frame,
+                total_frames=total_frames,
+            )
 
             if current_frame == 1 or current_frame % 30 == 0 or current_frame == total_frames:
                 processor.preview_update.emit(processed_frame)

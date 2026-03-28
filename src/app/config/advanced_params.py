@@ -20,6 +20,9 @@ PROCESSING_MODE_LABELS = {
     "multiprocess": "多进程分块",
     "pipeline": "流水线",
 }
+MODE_RESTRICTION_REASON_LABELS = {
+    "gpu_deep_backend_serial_only": "GPU 深度修复仅支持串行，已自动切换为单进程",
+}
 PROCESSING_MODE_LABEL_TO_VALUE = {
     **{value: key for key, value in PROCESSING_MODE_LABELS.items()},
     "多进程": "multiprocess",
@@ -105,6 +108,46 @@ def processing_mode_to_label(value: str) -> str:
     return PROCESSING_MODE_LABELS.get(
         normalize_processing_mode(value), PROCESSING_MODE_LABELS["auto"]
     )
+
+
+def mode_restriction_reason_to_label(value: Any) -> str:
+    """将运行模式限制原因转换为用户可读文案。"""
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    return MODE_RESTRICTION_REASON_LABELS.get(normalized, normalized)
+
+
+def build_processing_mode_runtime_summary(
+    *,
+    requested_mode: Any,
+    resolved_mode: Any,
+) -> str:
+    """构建运行模式摘要文案。"""
+    normalized_requested = normalize_processing_mode(requested_mode)
+    normalized_resolved = normalize_processing_mode(resolved_mode)
+
+    has_requested = str(requested_mode or "").strip() != ""
+    has_resolved = str(resolved_mode or "").strip() != ""
+    if not has_requested and not has_resolved:
+        return "运行模式：--"
+
+    if not has_resolved:
+        return f"运行模式：{processing_mode_to_label(normalized_requested)}"
+
+    resolved_label = processing_mode_to_label(normalized_resolved)
+    if has_requested and normalized_requested != normalized_resolved:
+        requested_label = processing_mode_to_label(normalized_requested)
+        return f"运行模式：请求{requested_label}，实际{resolved_label}"
+    return f"运行模式：{resolved_label}"
+
+
+def build_processing_mode_runtime_hint(reason: Any) -> str:
+    """构建运行模式提示文案。"""
+    label = mode_restriction_reason_to_label(reason)
+    if not label:
+        return ""
+    return f"提示：{label}"
 
 
 def _normalize_worker_count(value: Any) -> int:
@@ -669,12 +712,16 @@ __all__ = [
     "OUTPUT_FORMAT_LABELS",
     "OUTPUT_FORMAT_OPTIONS",
     "ProcessingContext",
+    "MODE_RESTRICTION_REASON_LABELS",
     "PROCESSING_MODE_LABELS",
     "PROCESSING_MODE_OPTIONS",
     "PROCESSING_MODE_UI_OPTIONS",
     "ResolvedOutputConfig",
     "ResolvedPerformanceConfig",
+    "build_processing_mode_runtime_hint",
+    "build_processing_mode_runtime_summary",
     "migrate_legacy_performance_preferences",
+    "mode_restriction_reason_to_label",
     "normalize_output_format",
     "normalize_processing_mode",
     "output_format_to_label",

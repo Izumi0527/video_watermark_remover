@@ -20,7 +20,12 @@ from typing import Any, List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # 导入配置
-from ..config.advanced_params import AdvancedParamsSnapshot, ResolvedPerformanceConfig
+from ..config.advanced_params import (
+    AdvancedParamsSnapshot,
+    ResolvedPerformanceConfig,
+    build_processing_mode_runtime_hint,
+    build_processing_mode_runtime_summary,
+)
 from ..config.styles.colors import DEFAULT_THEME
 
 # 导入视频处理线程
@@ -336,6 +341,34 @@ class SignalHandler(QObject):
                 is_batch=False,
                 ai_params=ai_params,
             ).to_manifest_dict()
+            runtime_summary = build_processing_mode_runtime_summary(
+                requested_mode=runtime_performance.get("requested_processing_mode"),
+                resolved_mode=runtime_performance.get("resolved_processing_mode"),
+            )
+            runtime_hint = build_processing_mode_runtime_hint(
+                runtime_performance.get("mode_restriction_reason")
+            )
+            self.status_updated.emit(runtime_summary)
+            if runtime_hint:
+                self.log_panel.add_warning_log(runtime_hint.removeprefix("提示："))
+            self.control_panel.update_detailed_progress(
+                {
+                    "phase": "loading_models",
+                    "current_frame": 0,
+                    "total_frames": 0,
+                    "processing_speed": 0.0,
+                    "time_elapsed": 0.0,
+                    "eta": 0.0,
+                    "percentage": 0,
+                    "requested_processing_mode": runtime_performance.get(
+                        "requested_processing_mode"
+                    ),
+                    "resolved_processing_mode": runtime_performance.get("resolved_processing_mode"),
+                    "mode_restriction_reason": runtime_performance.get("mode_restriction_reason"),
+                    "runtime_mode_summary": runtime_summary,
+                    "runtime_mode_hint": runtime_hint,
+                }
+            )
             output_path = resolve_output_path(self.input_file_path, ai_params)
 
             # 使用预加载的AI模型 (如果可用)

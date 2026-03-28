@@ -133,6 +133,7 @@ class _DummyControlPanel:
     def __init__(self):
         self.processing_states = []
         self.reset_progress_calls = 0
+        self.detailed_progress_updates = []
 
     def set_processing_state(self, value):
         self.processing_states.append(value)
@@ -144,6 +145,7 @@ class _DummyControlPanel:
         return None
 
     def update_detailed_progress(self, value):
+        self.detailed_progress_updates.append(value)
         return None
 
     def reset_progress(self):
@@ -239,6 +241,38 @@ def test_signal_handler_passes_runtime_performance_to_video_processor_thread(
     assert runtime_performance.get("resolved_processing_mode") == "single_process"
     assert runtime_performance.get("worker_count") == 1
     assert runtime_performance.get("mode_restriction_reason") == "gpu_deep_backend_serial_only"
+
+
+def test_signal_handler_pushes_runtime_observability_message_on_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signal_handler_module = _import_signal_handler_with_patches(monkeypatch)
+    SignalHandler = signal_handler_module.SignalHandler
+
+    control_panel = _DummyControlPanel()
+    log_panel = _DummyLogPanel()
+    handler = SignalHandler(
+        file_panel=_DummyFilePanel(),
+        preview_panel=_DummyPreviewPanel(),
+        control_panel=control_panel,
+        log_panel=log_panel,
+        preferences=_DummyPreferences(),
+        style_manager=_DummyStyleManager(),
+        main_window=None,
+    )
+    status_messages = []
+    handler.status_updated.connect(lambda msg: status_messages.append(msg))
+
+    handler.input_file_path = "demo.mp4"
+    handler.handle_start_processing()
+
+    assert any("请求流水线，实际单进程" in msg for msg in status_messages)
+    assert any(
+        update.get("resolved_processing_mode") == "single_process"
+        and update.get("mode_restriction_reason") == "gpu_deep_backend_serial_only"
+        for update in control_panel.detailed_progress_updates
+    )
+    assert any("GPU 深度修复仅支持串行" in msg for msg in log_panel.warning_logs)
 
 
 def test_handle_stop_processing_does_not_block_when_thread_still_running(
