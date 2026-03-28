@@ -71,6 +71,8 @@ H. 查看帮助
 
 - `basic` 会清理 `.mypy_cache`、`.pytest_cache`、`.coverage*`、`logs/*.log`
 - `temp` 会清理 `.cache/tmp`、`.cache/pytest`、`.cache/tests`、`.pytest_tmp`、`.tmp_*`、`tmp_*`、`pytest-cache-files-*`、`test_output`、`tests/.cache`、`tests/test_data/runtime_tmp`
+- 若 `.cache` 下仅剩已清空后的空父目录，脚本会顺带删除空的 `.cache`；若仍有未纳入规则的内容，则会保留 `.cache`
+- 若历史测试残留目录提示 `Access is denied`，通常表示当前 PowerShell 不是管理员会话；请以管理员身份重新打开 PowerShell 后，再运行 `.\scripts\vwr.ps1` 执行清理
 - 所有级别都会递归清理 `src/` 与 `tests/` 下的 `__pycache__`、`*.pyc`、`*.pyo`
 - 不会删除 `.venv`、`models`、`release`
 - `deep` 还会额外清理 `.uv-cache`、`.cache/uv`、`.cache/setup-state`、`src/video_watermark_remover.egg-info`

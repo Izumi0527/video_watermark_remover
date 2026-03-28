@@ -6,6 +6,29 @@ from typing import Any, Dict, List
 
 from ..advanced_params import OUTPUT_FORMAT_LABELS, OUTPUT_FORMAT_OPTIONS
 
+_VALID_PROCESSING_MODES = {"auto", "single_process", "multiprocess", "pipeline"}
+_BOOL_ADVANCED_PARAM_KEYS = {
+    "enable_gpu",
+    "enable_cache",
+    "batch_auto_retry_failed",
+    "add_suffix",
+    "add_timestamp",
+    "preserve_audio",
+}
+_INT_MIN_ADVANCED_PARAM_RULES = {
+    "gpu_memory_limit_mb": 256,
+    "cache_size_mb": 64,
+    "batch_max_concurrent_files": 1,
+    "batch_max_retry_count": 0,
+}
+_INT_RANGE_ADVANCED_PARAM_RULES = {
+    "worker_count": (0, 16),
+    "compression_quality": (1, 100),
+}
+_VALID_OUTPUT_FORMATS = (
+    set(OUTPUT_FORMAT_OPTIONS) | set(OUTPUT_FORMAT_LABELS.values()) | {"jpeg", "JPEG"}
+)
+
 
 class PreferencesValidator:
     """偏好设置验证和实用工具类."""
@@ -61,33 +84,21 @@ class PreferencesValidator:
     def _validate_advanced_params(self, key: str, value: Any) -> bool:
         """验证统一高级参数分类的偏好值。"""
         if key == "processing_mode":
-            return value in {"auto", "single_process", "multiprocess", "pipeline"}
-        if key == "worker_count":
-            return isinstance(value, int) and 0 <= value <= 16
-        if key == "enable_gpu":
+            return value in _VALID_PROCESSING_MODES
+
+        if key in _BOOL_ADVANCED_PARAM_KEYS:
             return isinstance(value, bool)
-        if key == "gpu_memory_limit_mb":
-            return isinstance(value, int) and value >= 256
-        if key == "enable_cache":
-            return isinstance(value, bool)
-        if key == "cache_size_mb":
-            return isinstance(value, int) and value >= 64
-        if key == "batch_max_concurrent_files":
-            return isinstance(value, int) and value >= 1
-        if key == "batch_auto_retry_failed":
-            return isinstance(value, bool)
-        if key == "batch_max_retry_count":
-            return isinstance(value, int) and value >= 0
+
+        if key in _INT_MIN_ADVANCED_PARAM_RULES:
+            return isinstance(value, int) and value >= _INT_MIN_ADVANCED_PARAM_RULES[key]
+
+        if key in _INT_RANGE_ADVANCED_PARAM_RULES:
+            min_value, max_value = _INT_RANGE_ADVANCED_PARAM_RULES[key]
+            return isinstance(value, int) and min_value <= value <= max_value
+
         if key == "output_format":
-            return str(value or "").strip() in set(OUTPUT_FORMAT_OPTIONS) | set(OUTPUT_FORMAT_LABELS.values()) | {"jpeg", "JPEG"}
-        if key == "compression_quality":
-            return isinstance(value, int) and 1 <= value <= 100
-        if key == "add_suffix":
-            return isinstance(value, bool)
-        if key == "add_timestamp":
-            return isinstance(value, bool)
-        if key == "preserve_audio":
-            return isinstance(value, bool)
+            return str(value or "").strip() in _VALID_OUTPUT_FORMATS
+
         return True
 
     def filter_recent_files(self, recent_files: List[str]) -> List[str]:

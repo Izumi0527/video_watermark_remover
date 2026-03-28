@@ -147,8 +147,13 @@ def process_video_chunk(
                         },
                         block=False,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "Chunk %s progress report skipped: %s",
+                        chunk_id,
+                        exc,
+                        exc_info=True,
+                    )
 
         cap.release()
         out.release()

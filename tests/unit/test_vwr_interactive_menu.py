@@ -283,6 +283,7 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
             TempRootExists = Test-Path ".cache/tmp"
             PytestTempExists = Test-Path ".cache/pytest"
             TestsRuntimeCacheExists = Test-Path ".cache/tests"
+            CacheRootExists = Test-Path ".cache"
             HarnessTempExists = Test-Path ".tmp_test_harness"
             PytestCacheFilesExists = Test-Path "pytest-cache-files-case01"
             TmpPatternExists = Test-Path "tmp_test_preferences"
@@ -303,6 +304,7 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
     assert result["TempRootExists"] is False
     assert result["PytestTempExists"] is False
     assert result["TestsRuntimeCacheExists"] is False
+    assert result["CacheRootExists"] is False
     assert result["HarnessTempExists"] is False
     assert result["PytestCacheFilesExists"] is False
     assert result["TmpPatternExists"] is False
@@ -315,6 +317,33 @@ def test_invoke_clean_all_removes_temp_and_cache_files_but_preserves_runtime_ass
     assert result["VenvExists"] is True
     assert result["ModelsExists"] is True
     assert result["ReleaseExists"] is True
+
+
+def test_invoke_clean_all_preserves_cache_root_when_unmanaged_entries_remain(
+    tmp_path: Path,
+) -> None:
+    result = _run_powershell_harness(
+        tmp_path,
+        """
+        New-Item -ItemType Directory -Path ".cache/tmp/run_case" -Force | Out-Null
+        Set-Content -LiteralPath ".cache/tmp/run_case/temp.txt" -Value "x" -Encoding ASCII
+
+        New-Item -ItemType Directory -Path ".cache/custom-keep" -Force | Out-Null
+        Set-Content -LiteralPath ".cache/custom-keep/keep.txt" -Value "keep" -Encoding ASCII
+
+        Invoke-Clean -Scope "all" -SkipConfirm
+
+        @{
+            TempRootExists = Test-Path ".cache/tmp"
+            CacheRootExists = Test-Path ".cache"
+            CustomKeepExists = Test-Path ".cache/custom-keep/keep.txt"
+        } | ConvertTo-Json -Depth 6 -Compress
+        """,
+    )
+
+    assert result["TempRootExists"] is False
+    assert result["CacheRootExists"] is True
+    assert result["CustomKeepExists"] is True
 
 
 def test_invoke_clean_temp_continues_after_permission_denied_and_reports_summary(
@@ -345,6 +374,10 @@ def test_invoke_clean_temp_continues_after_permission_denied_and_reports_summary
             $script:Oks += $Message
         }
 
+        function global:Test-IsElevated {
+            return $false
+        }
+
         function global:Remove-Item {
             param(
                 [string]$Path,
@@ -359,11 +392,11 @@ def test_invoke_clean_temp_continues_after_permission_denied_and_reports_summary
             $normalized = ([string]$target).Replace("/", "\")
 
             if ($normalized -match '(^|\\)\.cache\\tmp$') {
-                throw [System.UnauthorizedAccessException]::new("mock root access denied")
+                throw [System.UnauthorizedAccessException]::new("Access is denied.")
             }
 
             if ($normalized -match 'locked-dir') {
-                throw [System.UnauthorizedAccessException]::new("mock child access denied")
+                throw [System.UnauthorizedAccessException]::new("Access is denied.")
             }
 
             $forward = @{}
@@ -392,6 +425,7 @@ def test_invoke_clean_temp_continues_after_permission_denied_and_reports_summary
     assert result["LockedStillExists"] is True
     assert result["PytestOkRemoved"] is True
     assert any("失败" in line for line in result["Warns"])
+    assert any("管理员" in line for line in result["Warns"])
     assert any("继续处理其余项" in line for line in result["Warns"])
 
 

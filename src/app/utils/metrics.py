@@ -386,9 +386,10 @@ class ProcessingMetrics:
             if torch.cuda.is_available():
                 return float(torch.cuda.memory_allocated() / (1024 * 1024))
         except ImportError:
-            pass  # noqa: S110 - torch未安装时静默跳过
-        except Exception:  # noqa: S110
-            pass  # GPU监控失败时静默跳过，不影响主流程
+            return None
+        except Exception as exc:  # noqa: S110
+            logger.debug("获取 GPU 显存使用失败，降级为无 GPU 指标: %s", exc, exc_info=True)
+            return None
         return None
 
     @staticmethod
@@ -401,9 +402,10 @@ class ProcessingMetrics:
                 props = torch.cuda.get_device_properties(0)
                 return float(props.total_memory / (1024 * 1024))
         except ImportError:
-            pass  # noqa: S110 - torch未安装时静默跳过
-        except Exception:  # noqa: S110
-            pass  # GPU监控失败时静默跳过，不影响主流程
+            return None
+        except Exception as exc:  # noqa: S110
+            logger.debug("获取 GPU 总显存失败，降级为无 GPU 指标: %s", exc, exc_info=True)
+            return None
         return None
 
 

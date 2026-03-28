@@ -204,6 +204,15 @@ samples/
 *.backup
 *.orig
 *~.nib
+.tmp_*/
+.tmp_pytest*/
+tmp_*/
+tmp_pytest/
+tmp_pytest_local2/
+tmp_test_preferences/
+tmp_test_prefs/
+pytest-cache-files-*/
+tests/test_data/runtime_tmp/
 
 # Performance profiling
 *.prof

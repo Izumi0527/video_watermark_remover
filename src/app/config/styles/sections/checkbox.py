@@ -1,6 +1,5 @@
 """复选框样式片段。"""
 
-import os
 from pathlib import Path
 
 

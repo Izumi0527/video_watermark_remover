@@ -2557,6 +2557,51 @@ function Remove-CleanGlobTarget {
     return $result
 }
 
+function Remove-EmptyDirectoryIfExists {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return (New-CleanResult)
+    }
+
+    try {
+        $children = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+    } catch {
+        return (New-CleanResult -Failures @(
+                (New-CleanFailureRecord -Path $Path -Message $_.Exception.Message)
+            ))
+    }
+
+    if ($children.Count -gt 0) {
+        return (New-CleanResult)
+    }
+
+    return (Remove-CleanLiteralPath -LiteralPath $Path -Recurse $true)
+}
+
+function Test-IsElevated {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+        return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Test-ContainsAccessDeniedFailure {
+    param([object[]]$Failures)
+
+    foreach ($failure in @($Failures)) {
+        $message = [string]$failure.Message
+        if ($message -match '(?i)access is denied|is denied|access denied|unauthorized operation|访问被拒绝') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Remove-CleanTarget {
     param([pscustomobject]$Target)
 
@@ -2644,6 +2689,10 @@ function Invoke-Clean {
         }
     }
 
+    $cacheRootResult = Remove-EmptyDirectoryIfExists -Path ".cache"
+    $removedCount += $cacheRootResult.RemovedCount
+    $failures += @($cacheRootResult.Failures)
+
     if ($failures.Count -gt 0) {
         foreach ($failure in @($failures | Select-Object -First 5)) {
             Write-Warn "清理失败：$($failure.Path) - $($failure.Message)"
@@ -2651,6 +2700,10 @@ function Invoke-Clean {
 
         if ($failures.Count -gt 5) {
             Write-Warn "还有 $($failures.Count - 5) 项失败未展开显示"
+        }
+
+        if ((Test-ContainsAccessDeniedFailure -Failures $failures) -and -not (Test-IsElevated)) {
+            Write-Warn "检测到权限拒绝，当前 PowerShell 不是管理员会话。请以管理员身份重新打开 PowerShell 后，再运行 .\\scripts\\vwr.ps1 执行清理。"
         }
 
         Write-Warn "清理完成：成功 $removedCount 项，失败 $($failures.Count) 项，已继续处理其余项。"

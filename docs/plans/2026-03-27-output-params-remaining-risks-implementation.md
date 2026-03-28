@@ -1,5 +1,10 @@
 # 输出参数剩余风险修复实施计划
 
+> 归档说明：本文件保留第一次拆解时的实施草案，当前以
+> `docs/plans/2026-03-27-output-params-remaining-risks-remediation.md`
+> 作为继续执行与收口的主计划；若两者描述不一致，以 remediation
+> 版本为准。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 修复输出参数第二轮审查后仍遗留的 4 项风险，完成结构收敛、批处理稳定标识改造、UI 集成回归入口增强与更大范围验证。

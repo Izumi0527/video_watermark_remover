@@ -29,7 +29,7 @@ def generate_test_report(results):
     print(f"总测试数: {total_tests}")
     print(f"通过测试: {passed_tests} [OK]")
     print(f"失败测试: {failed_tests} [ERROR]")
-    print(f"成功率: {passed_tests/total_tests*100:.1f}%")
+    print(f"成功率: {passed_tests / total_tests * 100:.1f}%")
 
     print("\n详细结果:")
     for test_name, result in results.items():

@@ -53,6 +53,65 @@ def get_worker_ai_handler() -> Optional[Any]:
     return _worker_ai_handler
 
 
+def _build_processing_params(ai_params: dict) -> dict:
+    """构建帧处理参数。"""
+    return {
+        "auto_detect": ai_params.get("auto_detect", True),
+        "detection_sensitivity": ai_params.get("detection_sensitivity", 0.5),
+        "user_mask": ai_params.get("user_mask", None),
+    }
+
+
+def _is_timeout_error(error: Exception) -> bool:
+    """判断异常是否为超时类错误。"""
+    return "timeout" in str(error).lower()
+
+
+def _report_progress_non_blocking(
+    progress_queue: queues.Queue,
+    worker_id: int,
+    processed_count: int,
+    logger: logging.Logger,
+) -> None:
+    """非阻塞上报进度，失败时降级为调试日志。"""
+    if processed_count % 10 != 0:
+        return
+
+    try:
+        progress_queue.put(
+            {
+                "worker_id": worker_id,
+                "processed": processed_count,
+            },
+            block=False,
+        )
+    except Exception as exc:
+        logger.debug("Worker %s progress report skipped: %s", worker_id, exc, exc_info=True)
+
+
+def _get_or_init_worker_ai_handler(
+    ai_params: dict,
+    worker_id: int,
+    logger: logging.Logger,
+) -> Optional[Any]:
+    """获取或初始化当前进程 AI 处理器。"""
+    global _worker_ai_handler
+
+    ai_handler = _worker_ai_handler
+    if ai_handler is not None:
+        return ai_handler
+
+    logger.warning(f"Worker {worker_id}: AI handler not pre-initialized, loading now...")
+    ai_handler_class = _resolve_ai_handler_class()
+    ai_handler = ai_handler_class(None, ai_params)
+    if not ai_handler.load_models():
+        logger.error(f"Worker {worker_id} failed to load AI models")
+        return None
+
+    _worker_ai_handler = ai_handler
+    return ai_handler
+
+
 def frame_processor_worker(
     frame_queue: queues.Queue,
     result_queue: queues.Queue,
@@ -63,20 +122,12 @@ def frame_processor_worker(
     worker_id: int,
 ) -> None:
     """帧处理工作进程。"""
-    global _worker_ai_handler
     logger = logging.getLogger(__name__)
 
     try:
-        ai_handler = _worker_ai_handler
-
+        ai_handler = _get_or_init_worker_ai_handler(ai_params, worker_id, logger)
         if ai_handler is None:
-            logger.warning(f"Worker {worker_id}: AI handler not pre-initialized, loading now...")
-            ai_handler_class = _resolve_ai_handler_class()
-            ai_handler = ai_handler_class(None, ai_params)
-            if not ai_handler.load_models():
-                logger.error(f"Worker {worker_id} failed to load AI models")
-                return
-            _worker_ai_handler = ai_handler
+            return
 
         logger.info(
             f"Worker {worker_id} started (using {'pre-initialized' if _worker_ai_handler else 'newly loaded'} AI handler)"
@@ -93,32 +144,16 @@ def frame_processor_worker(
                     break
 
                 frame_index, frame = item
-
-                processing_params = {
-                    "auto_detect": ai_params.get("auto_detect", True),
-                    "detection_sensitivity": ai_params.get("detection_sensitivity", 0.5),
-                    "user_mask": ai_params.get("user_mask", None),
-                }
-
-                processed_frame, _ = ai_handler.process_frame(frame, processing_params)
+                processed_frame, _ = ai_handler.process_frame(
+                    frame, _build_processing_params(ai_params)
+                )
                 result_queue.put((frame_index, processed_frame), timeout=10)
 
                 processed_count += 1
-
-                if processed_count % 10 == 0:
-                    try:
-                        progress_queue.put(
-                            {
-                                "worker_id": worker_id,
-                                "processed": processed_count,
-                            },
-                            block=False,
-                        )
-                    except Exception:
-                        pass
+                _report_progress_non_blocking(progress_queue, worker_id, processed_count, logger)
 
             except Exception as e:
-                if "timeout" not in str(e).lower():
+                if not _is_timeout_error(e):
                     logger.warning(f"Worker {worker_id} processing error: {e}")
                 continue
 

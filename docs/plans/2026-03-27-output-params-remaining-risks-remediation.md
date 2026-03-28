@@ -1,5 +1,9 @@
 # 输出参数剩余风险收口实施计划
 
+> 当前主计划：本文件用于承接输出参数第二轮审查后的继续修复与收口；
+> `2026-03-27-output-params-remaining-risks-implementation.md`
+> 保留为首版实施草案归档，不再继续扩写。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 修复输出参数链路当前剩余的 4 项风险，完成 legacy 字段收口、批处理稳定标识重构、UI 集成探针升级与更大范围回归验证。
