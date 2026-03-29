@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QLabel,
     QScrollArea,
     QSlider,
@@ -63,6 +64,10 @@ class AdvancedParametersWidget(QWidget):
         self.enable_blur_check: Optional["QCheckBox"] = None
         self.enable_sharp_check: Optional["QCheckBox"] = None
         self.enable_denoise_check: Optional["QCheckBox"] = None
+        self.enable_mask_shrink_check: Optional["QCheckBox"] = None
+        self.mask_shrink_pixels_spin: Optional["QSpinBox"] = None
+        self.enable_mask_tracking_check: Optional["QCheckBox"] = None
+        self.mask_tracking_interval_spin: Optional["QSpinBox"] = None
         self.inpainting_method_combo: Optional["QComboBox"] = None
         self.inpaint_radius_spin: Optional["QSpinBox"] = None
         self.quality_slider: Optional["QSlider"] = None
@@ -70,6 +75,9 @@ class AdvancedParametersWidget(QWidget):
         self.enable_smooth_check: Optional["QCheckBox"] = None
         self.enable_blend_check: Optional["QCheckBox"] = None
         self.enable_enhance_check: Optional["QCheckBox"] = None
+        self.enable_mixed_inpainting_check: Optional["QCheckBox"] = None
+        self.mixed_inpainting_area_percent_spin: Optional["QDoubleSpinBox"] = None
+        self.mixed_inpainting_opencv_method_combo: Optional["QComboBox"] = None
         self.processing_mode_combo: Optional["QComboBox"] = None
         self.worker_count_spin: Optional["QSpinBox"] = None
         self.thread_count_spin: Optional["QSpinBox"] = None
@@ -140,6 +148,14 @@ class AdvancedParametersWidget(QWidget):
             self.enable_sharp_check.toggled.connect(self._on_parameter_changed)
         if self.enable_denoise_check:
             self.enable_denoise_check.toggled.connect(self._on_parameter_changed)
+        if self.enable_mask_shrink_check:
+            self.enable_mask_shrink_check.toggled.connect(self._on_parameter_changed)
+        if self.mask_shrink_pixels_spin:
+            self.mask_shrink_pixels_spin.valueChanged.connect(self._on_parameter_changed)
+        if self.enable_mask_tracking_check:
+            self.enable_mask_tracking_check.toggled.connect(self._on_parameter_changed)
+        if self.mask_tracking_interval_spin:
+            self.mask_tracking_interval_spin.valueChanged.connect(self._on_parameter_changed)
 
         # 修复参数信号
         if self.inpainting_method_combo:
@@ -149,6 +165,14 @@ class AdvancedParametersWidget(QWidget):
         if self.quality_slider:
             self.quality_slider.valueChanged.connect(self._update_quality_label)
             self.quality_slider.valueChanged.connect(self._on_parameter_changed)
+        if self.enable_mixed_inpainting_check:
+            self.enable_mixed_inpainting_check.toggled.connect(self._on_parameter_changed)
+        if self.mixed_inpainting_area_percent_spin:
+            self.mixed_inpainting_area_percent_spin.valueChanged.connect(self._on_parameter_changed)
+        if self.mixed_inpainting_opencv_method_combo:
+            self.mixed_inpainting_opencv_method_combo.currentTextChanged.connect(
+                self._on_parameter_changed
+            )
 
         # 后处理选项信号
         if self.enable_smooth_check:
@@ -281,6 +305,22 @@ class AdvancedParametersWidget(QWidget):
             "enable_denoise_preprocess": (
                 self.enable_denoise_check.isChecked() if self.enable_denoise_check else False
             ),
+            "enable_mask_shrink": (
+                self.enable_mask_shrink_check.isChecked()
+                if self.enable_mask_shrink_check
+                else False
+            ),
+            "mask_shrink_pixels": (
+                self.mask_shrink_pixels_spin.value() if self.mask_shrink_pixels_spin else 0
+            ),
+            "enable_mask_tracking": (
+                self.enable_mask_tracking_check.isChecked()
+                if self.enable_mask_tracking_check
+                else False
+            ),
+            "mask_tracking_interval": (
+                self.mask_tracking_interval_spin.value() if self.mask_tracking_interval_spin else 3
+            ),
             # 修复参数
             "inpainting_method": (
                 self.inpainting_method_combo.currentText() if self.inpainting_method_combo else ""
@@ -297,6 +337,21 @@ class AdvancedParametersWidget(QWidget):
             ),
             "enable_enhance_postprocess": (
                 self.enable_enhance_check.isChecked() if self.enable_enhance_check else False
+            ),
+            "enable_mixed_inpainting": (
+                self.enable_mixed_inpainting_check.isChecked()
+                if self.enable_mixed_inpainting_check
+                else False
+            ),
+            "mixed_inpainting_area_percent": (
+                self.mixed_inpainting_area_percent_spin.value()
+                if self.mixed_inpainting_area_percent_spin
+                else 0.30
+            ),
+            "mixed_inpainting_opencv_method": (
+                self.mixed_inpainting_opencv_method_combo.currentData()
+                if self.mixed_inpainting_opencv_method_combo
+                else "telea"
             ),
             # 统一高级参数（性能 + 输出）
             **advanced_snapshot.to_ui_dict(),
@@ -327,6 +382,14 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_sharp_check.setChecked(parameters["enable_sharp_preprocess"])
             if "enable_denoise_preprocess" in parameters and self.enable_denoise_check:
                 self.enable_denoise_check.setChecked(parameters["enable_denoise_preprocess"])
+            if "enable_mask_shrink" in parameters and self.enable_mask_shrink_check:
+                self.enable_mask_shrink_check.setChecked(parameters["enable_mask_shrink"])
+            if "mask_shrink_pixels" in parameters and self.mask_shrink_pixels_spin:
+                self.mask_shrink_pixels_spin.setValue(int(parameters["mask_shrink_pixels"]))
+            if "enable_mask_tracking" in parameters and self.enable_mask_tracking_check:
+                self.enable_mask_tracking_check.setChecked(parameters["enable_mask_tracking"])
+            if "mask_tracking_interval" in parameters and self.mask_tracking_interval_spin:
+                self.mask_tracking_interval_spin.setValue(int(parameters["mask_tracking_interval"]))
 
             # 设置修复参数
             if "inpainting_method" in parameters and self.inpainting_method_combo:
@@ -339,6 +402,24 @@ class AdvancedParametersWidget(QWidget):
 
             if "inpainting_quality" in parameters and self.quality_slider:
                 self.quality_slider.setValue(parameters["inpainting_quality"])
+            if "enable_mixed_inpainting" in parameters and self.enable_mixed_inpainting_check:
+                self.enable_mixed_inpainting_check.setChecked(parameters["enable_mixed_inpainting"])
+            if (
+                "mixed_inpainting_area_percent" in parameters
+                and self.mixed_inpainting_area_percent_spin
+            ):
+                self.mixed_inpainting_area_percent_spin.setValue(
+                    float(parameters["mixed_inpainting_area_percent"])
+                )
+            if (
+                "mixed_inpainting_opencv_method" in parameters
+                and self.mixed_inpainting_opencv_method_combo
+            ):
+                index = self.mixed_inpainting_opencv_method_combo.findData(
+                    parameters["mixed_inpainting_opencv_method"]
+                )
+                if index >= 0:
+                    self.mixed_inpainting_opencv_method_combo.setCurrentIndex(index)
 
             # 设置后处理选项
             if "enable_smooth_postprocess" in parameters and self.enable_smooth_check:
@@ -429,6 +510,14 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_sharp_check.toggled.disconnect(self._on_parameter_changed)
             if self.enable_denoise_check:
                 self.enable_denoise_check.toggled.disconnect(self._on_parameter_changed)
+            if self.enable_mask_shrink_check:
+                self.enable_mask_shrink_check.toggled.disconnect(self._on_parameter_changed)
+            if self.mask_shrink_pixels_spin:
+                self.mask_shrink_pixels_spin.valueChanged.disconnect(self._on_parameter_changed)
+            if self.enable_mask_tracking_check:
+                self.enable_mask_tracking_check.toggled.disconnect(self._on_parameter_changed)
+            if self.mask_tracking_interval_spin:
+                self.mask_tracking_interval_spin.valueChanged.disconnect(self._on_parameter_changed)
 
             if self.inpainting_method_combo:
                 self.inpainting_method_combo.currentTextChanged.disconnect(
@@ -439,6 +528,16 @@ class AdvancedParametersWidget(QWidget):
             if self.quality_slider:
                 self.quality_slider.valueChanged.disconnect(self._update_quality_label)
                 self.quality_slider.valueChanged.disconnect(self._on_parameter_changed)
+            if self.enable_mixed_inpainting_check:
+                self.enable_mixed_inpainting_check.toggled.disconnect(self._on_parameter_changed)
+            if self.mixed_inpainting_area_percent_spin:
+                self.mixed_inpainting_area_percent_spin.valueChanged.disconnect(
+                    self._on_parameter_changed
+                )
+            if self.mixed_inpainting_opencv_method_combo:
+                self.mixed_inpainting_opencv_method_combo.currentTextChanged.disconnect(
+                    self._on_parameter_changed
+                )
 
             if self.enable_smooth_check:
                 self.enable_smooth_check.toggled.disconnect(self._on_parameter_changed)
@@ -495,12 +594,19 @@ class AdvancedParametersWidget(QWidget):
             "enable_blur_preprocess": True,
             "enable_sharp_preprocess": False,
             "enable_denoise_preprocess": True,
+            "enable_mask_shrink": False,
+            "mask_shrink_pixels": 1,
+            "enable_mask_tracking": False,
+            "mask_tracking_interval": 3,
             "inpainting_method": "LaMa 深度学习修复（推荐）",
             "inpainting_radius": 3,
             "inpainting_quality": 3,
             "enable_smooth_postprocess": True,
             "enable_blend_postprocess": True,
             "enable_enhance_postprocess": False,
+            "enable_mixed_inpainting": False,
+            "mixed_inpainting_area_percent": 0.30,
+            "mixed_inpainting_opencv_method": "telea",
             **advanced_defaults,
         }
 

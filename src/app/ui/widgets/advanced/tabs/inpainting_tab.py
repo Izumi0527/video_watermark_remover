@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QLabel,
@@ -83,6 +84,39 @@ class InpaintingParametersTab:
         postprocess_layout.addWidget(parent_widget.enable_enhance_check)
 
         layout.addWidget(postprocess_group)
+
+        # 混合修复（P1：小水印走 OpenCV，速度优先；大水印仍走 LaMa）
+        mixed_group = QGroupBox("混合修复（提速）")
+        mixed_layout = QFormLayout(mixed_group)
+
+        parent_widget.enable_mixed_inpainting_check = QCheckBox(
+            "启用混合修复：小水印优先走 OpenCV（更快），大水印仍使用深度修复"
+        )
+        parent_widget.enable_mixed_inpainting_check.setChecked(False)
+        mixed_layout.addRow("", parent_widget.enable_mixed_inpainting_check)
+
+        parent_widget.mixed_inpainting_area_percent_spin = QDoubleSpinBox()
+        parent_widget.mixed_inpainting_area_percent_spin.setMinimum(0.01)
+        parent_widget.mixed_inpainting_area_percent_spin.setMaximum(5.0)
+        parent_widget.mixed_inpainting_area_percent_spin.setDecimals(2)
+        parent_widget.mixed_inpainting_area_percent_spin.setSingleStep(0.05)
+        parent_widget.mixed_inpainting_area_percent_spin.setValue(0.30)
+        parent_widget.mixed_inpainting_area_percent_spin.setSuffix(" %")
+        mixed_layout.addRow("小水印阈值:", parent_widget.mixed_inpainting_area_percent_spin)
+
+        parent_widget.mixed_inpainting_opencv_method_combo = QComboBox()
+        parent_widget.mixed_inpainting_opencv_method_combo.addItem("TELEA 快速修复", "telea")
+        parent_widget.mixed_inpainting_opencv_method_combo.addItem(
+            "Navier-Stokes 高质量", "navier_stokes"
+        )
+        mixed_layout.addRow("OpenCV 方法:", parent_widget.mixed_inpainting_opencv_method_combo)
+
+        mixed_layout.addRow(
+            "",
+            QLabel("说明：阈值表示掩码面积占画面比例；质量等级越高，系统会自动更保守地使用 OpenCV。"),
+        )
+
+        layout.addWidget(mixed_group)
         layout.addStretch()
 
         return tab

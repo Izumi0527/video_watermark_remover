@@ -242,6 +242,10 @@ class AIParamsBuilder:
         - enable_blur_preprocess → enable_blur_preprocess
         - enable_sharp_preprocess → enable_sharp_preprocess
         - enable_denoise_preprocess → enable_denoise_preprocess
+        - enable_mask_shrink → enable_mask_shrink
+        - mask_shrink_pixels → mask_shrink_pixels
+        - enable_mask_tracking → enable_mask_tracking
+        - mask_tracking_interval → mask_tracking_interval
         """
         params = {}
 
@@ -263,6 +267,21 @@ class AIParamsBuilder:
         params["enable_sharp_preprocess"] = advanced_params.get("enable_sharp_preprocess", False)
         params["enable_denoise_preprocess"] = advanced_params.get("enable_denoise_preprocess", True)
 
+        # P1：掩码优化（布尔值 / 简单边界约束）
+        params["enable_mask_shrink"] = bool(advanced_params.get("enable_mask_shrink", False))
+        try:
+            shrink_pixels = int(advanced_params.get("mask_shrink_pixels", 0) or 0)
+        except (TypeError, ValueError):
+            shrink_pixels = 0
+        params["mask_shrink_pixels"] = max(0, shrink_pixels)
+
+        params["enable_mask_tracking"] = bool(advanced_params.get("enable_mask_tracking", False))
+        try:
+            tracking_interval = int(advanced_params.get("mask_tracking_interval", 3) or 3)
+        except (TypeError, ValueError):
+            tracking_interval = 3
+        params["mask_tracking_interval"] = max(1, tracking_interval)
+
         self.logger.debug(
             f"[检测参数] conf_threshold={params['conf_threshold']}, device={params['device']}"
         )
@@ -281,6 +300,9 @@ class AIParamsBuilder:
         - enable_smooth_postprocess → enable_smooth_postprocess
         - enable_blend_postprocess → enable_blend_postprocess
         - enable_enhance_postprocess → enable_enhance_postprocess
+        - enable_mixed_inpainting → enable_mixed_inpainting
+        - mixed_inpainting_area_percent(%) → mixed_inpainting_area_ratio_threshold(0-1)
+        - mixed_inpainting_opencv_method → mixed_inpainting_opencv_method
         """
         params = {}
 
@@ -324,6 +346,19 @@ class AIParamsBuilder:
         params["enable_blend_postprocess"] = advanced_params.get("enable_blend_postprocess", True)
         params["enable_enhance_postprocess"] = advanced_params.get(
             "enable_enhance_postprocess", False
+        )
+
+        # P1：混合修复（小水印走 OpenCV，减少深度修复负载）
+        params["enable_mixed_inpainting"] = bool(
+            advanced_params.get("enable_mixed_inpainting", False)
+        )
+        try:
+            area_percent = float(advanced_params.get("mixed_inpainting_area_percent", 0.30) or 0.0)
+        except (TypeError, ValueError):
+            area_percent = 0.30
+        params["mixed_inpainting_area_ratio_threshold"] = max(0.0, area_percent / 100.0)
+        params["mixed_inpainting_opencv_method"] = str(
+            advanced_params.get("mixed_inpainting_opencv_method", "telea") or "telea"
         )
 
         self.logger.debug(

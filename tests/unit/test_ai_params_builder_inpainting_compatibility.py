@@ -23,6 +23,9 @@ class _DummyPreferences:
 
 def _build_with_method(method: str, enable_gpu: bool = True) -> dict:
     builder = AIParamsBuilder()
+    # 该用例关注“UI 文案/别名 → 算法与后端选择”归一化逻辑，而不是硬件探测。
+    # 为避免单元测试依赖真实 torch/CUDA 运行环境，这里显式模拟 CUDA 可用。
+    builder._is_cuda_available = lambda: True  # noqa: E731
     return builder.build_from_ui(
         preferences=_DummyPreferences(auto_mode=True),
         advanced_params={

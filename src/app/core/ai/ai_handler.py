@@ -13,7 +13,7 @@ AI处理协调器 - 主模块
 
 import logging
 import time
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Mapping, Optional, Tuple, TypedDict, Union, cast
 
 import cv2
 import numpy as np
@@ -26,6 +26,28 @@ from .inpainting_backends.factory import create_inpainting_backend
 
 # 导入拆分出的检测和修复模块
 from .yolo_detector import YOLOWatermarkDetector
+
+
+class _BatchTimingStats(TypedDict):
+    """批处理耗时统计结构（仅用于观测，不参与业务逻辑）。"""
+
+    batches: int
+    frames: int
+    preprocess_s: float
+    detect_s: float
+    batch_inpaint_s: float
+    finalize_s: float
+
+
+def _build_empty_batch_timing_stats() -> _BatchTimingStats:
+    return {
+        "batches": 0,
+        "frames": 0,
+        "preprocess_s": 0.0,
+        "detect_s": 0.0,
+        "batch_inpaint_s": 0.0,
+        "finalize_s": 0.0,
+    }
 
 
 class AIHandler:
@@ -69,6 +91,40 @@ class AIHandler:
         self.enable_blend_postprocess = self.ai_params.get("enable_blend_postprocess", False)
         self.enable_enhance_postprocess = self.ai_params.get("enable_enhance_postprocess", False)
 
+        # P1：掩码收缩 / 跟踪 / 混合修复（可配置开关）
+        self.enable_mask_shrink = bool(self.ai_params.get("enable_mask_shrink", False))
+        raw_mask_shrink_pixels = self.ai_params.get("mask_shrink_pixels", 0)
+        try:
+            self.mask_shrink_pixels = max(0, int(raw_mask_shrink_pixels or 0))
+        except (TypeError, ValueError):
+            self.mask_shrink_pixels = 0
+        self._mask_shrink_kernel: Optional[np.ndarray] = None
+        self._mask_shrink_kernel_size = 0
+
+        self.enable_mask_tracking = bool(self.ai_params.get("enable_mask_tracking", False))
+        raw_tracking_interval = self.ai_params.get("mask_tracking_interval", 3)
+        try:
+            self.mask_tracking_interval = max(1, int(raw_tracking_interval or 1))
+        except (TypeError, ValueError):
+            self.mask_tracking_interval = 3
+        raw_tracking_warmup = self.ai_params.get("mask_tracking_warmup_frames", 2)
+        try:
+            self.mask_tracking_warmup_frames = max(0, int(raw_tracking_warmup or 0))
+        except (TypeError, ValueError):
+            self.mask_tracking_warmup_frames = 2
+
+        self.enable_mixed_inpainting = bool(self.ai_params.get("enable_mixed_inpainting", False))
+        raw_mixed_ratio = self.ai_params.get("mixed_inpainting_area_ratio_threshold", 0.003)
+        try:
+            self.mixed_inpainting_area_ratio_threshold = max(0.0, float(raw_mixed_ratio or 0.0))
+        except (TypeError, ValueError):
+            self.mixed_inpainting_area_ratio_threshold = 0.003
+        self.mixed_inpainting_opencv_method = (
+            str(self.ai_params.get("mixed_inpainting_opencv_method", "telea") or "telea")
+            .strip()
+            .lower()
+        )
+
         # 初始化检测器和修复器
         self.watermark_detector: Optional[YOLOWatermarkDetector] = None  # 延迟初始化,需要先设置 device
         self.image_inpainter = ImageInpainter(config)
@@ -93,6 +149,24 @@ class AIHandler:
         self.loaded_inpainting_asset_ref: Optional[str] = None
 
         self.logger = logging.getLogger(__name__)
+        # 运行时性能统计（用于日志可观测性，不影响处理结果）。
+        # 目标：把“慢在哪里”从直觉变成数据，便于后续优化与回归验证。
+        self._batch_timing_stats: _BatchTimingStats = _build_empty_batch_timing_stats()
+        self._batch_timing_last_reset_at = time.time()
+
+        # 掩码跟踪状态：仅在严格串行处理时才安全启用。
+        self._mask_tracking_next_frame_index = 0
+        self._mask_tracking_last_mask: Optional[np.ndarray] = None
+        self._mask_tracking_stable_hits = 0
+
+        if self.enable_mask_tracking and (
+            bool(self.ai_params.get("enable_multiprocess", False))
+            or bool(self.ai_params.get("use_pipeline", False))
+            or str(self.ai_params.get("resolved_processing_mode", "") or "").strip().lower()
+            in {"multiprocess", "pipeline"}
+        ):
+            self.enable_mask_tracking = False
+            self.logger.warning("掩码跟踪仅支持串行处理，已自动关闭以避免多进程乱序导致误判。")
 
         self._setup_device()
 
@@ -219,6 +293,141 @@ class AIHandler:
                     self.logger.error(f"Failed to load DL inpainter: {e}")
                     self._disable_gpu_inpainting("gpu_inpainter_reload_failed")
 
+    def update_runtime_params(self, ai_params: Optional[Mapping[str, Any]]) -> None:  # noqa: C901
+        """
+        同步不会触发模型重载的运行时参数。
+
+        说明：预加载的 AIHandler 会在多个处理任务之间复用；若只复用模型但不刷新这些轻量开关，
+        UI 里的“掩码收缩/跟踪/混合修复”等选项会出现“勾选了但看起来没生效”的错觉。
+        """
+        if ai_params is None:
+            return
+
+        # 使用复制后的字典，避免外部在运行过程中意外修改导致不可追溯的问题。
+        self.ai_params = dict(ai_params)
+
+        # 预处理/后处理开关：不影响模型结构，可安全在线更新。
+        self.enable_blur_preprocess = bool(
+            self.ai_params.get("enable_blur_preprocess", self.enable_blur_preprocess)
+        )
+        self.enable_denoise_preprocess = bool(
+            self.ai_params.get("enable_denoise_preprocess", self.enable_denoise_preprocess)
+        )
+        self.enable_sharp_preprocess = bool(
+            self.ai_params.get("enable_sharp_preprocess", self.enable_sharp_preprocess)
+        )
+        self.enable_smooth_postprocess = bool(
+            self.ai_params.get("enable_smooth_postprocess", self.enable_smooth_postprocess)
+        )
+        self.enable_blend_postprocess = bool(
+            self.ai_params.get("enable_blend_postprocess", self.enable_blend_postprocess)
+        )
+        self.enable_enhance_postprocess = bool(
+            self.ai_params.get("enable_enhance_postprocess", self.enable_enhance_postprocess)
+        )
+
+        # P1：掩码收缩
+        prev_enable_mask_shrink = bool(getattr(self, "enable_mask_shrink", False))
+        prev_mask_shrink_pixels = int(getattr(self, "mask_shrink_pixels", 0) or 0)
+        self.enable_mask_shrink = bool(
+            self.ai_params.get("enable_mask_shrink", prev_enable_mask_shrink)
+        )
+        try:
+            shrink_pixels = int(
+                self.ai_params.get("mask_shrink_pixels", prev_mask_shrink_pixels) or 0
+            )
+        except (TypeError, ValueError):
+            shrink_pixels = prev_mask_shrink_pixels
+        self.mask_shrink_pixels = max(0, shrink_pixels)
+
+        # 掩码收缩参数变化时，清理核缓存，避免尺寸不一致导致行为异常。
+        if (
+            self.enable_mask_shrink != prev_enable_mask_shrink
+            or self.mask_shrink_pixels != prev_mask_shrink_pixels
+        ):
+            self._mask_shrink_kernel = None
+            self._mask_shrink_kernel_size = 0
+
+        # P1：掩码跟踪
+        desired_tracking_enabled = bool(
+            self.ai_params.get("enable_mask_tracking", getattr(self, "enable_mask_tracking", False))
+        )
+        try:
+            tracking_interval = int(
+                self.ai_params.get(
+                    "mask_tracking_interval", getattr(self, "mask_tracking_interval", 3)
+                )
+                or 3
+            )
+        except (TypeError, ValueError):
+            tracking_interval = int(getattr(self, "mask_tracking_interval", 3) or 3)
+        self.mask_tracking_interval = max(1, tracking_interval)
+
+        try:
+            tracking_warmup = int(
+                self.ai_params.get(
+                    "mask_tracking_warmup_frames", getattr(self, "mask_tracking_warmup_frames", 2)
+                )
+                or 0
+            )
+        except (TypeError, ValueError):
+            tracking_warmup = int(getattr(self, "mask_tracking_warmup_frames", 2) or 2)
+        self.mask_tracking_warmup_frames = max(0, tracking_warmup)
+
+        # 掩码跟踪仅对串行处理安全；若用户切换了运行模式，需重新评估开关。
+        mode_is_parallel = bool(self.ai_params.get("enable_multiprocess", False)) or bool(
+            self.ai_params.get("use_pipeline", False)
+        )
+        resolved_mode = (
+            str(self.ai_params.get("resolved_processing_mode", "") or "").strip().lower()
+        )
+        if desired_tracking_enabled and (
+            mode_is_parallel or resolved_mode in {"multiprocess", "pipeline"}
+        ):
+            self.enable_mask_tracking = False
+            self.logger.warning("掩码跟踪仅支持串行处理，已自动关闭以避免多进程乱序导致误判。")
+        else:
+            self.enable_mask_tracking = desired_tracking_enabled
+
+        # P1：混合修复
+        self.enable_mixed_inpainting = bool(
+            self.ai_params.get(
+                "enable_mixed_inpainting", getattr(self, "enable_mixed_inpainting", False)
+            )
+        )
+        try:
+            ratio = float(
+                self.ai_params.get(
+                    "mixed_inpainting_area_ratio_threshold",
+                    getattr(self, "mixed_inpainting_area_ratio_threshold", 0.003),
+                )
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            ratio = float(getattr(self, "mixed_inpainting_area_ratio_threshold", 0.003) or 0.003)
+        self.mixed_inpainting_area_ratio_threshold = max(0.0, ratio)
+        self.mixed_inpainting_opencv_method = str(
+            self.ai_params.get(
+                "mixed_inpainting_opencv_method",
+                getattr(self, "mixed_inpainting_opencv_method", "telea"),
+            )
+            or "telea"
+        )
+
+    def reset_runtime_state_for_new_task(self) -> None:
+        """
+        在开始处理新的媒体文件前重置运行时状态。
+
+        预加载模型为了提速会跨任务复用，但某些状态（如掩码跟踪的上一帧掩码、批处理耗时统计）
+        必须按“任务”维度清零，否则会出现跨视频串扰或统计失真。
+        """
+        self._mask_tracking_next_frame_index = 0
+        self._mask_tracking_last_mask = None
+        self._mask_tracking_stable_hits = 0
+
+        self._batch_timing_stats = _build_empty_batch_timing_stats()
+        self._batch_timing_last_reset_at = time.time()
+
     def load_models(self) -> bool:
         """
         加载 AI 模型
@@ -306,19 +515,28 @@ class AIHandler:
             self.logger.error("Invalid input frame")
             return frame, {"error": "Invalid input frame"}
 
+        # 兼容：部分单元测试会通过 `__new__` 构造 handler，仅填充少量字段。
+        # 这里确保 P1 相关状态字段存在，避免属性缺失导致回归测试失败。
+        self._ensure_runtime_state_initialized()
+
+        current_index = int(getattr(self, "_mask_tracking_next_frame_index", 0) or 0)
         try:
             return self._process_frame_internal(frame, watermark_selection_params)
 
         except Exception as e:
             self.logger.error(f"Error in frame processing: {e}")
             return frame, {"error": str(e)}
+        finally:
+            # 始终推进帧序号，避免跟踪间隔在异常路径下失真。
+            self._mask_tracking_next_frame_index = current_index + 1
 
-    def process_frames_batch(
+    def process_frames_batch(  # noqa: C901
         self,
         frames: list[np.ndarray],
         watermark_selection_params: dict,
     ) -> list[Tuple[np.ndarray, dict]]:
         """对一批帧复用批量检测，再逐帧执行修复。"""
+        self._ensure_runtime_state_initialized()
         if not frames:
             return []
 
@@ -330,6 +548,9 @@ class AIHandler:
         if detector is None or not hasattr(detector, "detect_batch"):
             return [self.process_frame(frame, watermark_selection_params) for frame in frames]
 
+        base_frame_index = int(self._mask_tracking_next_frame_index or 0)
+
+        preprocess_started_at = time.time()
         prepared_frames: list[np.ndarray] = []
         processing_infos: list[dict] = []
         for frame in frames:
@@ -338,18 +559,77 @@ class AIHandler:
             processing_info = self._create_processing_info(frame)
             prepared_frames.append(self._apply_preprocessing_if_needed(frame, processing_info))
             processing_infos.append(processing_info)
+        preprocess_cost = time.time() - preprocess_started_at
 
-        try:
-            masks = detector.detect_batch(prepared_frames)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning("批量检测失败，回退逐帧检测: %s", exc)
-            return [self.process_frame(frame, watermark_selection_params) for frame in frames]
+        masks: list[Optional[np.ndarray]] = [None] * len(prepared_frames)
+        detection_methods: list[str] = ["automatic_yolo"] * len(prepared_frames)
+        detected_mask_by_offset: dict[int, Optional[np.ndarray]] = {}
+        detection_indices: list[int] = []
+        for offset in range(len(prepared_frames)):
+            frame_index = base_frame_index + offset
+            if self._should_run_detection_for_frame_index(frame_index):
+                detection_indices.append(offset)
 
+        detect_cost = 0.0
+        detection_offset_set = set(detection_indices)
+        if detection_indices:
+            detect_started_at = time.time()
+            try:
+                if len(detection_indices) == len(prepared_frames):
+                    detected_masks = detector.detect_batch(prepared_frames)
+                else:
+                    detected_masks = detector.detect_batch(
+                        [prepared_frames[index] for index in detection_indices]
+                    )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("批量检测失败，回退逐帧检测: %s", exc)
+                try:
+                    detected_masks = [
+                        detector.detect_watermark(prepared_frames[index])
+                        for index in detection_indices
+                    ]
+                except Exception:  # noqa: BLE001
+                    return [
+                        self.process_frame(frame, watermark_selection_params) for frame in frames
+                    ]
+            detect_cost = time.time() - detect_started_at
+
+            if len(detected_masks) != len(detection_indices):
+                self.logger.warning(
+                    "批量检测返回数量异常，回退逐帧检测: expected=%s actual=%s",
+                    len(detection_indices),
+                    len(detected_masks),
+                )
+                return [self.process_frame(frame, watermark_selection_params) for frame in frames]
+
+            for slot, detected_mask in zip(detection_indices, detected_masks):
+                adjusted = self._shrink_mask_if_needed(detected_mask)
+                detected_mask_by_offset[int(slot)] = adjusted
+
+        # 严格按帧序号顺序填充掩码，避免“未来检测结果回填到过去帧”。
+        for offset in range(len(prepared_frames)):
+            if int(offset) in detection_offset_set:
+                detected = detected_mask_by_offset.get(int(offset))
+                masks[offset] = detected
+                detection_methods[offset] = "automatic_yolo"
+                self._record_tracking_detection_result(detected)
+                continue
+
+            tracked = self._get_tracked_mask_copy()
+            if tracked is not None:
+                masks[offset] = tracked
+                detection_methods[offset] = "mask_tracking_reuse_last"
+
+        self._mask_tracking_next_frame_index = base_frame_index + len(prepared_frames)
+
+        inpaint_started_at = time.time()
         precomputed_inpainting_results = self._try_batch_inpaint_frames(
             prepared_frames,
             masks,
         )
+        inpaint_cost = time.time() - inpaint_started_at
 
+        finalize_started_at = time.time()
         results: list[Tuple[np.ndarray, dict]] = []
         for index, (frame, prepared_frame, mask, processing_info) in enumerate(
             zip(frames, prepared_frames, masks, processing_infos)
@@ -363,13 +643,51 @@ class AIHandler:
                     mask=mask,
                     processing_info=processing_info,
                     watermark_selection_params=watermark_selection_params,
-                    detection_method="automatic_yolo",
+                    detection_method=detection_methods[index]
+                    if index < len(detection_methods)
+                    else None,
                     precomputed_inpainting_result=precomputed_result,
                 )
             )
+        finalize_cost = time.time() - finalize_started_at
+
+        # 写入批处理性能统计（仅用于观测，不参与业务逻辑）。
+        try:
+            stats = self._batch_timing_stats
+            stats["batches"] = int(stats["batches"]) + 1
+            stats["frames"] = int(stats["frames"]) + len(frames)
+            stats["preprocess_s"] = float(stats["preprocess_s"]) + float(preprocess_cost)
+            stats["detect_s"] = float(stats["detect_s"]) + float(detect_cost)
+            stats["batch_inpaint_s"] = float(stats["batch_inpaint_s"]) + float(inpaint_cost)
+            stats["finalize_s"] = float(stats["finalize_s"]) + float(finalize_cost)
+        except Exception as exc:  # noqa: BLE001
+            # 统计不应影响主流程稳定性，但需要留下调试线索，避免 silent failure。
+            safe_logger = getattr(self, "logger", logging.getLogger(__name__))
+            safe_logger.debug("批处理性能统计写入失败: %s", exc)
+
         return results
 
-    def _try_batch_inpaint_frames(
+    def consume_batch_timing_snapshot(self) -> Optional[dict[str, Union[float, int]]]:
+        """消费并重置批处理耗时统计快照。"""
+        stats: dict[str, Union[float, int]] = dict(
+            cast(Mapping[str, Union[float, int]], self._batch_timing_stats)
+        )
+        frames = int(stats.get("frames", 0))
+        batches = int(stats.get("batches", 0))
+        if frames <= 0 or batches <= 0:
+            return None
+
+        now = time.time()
+        last_reset_at = float(getattr(self, "_batch_timing_last_reset_at", now) or now)
+        elapsed = max(0.0, float(now - last_reset_at))
+        stats["elapsed_s"] = elapsed
+
+        # reset
+        self._batch_timing_stats = _build_empty_batch_timing_stats()
+        self._batch_timing_last_reset_at = now
+        return stats
+
+    def _try_batch_inpaint_frames(  # noqa: C901
         self,
         frames: list[np.ndarray],
         masks: list[Optional[np.ndarray]],
@@ -383,9 +701,14 @@ class AIHandler:
         if not callable(batch_inpaint):
             return {}
 
-        candidate_indices = [
-            index for index, mask in enumerate(masks) if mask is not None and np.any(mask)
-        ]
+        candidate_indices: list[int] = []
+        for index, mask in enumerate(masks):
+            if mask is None or not np.any(mask):
+                continue
+            # 混合修复：小水印优先走 OpenCV，不进入深度批量修复队列。
+            if self._should_route_to_opencv_for_mask(mask, frames[index].shape):
+                continue
+            candidate_indices.append(index)
         if not candidate_indices:
             return {}
 
@@ -516,6 +839,153 @@ class AIHandler:
         self.logger.debug(f"Applied preprocessing: {processing_info['preprocessing_applied']}")
         return processed
 
+    def _get_mask_shrink_kernel(self) -> Optional[np.ndarray]:
+        """构建/复用掩码收缩用的腐蚀核。"""
+        if not self.enable_mask_shrink or self.mask_shrink_pixels <= 0:
+            return None
+
+        k = int(self.mask_shrink_pixels) * 2 + 1
+        if k <= 1:
+            return None
+
+        if self._mask_shrink_kernel is not None and self._mask_shrink_kernel_size == k:
+            return self._mask_shrink_kernel
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        self._mask_shrink_kernel = kernel
+        self._mask_shrink_kernel_size = k
+        return kernel
+
+    def _shrink_mask_if_needed(self, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        """按配置对掩码做轻微收缩（侵蚀），以减少误伤与修复负载。"""
+        if mask is None:
+            return None
+        if not self.enable_mask_shrink or self.mask_shrink_pixels <= 0:
+            return mask
+        if not np.any(mask):
+            return mask
+
+        kernel = self._get_mask_shrink_kernel()
+        if kernel is None:
+            return mask
+
+        try:
+            shrunk = cv2.erode(mask, kernel, iterations=1)
+        except Exception:  # noqa: BLE001
+            return mask
+
+        # 侵蚀后若掩码完全消失，则保持原掩码避免漏修。
+        return shrunk if np.any(shrunk) else mask
+
+    def _ensure_runtime_state_initialized(self) -> None:  # noqa: C901
+        """确保 P1 掩码优化相关的状态字段已初始化（用于兼容轻量单元测试构造方式）。"""
+        if not hasattr(self, "_mask_tracking_next_frame_index"):
+            self._mask_tracking_next_frame_index = 0
+        if not hasattr(self, "_mask_tracking_last_mask"):
+            self._mask_tracking_last_mask = None
+        if not hasattr(self, "_mask_tracking_stable_hits"):
+            self._mask_tracking_stable_hits = 0
+
+        if not hasattr(self, "enable_mask_tracking"):
+            self.enable_mask_tracking = False
+        if not hasattr(self, "mask_tracking_interval"):
+            self.mask_tracking_interval = 3
+        if not hasattr(self, "mask_tracking_warmup_frames"):
+            self.mask_tracking_warmup_frames = 2
+
+        if not hasattr(self, "enable_mask_shrink"):
+            self.enable_mask_shrink = False
+        if not hasattr(self, "mask_shrink_pixels"):
+            self.mask_shrink_pixels = 0
+        if not hasattr(self, "_mask_shrink_kernel"):
+            self._mask_shrink_kernel = None
+        if not hasattr(self, "_mask_shrink_kernel_size"):
+            self._mask_shrink_kernel_size = 0
+
+        if not hasattr(self, "enable_mixed_inpainting"):
+            self.enable_mixed_inpainting = False
+        if not hasattr(self, "mixed_inpainting_area_ratio_threshold"):
+            self.mixed_inpainting_area_ratio_threshold = 0.003
+        if not hasattr(self, "mixed_inpainting_opencv_method"):
+            self.mixed_inpainting_opencv_method = "telea"
+
+        # 批处理耗时统计字段：部分单测会跳过 __init__，需要兜底初始化。
+        if not hasattr(self, "_batch_timing_stats"):
+            self._batch_timing_stats = _build_empty_batch_timing_stats()
+        if not hasattr(self, "_batch_timing_last_reset_at"):
+            self._batch_timing_last_reset_at = time.time()
+
+    def _resolve_mixed_inpainting_threshold_ratio(self) -> float:
+        """按质量等级动态收敛混合修复的面积阈值。"""
+        base = max(0.0, float(self.mixed_inpainting_area_ratio_threshold or 0.0))
+        quality = max(1, min(5, int(self.quality_level or 3)))
+        quality_scale = {
+            1: 1.6,
+            2: 1.3,
+            3: 1.0,
+            4: 0.7,
+            5: 0.5,
+        }.get(quality, 1.0)
+        return max(0.0, base * float(quality_scale))
+
+    def _should_route_to_opencv_for_mask(
+        self, mask: Optional[np.ndarray], frame_shape: tuple[int, ...]
+    ) -> bool:
+        """判断是否走混合修复的 OpenCV 快速路径。"""
+        if not self.enable_mixed_inpainting:
+            return False
+        if mask is None or not np.any(mask):
+            return False
+
+        height = int(frame_shape[0]) if len(frame_shape) >= 1 else 0
+        width = int(frame_shape[1]) if len(frame_shape) >= 2 else 0
+        if height <= 0 or width <= 0:
+            return False
+
+        try:
+            mask_pixels = int(cv2.countNonZero(mask))
+        except Exception:  # noqa: BLE001
+            mask_pixels = int(np.count_nonzero(mask))
+        area_ratio = mask_pixels / float(height * width)
+        threshold = self._resolve_mixed_inpainting_threshold_ratio()
+        return area_ratio > 0 and area_ratio <= threshold
+
+    def _is_tracking_ready(self) -> bool:
+        if not self.enable_mask_tracking:
+            return False
+        if self._mask_tracking_last_mask is None or not np.any(self._mask_tracking_last_mask):
+            return False
+        return int(self._mask_tracking_stable_hits or 0) >= int(
+            self.mask_tracking_warmup_frames or 0
+        )
+
+    def _should_run_detection_for_frame_index(self, frame_index: int) -> bool:
+        if not self.enable_mask_tracking:
+            return True
+        if not self._is_tracking_ready():
+            return True
+        interval = max(1, int(self.mask_tracking_interval or 1))
+        return int(frame_index) % interval == 0
+
+    def _record_tracking_detection_result(self, mask: Optional[np.ndarray]) -> None:
+        """记录一次真实检测结果，用于后续跟踪复用。"""
+        if mask is None or not np.any(mask):
+            self._mask_tracking_last_mask = None
+            self._mask_tracking_stable_hits = 0
+            return
+        self._mask_tracking_last_mask = mask
+        self._mask_tracking_stable_hits = int(self._mask_tracking_stable_hits or 0) + 1
+
+    def _get_tracked_mask_copy(self) -> Optional[np.ndarray]:
+        """获取可复用的掩码副本。"""
+        mask = self._mask_tracking_last_mask
+        if mask is None or not np.any(mask):
+            return None
+        try:
+            return mask.copy()
+        except Exception:  # noqa: BLE001
+            return np.asarray(mask)
+
     def _resolve_mask(  # noqa: C901
         self,
         frame: np.ndarray,
@@ -565,11 +1035,27 @@ class AIHandler:
                 self.logger.error("Watermark detector not initialized")
                 return None, "Watermark detector not initialized"
 
+            frame_index = int(self._mask_tracking_next_frame_index or 0)
+
             mask = precomputed_mask
-            if mask is None:
+            if mask is not None:
+                # 注意：预计算掩码应在“生成阶段”完成必要的后处理（如掩码收缩）。
+                # 这里再做一次收缩会导致掩码被二次侵蚀，出现漏修风险。
+                processing_info["detection_method"] = "automatic_yolo"
+            else:
+                if not self._should_run_detection_for_frame_index(frame_index):
+                    tracked = self._get_tracked_mask_copy()
+                    if tracked is not None:
+                        processing_info["detection_method"] = "mask_tracking_reuse_last"
+                        return tracked, None
+
                 _ = watermark_selection_params.get("detection_sensitivity", 0.5)
-                mask = self.watermark_detector.detect_watermark(frame)
-            processing_info["detection_method"] = "automatic_yolo"
+                detected = self.watermark_detector.detect_watermark(frame)
+                detected = self._shrink_mask_if_needed(detected)
+                mask = detected
+                processing_info["detection_method"] = "automatic_yolo"
+                self._record_tracking_detection_result(detected)
+
             detector = self.watermark_detector
             detector_model_type = getattr(detector, "model_type", None) or "unknown"
             detector_device = getattr(detector, "device", None) or self.device
@@ -759,6 +1245,39 @@ class AIHandler:
             self.last_effective_quality_level = None
             self.last_effective_inpaint_radius = None
             self.last_gpu_inpainting_runtime_error = None
+
+            # P1：混合修复（小水印优先 OpenCV，兼顾速度与观感）
+            if self._should_route_to_opencv_for_mask(mask, frame.shape):
+                if self._ensure_opencv_backend_loaded():
+                    backend = self.opencv_inpainting_backend
+                    if backend is None:
+                        self.logger.error("OpenCV backend unexpectedly unavailable after load")
+                        return frame
+
+                    resolved_method = self.mixed_inpainting_opencv_method
+                    if resolved_method not in {
+                        "telea",
+                        "navier_stokes",
+                        "custom_interpolation",
+                        "auto",
+                    }:
+                        resolved_method = self._resolve_opencv_inpainting_method()
+
+                    try:
+                        result = backend.inpaint_frame(
+                            frame,
+                            mask,
+                            inpaint_radius=self.inpaint_radius,
+                            quality_level=self.quality_level,
+                            opencv_method=resolved_method,
+                        )
+                        if result is None:
+                            self.logger.warning("混合修复返回 None，回退到原始帧")
+                            return frame
+                        self._sync_trace_from_opencv_backend()
+                        return cast(np.ndarray, result)
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.warning("混合修复 OpenCV 失败，回退深度修复: %s", exc)
 
             # 优先使用深度学习 inpainter (如果已启用)
             if self.use_gpu_inpainting and self.deep_inpainting_backend is not None:

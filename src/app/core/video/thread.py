@@ -369,6 +369,24 @@ class VideoProcessorThread(QThread):
                         self.ai_handler.update_device(new_device)
                     self.status.emit("⚡ 使用预加载的AI模型，立即开始处理")
 
+            # 复用预加载模型时，务必同步本次任务的轻量开关/阈值，并重置跨任务状态（避免上一段视频的掩码污染下一段）。
+            try:
+                updater = getattr(self.ai_handler, "update_runtime_params", None)
+                if callable(updater):
+                    updater(self.ai_params)
+                else:
+                    # 兜底：至少更新 ai_params 供后续签名/日志读取。
+                    setattr(self.ai_handler, "ai_params", dict(self.ai_params))
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug("同步运行时参数失败（将继续处理）: %s", exc)
+
+            try:
+                resetter = getattr(self.ai_handler, "reset_runtime_state_for_new_task", None)
+                if callable(resetter):
+                    resetter()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug("重置任务运行时状态失败（将继续处理）: %s", exc)
+
             # 关键运行上下文：用于用户直接判断“是否走 GPU / 用的是什么模型”。
             try:
                 detector = getattr(self.ai_handler, "watermark_detector", None)

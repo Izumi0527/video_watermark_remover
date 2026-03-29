@@ -13,9 +13,12 @@ LaMa TorchScript 运行时。
 
 from __future__ import annotations
 
+import logging
+import os
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import cv2
 import numpy as np
@@ -27,6 +30,8 @@ TORCHSCRIPT_CANDIDATE_NAMES = (
     "lama.pt",
     "model.pt",
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LaMaRuntimeError(RuntimeError):
@@ -45,6 +50,78 @@ class LaMaTorchScriptRunner:
     device: torch.device
     asset_ref: str
     model_path: str
+    use_fp16: bool = False
+
+    def _run_with_fp16_fallback(
+        self,
+        *,
+        use_fp16: bool,
+        run_fp16: Callable[[], Any],
+        run_fp32: Callable[[], Any],
+        context: str,
+    ) -> Any:
+        """统一处理“FP16 失败→自动回退 FP32→锁定 FP32”的执行逻辑。"""
+        try:
+            if use_fp16:
+                return run_fp16()
+            return run_fp32()
+        except RuntimeError as exc:
+            if not use_fp16 or not self._should_fallback_fp16(exc):
+                raise
+
+            summary = self._summarize_runtime_error(exc)
+            logger.warning(
+                "LaMa FP16 %s失败，已自动回退到 FP32（后续将保持 FP32）：%s",
+                str(context or "推理"),
+                summary,
+            )
+            self.use_fp16 = False
+            return run_fp32()
+
+    def _summarize_runtime_error(self, exc: BaseException, *, max_chars: int = 260) -> str:
+        """将 RuntimeError 转为更短的摘要文本，避免 TorchScript 长栈影响性能与可读性。"""
+        try:
+            message = str(exc) or ""
+        except Exception:  # noqa: BLE001
+            message = ""
+
+        if not message:
+            return repr(exc)
+
+        lines = [line.strip() for line in message.splitlines() if str(line).strip()]
+        if not lines:
+            summary = message.strip()
+        else:
+            summary = lines[-1]
+            for line in reversed(lines):
+                lowered = line.lower()
+                if lowered.startswith("runtimeerror:"):
+                    summary = line
+                    break
+                if "cufft" in lowered or "complexhalf" in lowered:
+                    summary = line
+                    break
+                if "half precision" in lowered and "fft" in lowered:
+                    summary = line
+                    break
+
+        summary = summary.replace("\r", " ").replace("\n", " ").strip()
+        if max_chars > 0 and len(summary) > max_chars:
+            summary = summary[: max(1, max_chars - 3)] + "..."
+        return summary
+
+    def _should_fallback_fp16(self, exc: BaseException) -> bool:
+        """判断是否需要从 FP16 回退到 FP32（避免 cuFFT/ComplexHalf 等已知限制导致崩溃）。"""
+        message = str(exc).lower()
+        if "out of memory" in message:
+            return False
+        if "cufft" in message and ("half" in message or "complex" in message):
+            return True
+        if "complexhalf" in message:
+            return True
+        if "half precision" in message and "fft" in message:
+            return True
+        return False
 
     def __call__(
         self,
@@ -52,14 +129,33 @@ class LaMaTorchScriptRunner:
         mask: np.ndarray,
         **_: Any,
     ) -> np.ndarray:
+        use_fp16 = bool(self.use_fp16 and self.device.type == "cuda")
+        target_dtype = torch.float16 if use_fp16 else torch.float32
         image_tensor, mask_tensor, original_height, original_width = _prepare_inputs(
             frame,
             mask,
             self.device,
+            dtype=target_dtype,
         )
 
-        with torch.inference_mode():
-            output = self.model(image_tensor, mask_tensor)
+        autocast_ctx = nullcontext()
+        if use_fp16:
+            autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.float16)
+
+        def _run_fp16() -> Any:
+            with torch.inference_mode(), autocast_ctx:
+                return self.model(image_tensor, mask_tensor)
+
+        def _run_fp32() -> Any:
+            with torch.inference_mode():
+                return self.model(image_tensor.float(), mask_tensor.float())
+
+        output = self._run_with_fp16_fallback(
+            use_fp16=use_fp16,
+            run_fp16=_run_fp16,
+            run_fp32=_run_fp32,
+            context="单帧推理",
+        )
 
         return _convert_output_to_bgr_image(output, original_height, original_width)
 
@@ -70,14 +166,33 @@ class LaMaTorchScriptRunner:
         **_: Any,
     ) -> list[np.ndarray]:
         """执行批量 LaMa 推理，降低逐帧调用与张量搬运开销。"""
+        use_fp16 = bool(self.use_fp16 and self.device.type == "cuda")
+        target_dtype = torch.float16 if use_fp16 else torch.float32
         image_tensor, mask_tensor, original_sizes = _prepare_inputs_batch(
             frames,
             masks,
             self.device,
+            dtype=target_dtype,
         )
 
-        with torch.inference_mode():
-            output = self.model(image_tensor, mask_tensor)
+        autocast_ctx = nullcontext()
+        if use_fp16:
+            autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.float16)
+
+        def _run_fp16() -> Any:
+            with torch.inference_mode(), autocast_ctx:
+                return self.model(image_tensor, mask_tensor)
+
+        def _run_fp32() -> Any:
+            with torch.inference_mode():
+                return self.model(image_tensor.float(), mask_tensor.float())
+
+        output = self._run_with_fp16_fallback(
+            use_fp16=use_fp16,
+            run_fp16=_run_fp16,
+            run_fp32=_run_fp32,
+            context="批量推理",
+        )
 
         return _convert_batch_output_to_bgr_images(output, original_sizes)
 
@@ -110,11 +225,21 @@ def build_lama_runner(
             f"加载 LaMa TorchScript 模型失败：{exc}",
         ) from exc
 
+    use_fp16 = False
+    if device.type == "cuda":
+        # 默认禁用 FP16：
+        # LaMa TorchScript 内部包含 FFT，且对 half precision 的 cuFFT 维度存在强约束，
+        # 典型视频分辨率（如 720p/1080p）很容易触发异常，造成性能断崖与日志膨胀。
+        # 如需尝试 FP16，请显式设置环境变量：VWR_LAMA_FP16=1
+        raw_flag = str(os.environ.get("VWR_LAMA_FP16", "0") or "0").strip().lower()
+        use_fp16 = raw_flag not in {"0", "false", "no", "off"}
+
     return LaMaTorchScriptRunner(
         model=model,
         device=device,
         asset_ref=str(Path(asset_ref).expanduser()),
         model_path=str(model_path),
+        use_fp16=use_fp16,
     )
 
 
@@ -224,10 +349,12 @@ def _prepare_inputs(
     frame: np.ndarray,
     mask: np.ndarray,
     device: torch.device,
+    *,
+    dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor, int, int]:
     image_array, mask_array, original_height, original_width = _prepare_input_arrays(frame, mask)
-    image_tensor = torch.from_numpy(image_array).unsqueeze(0).to(device)
-    mask_tensor = torch.from_numpy(mask_array).unsqueeze(0).to(device)
+    image_tensor = torch.from_numpy(image_array).unsqueeze(0).to(device=device, dtype=dtype)
+    mask_tensor = torch.from_numpy(mask_array).unsqueeze(0).to(device=device, dtype=dtype)
     return image_tensor, mask_tensor, original_height, original_width
 
 
@@ -235,6 +362,8 @@ def _prepare_inputs_batch(
     frames: list[np.ndarray],
     masks: list[np.ndarray],
     device: torch.device,
+    *,
+    dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor, list[tuple[int, int]]]:
     if not frames or not masks or len(frames) != len(masks):
         raise LaMaRuntimeError("lama_invalid_batch", "LaMa 批量推理要求 frame/mask 数量一致且非空。")
@@ -270,8 +399,10 @@ def _prepare_inputs_batch(
         axis=0,
     )
 
-    image_tensor = torch.from_numpy(np.ascontiguousarray(batch_images)).to(device)
-    mask_tensor = torch.from_numpy(np.ascontiguousarray(batch_masks)).to(device)
+    image_tensor = torch.from_numpy(np.ascontiguousarray(batch_images)).to(
+        device=device, dtype=dtype
+    )
+    mask_tensor = torch.from_numpy(np.ascontiguousarray(batch_masks)).to(device=device, dtype=dtype)
     return image_tensor, mask_tensor, original_sizes
 
 

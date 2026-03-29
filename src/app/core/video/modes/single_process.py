@@ -79,9 +79,35 @@ def _maybe_log_runtime_heartbeat(processor, *, current_frame: int, total_frames:
         getattr(processor, "runtime_processing_guard_reason", None)
     )
     hint_suffix = f"；{runtime_hint}" if runtime_hint else ""
+
+    timing_suffix = ""
+    ai_handler = getattr(processor, "ai_handler", None)
+    consume_timing = (
+        getattr(ai_handler, "consume_batch_timing_snapshot", None) if ai_handler else None
+    )
+    if callable(consume_timing):
+        try:
+            snapshot = consume_timing()
+        except Exception:  # noqa: BLE001
+            snapshot = None
+
+        if isinstance(snapshot, dict):
+            frames = int(snapshot.get("frames", 0) or 0)
+            if frames > 0:
+                preprocess_ms = (float(snapshot.get("preprocess_s", 0.0) or 0.0) / frames) * 1000
+                detect_ms = (float(snapshot.get("detect_s", 0.0) or 0.0) / frames) * 1000
+                inpaint_ms = (float(snapshot.get("batch_inpaint_s", 0.0) or 0.0) / frames) * 1000
+                finalize_ms = (float(snapshot.get("finalize_s", 0.0) or 0.0) / frames) * 1000
+                timing_suffix = (
+                    " timing(ms/frame):"
+                    f" pre={preprocess_ms:.0f}"
+                    f" det={detect_ms:.0f}"
+                    f" lama={inpaint_ms:.0f}"
+                    f" fin={finalize_ms:.0f}"
+                )
     progress_percentage = int((current_frame / total_frames) * 100) if total_frames > 0 else 0
     processor.logger.info(
-        "单进程处理心跳: frame=%s/%s progress=%s%% speed=%.2f fps eta=%s %s%s",
+        "单进程处理心跳: frame=%s/%s progress=%s%% speed=%.2f fps eta=%s %s%s%s",
         current_frame,
         total_frames,
         progress_percentage,
@@ -89,6 +115,7 @@ def _maybe_log_runtime_heartbeat(processor, *, current_frame: int, total_frames:
         _format_duration(eta),
         runtime_summary,
         hint_suffix,
+        timing_suffix,
     )
 
 

@@ -82,6 +82,40 @@ class DetectionParametersTab:
         preprocess_layout.addWidget(parent_widget.enable_denoise_check)
 
         layout.addWidget(preprocess_group)
+
+        # 掩码优化（速度/误伤控制）
+        mask_group = QGroupBox("掩码优化")
+        mask_layout = QFormLayout(mask_group)
+
+        parent_widget.enable_mask_shrink_check = QCheckBox("启用掩码收缩（减少误伤并降低修复负载）")
+        parent_widget.enable_mask_shrink_check.setChecked(False)
+        mask_layout.addRow("", parent_widget.enable_mask_shrink_check)
+
+        parent_widget.mask_shrink_pixels_spin = QSpinBox()
+        parent_widget.mask_shrink_pixels_spin.setMinimum(0)
+        parent_widget.mask_shrink_pixels_spin.setMaximum(10)
+        parent_widget.mask_shrink_pixels_spin.setValue(1)
+        parent_widget.mask_shrink_pixels_spin.setSpecialValueText("不收缩")
+        parent_widget.mask_shrink_pixels_spin.setSuffix(" px")
+        mask_layout.addRow("收缩强度:", parent_widget.mask_shrink_pixels_spin)
+
+        parent_widget.enable_mask_tracking_check = QCheckBox("启用静态水印跟踪（复用掩码以减少检测频率）")
+        parent_widget.enable_mask_tracking_check.setChecked(False)
+        mask_layout.addRow("", parent_widget.enable_mask_tracking_check)
+
+        parent_widget.mask_tracking_interval_spin = QSpinBox()
+        parent_widget.mask_tracking_interval_spin.setMinimum(1)
+        parent_widget.mask_tracking_interval_spin.setMaximum(30)
+        parent_widget.mask_tracking_interval_spin.setValue(3)
+        parent_widget.mask_tracking_interval_spin.setSuffix(" 帧")
+        mask_layout.addRow("重新检测间隔:", parent_widget.mask_tracking_interval_spin)
+
+        mask_layout.addRow(
+            "",
+            QLabel("说明：适合静态/轻微移动水印；动态水印建议关闭或调小间隔。"),
+        )
+
+        layout.addWidget(mask_group)
         layout.addStretch()
 
         return tab

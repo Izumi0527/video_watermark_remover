@@ -159,8 +159,8 @@ iou_threshold = 0.45
 
 # 批处理大小（针对GPU优化）
 # 说明：0=自动检测，1=单帧处理，8-16=批处理
-# 推荐：NVIDIA 4070 Ti Super (16GB)使用8-12获得最佳性能
-batch_size = 8
+# 推荐：NVIDIA 4070 Ti Super (16GB)使用16-32更容易喂满 GPU（显存紧张时会自动降级）
+batch_size = 16
 
 # 是否自动下载缺失的模型（选项：yes/no）
 # 说明：首次使用时自动从Hugging Face下载模型（约114MB）
