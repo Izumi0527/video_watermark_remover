@@ -55,6 +55,16 @@ class DetectionParametersTab:
                 "YOLO v11x CPU 模式",
             ]
         )
+        # 说明：不同 PyQt6/Qt 版本对 SizeAdjustPolicy 的枚举值支持不完全一致；
+        # 这里做兼容处理，避免启动时因属性不存在而崩溃。
+        size_policy = getattr(
+            QComboBox.SizeAdjustPolicy, "AdjustToMinimumContentsLength", None
+        ) or getattr(QComboBox.SizeAdjustPolicy, "AdjustToMinimumContentsLengthWithIcon", None)
+        if size_policy is not None and hasattr(
+            parent_widget.detection_method_combo, "setMinimumContentsLength"
+        ):
+            parent_widget.detection_method_combo.setSizeAdjustPolicy(size_policy)
+            parent_widget.detection_method_combo.setMinimumContentsLength(18)
         method_layout.addRow("检测方法:", parent_widget.detection_method_combo)
 
         parent_widget.min_area_spin = QSpinBox()
@@ -87,7 +97,8 @@ class DetectionParametersTab:
         mask_group = QGroupBox("掩码优化")
         mask_layout = QFormLayout(mask_group)
 
-        parent_widget.enable_mask_shrink_check = QCheckBox("启用掩码收缩（减少误伤并降低修复负载）")
+        parent_widget.enable_mask_shrink_check = QCheckBox("启用掩码收缩（减少误伤）")
+        parent_widget.enable_mask_shrink_check.setToolTip("收缩掩码边界，减少误伤并降低修复负载；边界偏小的水印不建议开启。")
         parent_widget.enable_mask_shrink_check.setChecked(False)
         mask_layout.addRow("", parent_widget.enable_mask_shrink_check)
 
@@ -99,7 +110,8 @@ class DetectionParametersTab:
         parent_widget.mask_shrink_pixels_spin.setSuffix(" px")
         mask_layout.addRow("收缩强度:", parent_widget.mask_shrink_pixels_spin)
 
-        parent_widget.enable_mask_tracking_check = QCheckBox("启用静态水印跟踪（复用掩码以减少检测频率）")
+        parent_widget.enable_mask_tracking_check = QCheckBox("启用静态水印跟踪（降低检测频率）")
+        parent_widget.enable_mask_tracking_check.setToolTip("静态/轻微移动水印可复用掩码减少检测；动态水印建议关闭或减小间隔。")
         parent_widget.enable_mask_tracking_check.setChecked(False)
         mask_layout.addRow("", parent_widget.enable_mask_tracking_check)
 
@@ -110,11 +122,10 @@ class DetectionParametersTab:
         parent_widget.mask_tracking_interval_spin.setSuffix(" 帧")
         mask_layout.addRow("重新检测间隔:", parent_widget.mask_tracking_interval_spin)
 
-        mask_layout.addRow(
-            "",
-            QLabel("说明：适合静态/轻微移动水印；动态水印建议关闭或调小间隔。"),
-        )
-
+        tracking_hint_label = QLabel("说明：适合静态水印；动态水印建议关闭/减小间隔。")
+        tracking_hint_label.setWordWrap(True)
+        tracking_hint_label.setToolTip("静态/轻微移动水印可复用掩码减少检测；动态水印建议关闭或减小间隔。")
+        mask_layout.addRow("", tracking_hint_label)
         layout.addWidget(mask_group)
         layout.addStretch()
 

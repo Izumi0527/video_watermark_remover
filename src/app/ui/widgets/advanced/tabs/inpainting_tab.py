@@ -41,6 +41,16 @@ class InpaintingParametersTab:
                 "自定义插值方法",
             ]
         )
+        # 说明：不同 PyQt6/Qt 版本对 SizeAdjustPolicy 的枚举值支持不完全一致；
+        # 这里做兼容处理，避免启动时因属性不存在而崩溃。
+        size_policy = getattr(
+            QComboBox.SizeAdjustPolicy, "AdjustToMinimumContentsLength", None
+        ) or getattr(QComboBox.SizeAdjustPolicy, "AdjustToMinimumContentsLengthWithIcon", None)
+        if size_policy is not None and hasattr(
+            parent_widget.inpainting_method_combo, "setMinimumContentsLength"
+        ):
+            parent_widget.inpainting_method_combo.setSizeAdjustPolicy(size_policy)
+            parent_widget.inpainting_method_combo.setMinimumContentsLength(18)
         method_layout.addRow("修复算法:", parent_widget.inpainting_method_combo)
 
         parent_widget.inpaint_radius_spin = QSpinBox()
@@ -89,8 +99,9 @@ class InpaintingParametersTab:
         mixed_group = QGroupBox("混合修复（提速）")
         mixed_layout = QFormLayout(mixed_group)
 
-        parent_widget.enable_mixed_inpainting_check = QCheckBox(
-            "启用混合修复：小水印优先走 OpenCV（更快），大水印仍使用深度修复"
+        parent_widget.enable_mixed_inpainting_check = QCheckBox("启用混合修复（小水印走 OpenCV 提速）")
+        parent_widget.enable_mixed_inpainting_check.setToolTip(
+            "小水印优先走 OpenCV（更快），大水印仍使用深度修复；可通过“小水印阈值”控制切换。"
         )
         parent_widget.enable_mixed_inpainting_check.setChecked(False)
         mixed_layout.addRow("", parent_widget.enable_mixed_inpainting_check)
@@ -111,11 +122,10 @@ class InpaintingParametersTab:
         )
         mixed_layout.addRow("OpenCV 方法:", parent_widget.mixed_inpainting_opencv_method_combo)
 
-        mixed_layout.addRow(
-            "",
-            QLabel("说明：阈值表示掩码面积占画面比例；质量等级越高，系统会自动更保守地使用 OpenCV。"),
-        )
-
+        mixed_hint_label = QLabel("说明：阈值为掩码占比；质量越高越保守。")
+        mixed_hint_label.setWordWrap(True)
+        mixed_hint_label.setToolTip("阈值表示掩码面积占画面比例；质量等级越高，系统会更保守地使用 OpenCV。")
+        mixed_layout.addRow("", mixed_hint_label)
         layout.addWidget(mixed_group)
         layout.addStretch()
 

@@ -34,10 +34,10 @@ class PerformanceParametersTab:
         for mode in PROCESSING_MODE_UI_OPTIONS:
             parent_widget.processing_mode_combo.addItem(processing_mode_to_label(mode), mode)
         thread_layout.addRow("处理模式:", parent_widget.processing_mode_combo)
-        thread_layout.addRow(
-            "",
-            QLabel("说明：处理模式为单选；“多进程分块”和“流水线”不能同时启用。"),
-        )
+        mode_hint_label = QLabel("说明：模式会影响速度与资源占用。")
+        mode_hint_label.setWordWrap(True)
+        mode_hint_label.setToolTip("提示：显存紧张或深度学习后端下，程序可能自动收敛为更保守的模式。")
+        thread_layout.addRow("", mode_hint_label)
 
         parent_widget.worker_count_spin = QSpinBox()
         parent_widget.worker_count_spin.setMinimum(0)
@@ -53,7 +53,8 @@ class PerformanceParametersTab:
         gpu_group = QGroupBox("GPU 深度学习修复")
         gpu_layout = QVBoxLayout(gpu_group)
 
-        parent_widget.enable_gpu_check = QCheckBox("启用深度学习修复后端（LaMa / 兼容 U-Net，需要 CUDA 与权重）")
+        parent_widget.enable_gpu_check = QCheckBox("启用深度修复（需 CUDA/权重）")
+        parent_widget.enable_gpu_check.setToolTip("启用深度学习修复后端（LaMa / 兼容 U-Net）。需要 CUDA 环境与模型权重。")
         gpu_layout.addWidget(parent_widget.enable_gpu_check)
 
         parent_widget.gpu_memory_spin = QSpinBox()

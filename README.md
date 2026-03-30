@@ -8,9 +8,9 @@
 [![PyQt6](https://img.shields.io/badge/PyQt6-6.6.0+-green.svg)](https://www.qt.io/qt-for-python)
 [![uv](https://img.shields.io/badge/uv-workflow-4B8BBE.svg)](https://docs.astral.sh/uv/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.6.0-orange.svg)](https://github.com/Izumi0527/video_watermark_remover/releases)
+[![Version](https://img.shields.io/badge/Version-v0.7.20-orange.svg)](https://github.com/Izumi0527/video_watermark_remover/releases)
 
-**v0.6.0** | 更新日期：2026-03-23 | Windows 为主要支持平台
+**v0.7.20** | 更新日期：2026-03-31 | Windows 为主要支持平台
 
 [快速开始](#快速开始) • [更新重点](#更新重点) • [功能特性](#功能特性) • [安装与运行](#安装与运行) • [使用说明](#使用说明) • [测试与质量](#测试与质量) • [文档索引](#文档索引)
 
@@ -33,7 +33,7 @@
 
 ## ✨ 更新重点
 
-### v0.6.0（2026-03-23）
+### v0.7.20（2026-03-31）
 
 - ✅ README 改为围绕当前可用能力、真实命令和现有文档入口组织，移除了容易过期的项目结构目录树
 - ✅ `src/app` 标准布局已经落地，`.\scripts\vwr.ps1 setup` 会自动执行 editable install，并在 Windows 权限异常时回退为本地 `.pth` 桥接
@@ -226,7 +226,7 @@ batch_size = 8
 
 ## 🎉 版本历史
 
-### v0.6.0（2026-03-23）
+### v0.7.20（2026-03-31）
 
 - 统一 README、程序可见版本和包元数据
 - 完成 `src/app` 布局后的运行 / 测试 / editable 安装收敛

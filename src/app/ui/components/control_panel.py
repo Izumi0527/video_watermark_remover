@@ -1,6 +1,6 @@
 import logging
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -50,6 +50,8 @@ class ControlPanel(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setObjectName("control_scroll_area")
+        # 右侧控制面板只需要纵向滚动；横向滚动会带来“左右虚拟滚轮”体验问题
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # 滚动区域的内容容器
         content_widget = QWidget()
