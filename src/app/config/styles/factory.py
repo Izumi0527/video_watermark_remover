@@ -13,6 +13,7 @@ from .sections import (
     listwidget_styles,
     main_window_styles,
     progressbar_styles,
+    spinbox_styles,
     tab_styles,
     textedit_styles,
 )
@@ -48,6 +49,9 @@ class StyleFactory:
 
     def get_combobox_stylesheet(self) -> str:
         return combobox_styles(self.colors)
+
+    def get_spinbox_stylesheet(self) -> str:
+        return spinbox_styles(self.colors)
 
     def get_label_stylesheet(self) -> str:
         return label_styles(self.colors)

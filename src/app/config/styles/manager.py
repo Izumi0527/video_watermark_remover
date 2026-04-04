@@ -67,6 +67,7 @@ class ModernStyleManager:
         {self.style_factory.get_textedit_stylesheet()}
         {self.style_factory.get_checkbox_stylesheet()}
         {self.style_factory.get_combobox_stylesheet()}
+        {self.style_factory.get_spinbox_stylesheet()}
         {self.style_factory.get_label_stylesheet()}
         {self.style_factory.get_listwidget_stylesheet()}
         {self.style_factory.get_additional_styles()}
@@ -136,6 +137,8 @@ class ModernStyleManager:
             widget.setStyleSheet(self.style_factory.get_checkbox_stylesheet())
         elif style_type == "combobox":
             widget.setStyleSheet(self.style_factory.get_combobox_stylesheet())
+        elif style_type == "spinbox":
+            widget.setStyleSheet(self.style_factory.get_spinbox_stylesheet())
         elif style_type == "label":
             widget.setStyleSheet(self.style_factory.get_label_stylesheet())
         elif style_type == "listwidget":

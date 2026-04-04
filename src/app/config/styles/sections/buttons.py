@@ -109,12 +109,21 @@ def button_styles(colors: dict) -> str:
 
     QPushButton#danger:hover {{ background-color: #EF5350; }}
 
-    QPushButton#btn_clear, QPushButton#btn_clear_log, QPushButton#btn_save_log {{
+    QPushButton#btn_clear {{
         background-color: {colors['surface']};
         color: {colors['text_primary']};
         border: 1px solid {colors['border']};
         min-height: 16px;
         padding: 8px 12px;
+    }}
+
+    QPushButton#btn_clear_log, QPushButton#btn_save_log {{
+        background-color: {colors['surface']};
+        color: {colors['text_primary']};
+        border: 1px solid {colors['border']};
+        border-radius: 8px;
+        min-height: 18px;
+        padding: 5px 12px;
     }}
 
     QPushButton#btn_clear:hover, QPushButton#btn_clear_log:hover, QPushButton#btn_save_log:hover {{

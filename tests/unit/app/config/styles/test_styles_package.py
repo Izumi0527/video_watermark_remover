@@ -56,6 +56,7 @@ def test_style_factory_sections():
         factory.get_textedit_stylesheet,
         factory.get_checkbox_stylesheet,
         factory.get_combobox_stylesheet,
+        factory.get_spinbox_stylesheet,
         factory.get_label_stylesheet,
         factory.get_listwidget_stylesheet,
         factory.get_additional_styles,

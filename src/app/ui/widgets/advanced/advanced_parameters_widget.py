@@ -16,7 +16,9 @@ import logging
 from typing import Any, Dict, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -127,6 +129,42 @@ class AdvancedParametersWidget(QWidget):
 
         scroll_area.setWidget(self.tab_widget)
         layout.addWidget(scroll_area)
+
+    def configure_panel_combo_box(
+        self,
+        combo_box: QComboBox,
+        *,
+        object_name: str = "panel_combobox",
+        minimum_height: int = 34,
+        minimum_contents_length: Optional[int] = None,
+        tooltip: Optional[str] = None,
+    ) -> None:
+        """统一配置参数面板中的下拉框外观与交互细节。"""
+        combo_box.setObjectName(object_name)
+        combo_box.setMinimumHeight(minimum_height)
+        combo_box.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        if combo_box.view() is not None:
+            combo_box.view().setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        if tooltip:
+            combo_box.setToolTip(tooltip)
+        if minimum_contents_length is not None and hasattr(
+            combo_box, "setMinimumContentsLength"
+        ):
+            combo_box.setMinimumContentsLength(minimum_contents_length)
+
+    def configure_panel_spin_box(
+        self,
+        spin_box: QAbstractSpinBox,
+        *,
+        object_name: str = "panel_spinbox",
+        minimum_height: int = 34,
+        tooltip: Optional[str] = None,
+    ) -> None:
+        """统一配置参数面板中的数值输入控件。"""
+        spin_box.setObjectName(object_name)
+        spin_box.setMinimumHeight(minimum_height)
+        if tooltip:
+            spin_box.setToolTip(tooltip)
 
     def _connect_signals(self):  # noqa: C901
         """连接信号"""

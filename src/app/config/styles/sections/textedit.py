@@ -17,8 +17,12 @@ def textedit_styles(colors: dict) -> str:
     QTextEdit:focus {{ border-color: {colors['primary']}; }}
 
     QTextEdit#log_output {{
-        background-color: {colors['background']};
+        background-color: {colors['surface']};
+        color: {colors['text_primary']};
         font-family: 'Consolas', monospace;
         border: 1px solid {colors['border']};
+        border-radius: 10px;
+        padding: 0;
+        selection-background-color: {colors['primary_light']};
     }}
     """

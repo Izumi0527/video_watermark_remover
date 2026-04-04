@@ -1,9 +1,10 @@
 import logging
+from html import escape
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, Optional
 
-from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtGui import QCursor, QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -58,6 +59,7 @@ class LogPanel(QWidget):
                 "WARNING": colors.get("log_warning", "#FFAA00"),
                 "ERROR": colors.get("log_error", "#FF4444"),
                 "TIMESTAMP": colors.get("log_timestamp", "#888888"),
+                "MESSAGE": colors.get("text_primary", "#FFFFFF"),
             }
         else:
             # 默认颜色（深色主题）
@@ -67,6 +69,7 @@ class LogPanel(QWidget):
                 "WARNING": "#FFAA00",
                 "ERROR": "#FF4444",
                 "TIMESTAMP": "#888888",
+                "MESSAGE": "#FFFFFF",
             }
 
     def _init_ui(self):
@@ -83,8 +86,8 @@ class LogPanel(QWidget):
         log_group.setObjectName("log_group")
 
         log_layout = QVBoxLayout(log_group)
-        log_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有边距
-        log_layout.setSpacing(0)
+        log_layout.setContentsMargins(6, 0, 6, 8)
+        log_layout.setSpacing(6)
 
         # 日志控制栏
         self._create_log_controls(log_layout)
@@ -97,15 +100,26 @@ class LogPanel(QWidget):
     def _create_log_controls(self, parent_layout):
         """创建日志控制栏"""
         controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(6, 6, 6, 0)
+        controls_layout.setSpacing(8)
 
         # 日志级别选择
         level_label = QLabel("日志级别:")
+        level_label.setFixedHeight(34)
+        level_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         controls_layout.addWidget(level_label)
 
         self.log_level_combo = QComboBox()
+        self.log_level_combo.setObjectName("log_toolbar_combo")
         self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
         self.log_level_combo.setCurrentText("INFO")
-        self.log_level_combo.setFixedWidth(70)  # 固定宽度为70px，匹配按钮实际宽度
+        self.log_level_combo.setFixedHeight(34)
+        self.log_level_combo.setFixedWidth(96)
+        self.log_level_combo.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        if self.log_level_combo.view() is not None:
+            self.log_level_combo.view().setObjectName("log_toolbar_combo_view")
+            self.log_level_combo.view().setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.log_level_combo.setToolTip("控制日志面板显示的最低日志等级。")
         self.log_level_combo.currentTextChanged.connect(self._on_log_level_changed)
         controls_layout.addWidget(self.log_level_combo)
 
@@ -113,21 +127,28 @@ class LogPanel(QWidget):
 
         # 自动滚动选项
         self.auto_scroll_checkbox = QCheckBox("自动滚动")
+        self.auto_scroll_checkbox.setObjectName("log_toolbar_checkbox")
         self.auto_scroll_checkbox.setChecked(True)
+        self.auto_scroll_checkbox.setFixedHeight(34)
+        self.auto_scroll_checkbox.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         controls_layout.addWidget(self.auto_scroll_checkbox)
 
         # 清空日志按钮
-        self.btn_clear_log = QPushButton("🗑️ 清空")
+        self.btn_clear_log = QPushButton("清空")
         self.btn_clear_log.setObjectName("btn_clear_log")
         self.btn_clear_log.clicked.connect(self._clear_log)
-        self.btn_clear_log.setMaximumWidth(80)
+        self.btn_clear_log.setFixedHeight(34)
+        self.btn_clear_log.setMaximumWidth(60)
+        self.btn_clear_log.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         controls_layout.addWidget(self.btn_clear_log)
 
         # 保存日志按钮
-        self.btn_save_log = QPushButton("💾 保存")
+        self.btn_save_log = QPushButton("保存")
         self.btn_save_log.setObjectName("btn_save_log")
         self.btn_save_log.clicked.connect(self._save_log)
-        self.btn_save_log.setMaximumWidth(80)
+        self.btn_save_log.setFixedHeight(34)
+        self.btn_save_log.setMaximumWidth(60)
+        self.btn_save_log.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         controls_layout.addWidget(self.btn_save_log)
 
         parent_layout.addLayout(controls_layout)
@@ -137,11 +158,12 @@ class LogPanel(QWidget):
         self.log_text_edit = QTextEdit()
         self.log_text_edit.setReadOnly(True)
         self.log_text_edit.setMinimumHeight(200)
+        self.log_text_edit.document().setDocumentMargin(10)
 
         # 设置字体
-        font = QFont("Consolas", 9)
+        font = QFont("Consolas", 10)
         if not font.exactMatch():
-            font = QFont("Courier New", 9)
+            font = QFont("Courier New", 10)
         self.log_text_edit.setFont(font)
 
         # 设置样式
@@ -188,18 +210,24 @@ class LogPanel(QWidget):
         log_colors = self._get_log_colors()
         timestamp_color = log_colors.get("TIMESTAMP", "#888888")
         level_color = log_colors.get(level, log_colors.get("INFO"))
+        message_color = log_colors.get("MESSAGE", level_color)
+        safe_level = escape(level)
+        safe_message = escape(message)
 
         # 格式化消息
-        formatted_message = f'<span style="color: {timestamp_color}">[{timestamp}]</span> '
-        formatted_message += (
-            f'<span style="color: {level_color}; font-weight: bold">[{level}]</span> '
+        formatted_message = (
+            f'<div style="line-height: 1.55; margin: 0 0 4px 0;">'
+            f'<span style="color: {timestamp_color}; font-weight: 500;">[{timestamp}]</span>'
+            f'&nbsp;&nbsp;<span style="color: {level_color}; font-weight: 700;">'
+            f'[{safe_level}]</span>'
+            f'&nbsp;&nbsp;<span style="color: {message_color}; font-weight: 500;">'
+            f"{safe_message}</span></div>"
         )
-        formatted_message += f'<span style="color: {level_color}">{message}</span>'
 
         # 添加到文本区域
         cursor = self.log_text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(formatted_message + "<br>")
+        cursor.insertHtml(formatted_message)
 
         # 控制最大行数
         self._limit_log_lines()

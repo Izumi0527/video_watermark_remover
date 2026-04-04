@@ -41,6 +41,11 @@ class InpaintingParametersTab:
                 "自定义插值方法",
             ]
         )
+        parent_widget.configure_panel_combo_box(
+            parent_widget.inpainting_method_combo,
+            minimum_contents_length=18,
+            tooltip="优先使用 LaMa 获取更自然的修复结果；OpenCV 方法适合小范围快速修补。",
+        )
         # 说明：不同 PyQt6/Qt 版本对 SizeAdjustPolicy 的枚举值支持不完全一致；
         # 这里做兼容处理，避免启动时因属性不存在而崩溃。
         size_policy = getattr(
@@ -50,10 +55,13 @@ class InpaintingParametersTab:
             parent_widget.inpainting_method_combo, "setMinimumContentsLength"
         ):
             parent_widget.inpainting_method_combo.setSizeAdjustPolicy(size_policy)
-            parent_widget.inpainting_method_combo.setMinimumContentsLength(18)
         method_layout.addRow("修复算法:", parent_widget.inpainting_method_combo)
 
         parent_widget.inpaint_radius_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.inpaint_radius_spin,
+            tooltip="主要影响 OpenCV 修复算法的传播范围。",
+        )
         parent_widget.inpaint_radius_spin.setMinimum(1)
         parent_widget.inpaint_radius_spin.setMaximum(10)
         parent_widget.inpaint_radius_spin.setValue(3)
@@ -107,6 +115,10 @@ class InpaintingParametersTab:
         mixed_layout.addRow("", parent_widget.enable_mixed_inpainting_check)
 
         parent_widget.mixed_inpainting_area_percent_spin = QDoubleSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mixed_inpainting_area_percent_spin,
+            tooltip="控制多大面积以下的水印优先走 OpenCV 快速修复。",
+        )
         parent_widget.mixed_inpainting_area_percent_spin.setMinimum(0.01)
         parent_widget.mixed_inpainting_area_percent_spin.setMaximum(5.0)
         parent_widget.mixed_inpainting_area_percent_spin.setDecimals(2)
@@ -119,6 +131,11 @@ class InpaintingParametersTab:
         parent_widget.mixed_inpainting_opencv_method_combo.addItem("TELEA 快速修复", "telea")
         parent_widget.mixed_inpainting_opencv_method_combo.addItem(
             "Navier-Stokes 高质量", "navier_stokes"
+        )
+        parent_widget.configure_panel_combo_box(
+            parent_widget.mixed_inpainting_opencv_method_combo,
+            minimum_contents_length=16,
+            tooltip="小水印默认可走更快的 OpenCV 修复路径；不同方法在速度和边缘自然度上各有偏向。",
         )
         mixed_layout.addRow("OpenCV 方法:", parent_widget.mixed_inpainting_opencv_method_combo)
 

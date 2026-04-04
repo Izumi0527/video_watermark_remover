@@ -31,6 +31,11 @@ class OutputParametersTab:
 
         parent_widget.output_format_combo = QComboBox()
         parent_widget.output_format_combo.addItems(["保持原格式", "JPG", "PNG", "BMP", "TIFF"])
+        parent_widget.configure_panel_combo_box(
+            parent_widget.output_format_combo,
+            minimum_contents_length=10,
+            tooltip="图片输出可在此选择格式；视频输出通常沿用原容器或导出策略。",
+        )
         format_layout.addRow("输出格式:", parent_widget.output_format_combo)
         format_hint_label = QLabel("说明：仅图片生效，视频保持原容器。")
         format_hint_label.setWordWrap(True)

@@ -55,6 +55,11 @@ class DetectionParametersTab:
                 "YOLO v11x CPU 模式",
             ]
         )
+        parent_widget.configure_panel_combo_box(
+            parent_widget.detection_method_combo,
+            minimum_contents_length=18,
+            tooltip="选择检测后端。推荐使用 auto，在 GPU 不可用时会更稳妥地回退。",
+        )
         # 说明：不同 PyQt6/Qt 版本对 SizeAdjustPolicy 的枚举值支持不完全一致；
         # 这里做兼容处理，避免启动时因属性不存在而崩溃。
         size_policy = getattr(
@@ -64,10 +69,13 @@ class DetectionParametersTab:
             parent_widget.detection_method_combo, "setMinimumContentsLength"
         ):
             parent_widget.detection_method_combo.setSizeAdjustPolicy(size_policy)
-            parent_widget.detection_method_combo.setMinimumContentsLength(18)
         method_layout.addRow("检测方法:", parent_widget.detection_method_combo)
 
         parent_widget.min_area_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.min_area_spin,
+            tooltip="过滤过小的检测框，降低噪点误检进入修复流程的概率。",
+        )
         parent_widget.min_area_spin.setMinimum(1)
         parent_widget.min_area_spin.setMaximum(10000)
         parent_widget.min_area_spin.setValue(100)
@@ -103,6 +111,10 @@ class DetectionParametersTab:
         mask_layout.addRow("", parent_widget.enable_mask_shrink_check)
 
         parent_widget.mask_shrink_pixels_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mask_shrink_pixels_spin,
+            tooltip="收缩掩码边界像素，数值越大越保守。",
+        )
         parent_widget.mask_shrink_pixels_spin.setMinimum(0)
         parent_widget.mask_shrink_pixels_spin.setMaximum(10)
         parent_widget.mask_shrink_pixels_spin.setValue(1)
@@ -116,6 +128,10 @@ class DetectionParametersTab:
         mask_layout.addRow("", parent_widget.enable_mask_tracking_check)
 
         parent_widget.mask_tracking_interval_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mask_tracking_interval_spin,
+            tooltip="控制静态水印场景下的重新检测频率。",
+        )
         parent_widget.mask_tracking_interval_spin.setMinimum(1)
         parent_widget.mask_tracking_interval_spin.setMaximum(30)
         parent_widget.mask_tracking_interval_spin.setValue(3)

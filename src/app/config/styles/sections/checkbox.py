@@ -23,12 +23,25 @@ def checkbox_styles(colors: dict) -> str:
         spacing: 8px;
     }}
 
+    QCheckBox#log_toolbar_checkbox {{
+        spacing: 6px;
+        min-height: 34px;
+        padding: 0 2px 0 0;
+        font-weight: 600;
+    }}
+
     QCheckBox::indicator {{
         width: 18px;
         height: 18px;
         border: 2px solid {colors['text_secondary']};
         border-radius: 4px;
         background-color: transparent;
+    }}
+
+    QCheckBox#log_toolbar_checkbox::indicator {{
+        width: 16px;
+        height: 16px;
+        margin-right: 2px;
     }}
 
     QCheckBox::indicator:checked {{

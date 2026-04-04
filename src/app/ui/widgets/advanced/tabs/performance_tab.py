@@ -33,6 +33,11 @@ class PerformanceParametersTab:
         parent_widget.processing_mode_combo = QComboBox()
         for mode in PROCESSING_MODE_UI_OPTIONS:
             parent_widget.processing_mode_combo.addItem(processing_mode_to_label(mode), mode)
+        parent_widget.configure_panel_combo_box(
+            parent_widget.processing_mode_combo,
+            minimum_contents_length=14,
+            tooltip="不同处理模式会影响吞吐、显存占用与稳定性；资源紧张时建议使用更保守的模式。",
+        )
         thread_layout.addRow("处理模式:", parent_widget.processing_mode_combo)
         mode_hint_label = QLabel("说明：模式会影响速度与资源占用。")
         mode_hint_label.setWordWrap(True)
@@ -40,6 +45,10 @@ class PerformanceParametersTab:
         thread_layout.addRow("", mode_hint_label)
 
         parent_widget.worker_count_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.worker_count_spin,
+            tooltip="控制处理并行度，0 表示自动分配。",
+        )
         parent_widget.worker_count_spin.setMinimum(0)
         parent_widget.worker_count_spin.setMaximum(16)
         parent_widget.worker_count_spin.setValue(0)
@@ -58,6 +67,10 @@ class PerformanceParametersTab:
         gpu_layout.addWidget(parent_widget.enable_gpu_check)
 
         parent_widget.gpu_memory_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.gpu_memory_spin,
+            tooltip="限制深度修复后端可使用的显存预算。",
+        )
         parent_widget.gpu_memory_spin.setMinimum(512)
         parent_widget.gpu_memory_spin.setMaximum(16384)
         parent_widget.gpu_memory_spin.setValue(2048)
@@ -72,6 +85,10 @@ class PerformanceParametersTab:
         cache_layout = QFormLayout(cache_group)
 
         parent_widget.cache_size_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.cache_size_spin,
+            tooltip="控制缓存上限，过大可能增加内存占用。",
+        )
         parent_widget.cache_size_spin.setMinimum(64)
         parent_widget.cache_size_spin.setMaximum(4096)
         parent_widget.cache_size_spin.setValue(512)
@@ -89,6 +106,10 @@ class PerformanceParametersTab:
         batch_layout = QFormLayout(batch_group)
 
         parent_widget.batch_max_concurrent_files_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.batch_max_concurrent_files_spin,
+            tooltip="限制批处理同时运行的文件数量。",
+        )
         parent_widget.batch_max_concurrent_files_spin.setMinimum(1)
         parent_widget.batch_max_concurrent_files_spin.setMaximum(16)
         parent_widget.batch_max_concurrent_files_spin.setValue(1)
@@ -99,6 +120,10 @@ class PerformanceParametersTab:
         batch_layout.addRow("", parent_widget.batch_auto_retry_failed_check)
 
         parent_widget.batch_max_retry_count_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.batch_max_retry_count_spin,
+            tooltip="失败任务的最大自动重试次数。",
+        )
         parent_widget.batch_max_retry_count_spin.setMinimum(0)
         parent_widget.batch_max_retry_count_spin.setMaximum(10)
         parent_widget.batch_max_retry_count_spin.setValue(3)

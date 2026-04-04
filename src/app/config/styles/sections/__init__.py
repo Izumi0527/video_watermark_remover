@@ -17,7 +17,13 @@ from .additional import additional_styles
 from .containers import groupbox_styles, main_window_styles, tab_styles
 
 # 输入控件样式
-from .controls import button_styles, checkbox_styles, combobox_styles, textedit_styles
+from .controls import (
+    button_styles,
+    checkbox_styles,
+    combobox_styles,
+    spinbox_styles,
+    textedit_styles,
+)
 
 # 展示组件样式
 from .display import label_styles, listwidget_styles, progressbar_styles
@@ -31,6 +37,7 @@ __all__ = [
     "button_styles",
     "checkbox_styles",
     "combobox_styles",
+    "spinbox_styles",
     "textedit_styles",
     # 展示组件
     "label_styles",
