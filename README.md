@@ -8,9 +8,9 @@
 [![PyQt6](https://img.shields.io/badge/PyQt6-6.6.0+-green.svg)](https://www.qt.io/qt-for-python)
 [![uv](https://img.shields.io/badge/uv-workflow-4B8BBE.svg)](https://docs.astral.sh/uv/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.7.20-orange.svg)](https://github.com/Izumi0527/video_watermark_remover/releases)
+[![Version](https://img.shields.io/badge/Version-v0.7.23-orange.svg)](https://github.com/Izumi0527/video_watermark_remover/releases)
 
-**v0.7.20** | 更新日期：2026-03-31 | Windows 为主要支持平台
+**v0.7.23** | 更新日期：2026-04-04 | Windows 为主要支持平台
 
 [快速开始](#快速开始) • [更新重点](#更新重点) • [功能特性](#功能特性) • [安装与运行](#安装与运行) • [使用说明](#使用说明) • [测试与质量](#测试与质量) • [文档索引](#文档索引)
 
@@ -32,6 +32,14 @@
 ---
 
 ## ✨ 更新重点
+
+### v0.7.23（2026-04-04）
+
+- ✅ 复杂图片掩码优化新增 `MaskRefiner`，加强噪点清理、裂缝桥接、短线缺口填补与稳定孔洞保护
+- ✅ 复杂视频时序一致性新增 `TemporalCoordinator`，支持丢检容忍、大位移重检与确认帧控制
+- ✅ 新时序参数已正式下沉到配置层、AI 参数构建层与高级参数面板，支持直接调参
+- ✅ 丢检容忍次数与位移确认帧数的上限策略已在 UI、配置与偏好校验层统一为 `30`
+- ✅ 新增复杂掩码、复杂视频时序跟踪、批处理冷启动等核心回归测试，稳定性进一步提升
 
 ### v0.7.20（2026-03-31）
 
@@ -225,6 +233,14 @@ batch_size = 8
 ---
 
 ## 🎉 版本历史
+
+### v0.7.23（2026-04-04）
+
+- 新增 `MaskRefiner` 以提升复杂图片掩码质量
+- 新增 `TemporalCoordinator` 以提升复杂视频时序一致性
+- 高级参数面板已支持时序跟踪核心参数直接配置
+- 统一时序参数在 UI、配置与偏好层的上限与校验策略
+- 补齐复杂掩码、动态跟踪、批处理冷启动等核心回归测试
 
 ### v0.7.20（2026-03-31）
 

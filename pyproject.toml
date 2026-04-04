@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-watermark-remover"
-version = "0.7.20"
+version = "0.7.23"
 description = "智能视频水印去除工具 - AI驱动的水印检测和去除应用"
 readme = "README.md"
 requires-python = ">=3.8"

@@ -95,7 +95,7 @@ class InpaintingParametersTab:
         postprocess_layout.addWidget(parent_widget.enable_smooth_check)
 
         parent_widget.enable_blend_check = QCheckBox("启用颜色混合")
-        parent_widget.enable_blend_check.setChecked(True)
+        parent_widget.enable_blend_check.setChecked(False)
         postprocess_layout.addWidget(parent_widget.enable_blend_check)
 
         parent_widget.enable_enhance_check = QCheckBox("启用图像增强")

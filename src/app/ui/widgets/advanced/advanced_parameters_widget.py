@@ -720,7 +720,7 @@ class AdvancedParametersWidget(QWidget):
             "inpainting_radius": 3,
             "inpainting_quality": 3,
             "enable_smooth_postprocess": True,
-            "enable_blend_postprocess": True,
+            "enable_blend_postprocess": False,
             "enable_enhance_postprocess": False,
             "enable_mixed_inpainting": False,
             "mixed_inpainting_area_percent": 0.30,

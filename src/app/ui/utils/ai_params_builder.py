@@ -384,7 +384,7 @@ class AIParamsBuilder:
 
         # 后处理选项（布尔值，无需验证）
         params["enable_smooth_postprocess"] = advanced_params.get("enable_smooth_postprocess", True)
-        params["enable_blend_postprocess"] = advanced_params.get("enable_blend_postprocess", True)
+        params["enable_blend_postprocess"] = advanced_params.get("enable_blend_postprocess", False)
         params["enable_enhance_postprocess"] = advanced_params.get(
             "enable_enhance_postprocess", False
         )

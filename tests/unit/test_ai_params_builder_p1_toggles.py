@@ -173,3 +173,24 @@ def test_builder_supplies_mask_tracking_defaults_when_fields_absent(
     assert ai_params["mask_tracking_max_missing_detections"] == 1
     assert ai_params["mask_tracking_motion_iou_threshold"] == pytest.approx(0.2, rel=1e-6)
     assert ai_params["mask_tracking_scene_shift_confirmation_frames"] == 1
+
+
+def test_builder_disables_blend_postprocess_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.ui.utils.ai_params_builder import AIParamsBuilder
+
+    builder = AIParamsBuilder()
+    monkeypatch.setattr(builder, "_is_cuda_available", lambda: False)
+
+    ai_params = builder.build_from_ui(
+        preferences=_DummyPreferences(),
+        advanced_params={
+            "detection_method": "YOLO v11x 深度学习auto (推荐)",
+            "inpainting_method": "LaMa 深度学习修复（推荐）",
+        },
+        manual_selections=None,
+        input_file_path="demo.png",
+    )
+
+    assert ai_params["enable_blend_postprocess"] is False

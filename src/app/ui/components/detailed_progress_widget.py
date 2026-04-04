@@ -103,8 +103,8 @@ class DetailedProgressWidget(QWidget):
         phase_container.setFrameShape(QFrame.Shape.StyledPanel)
 
         phase_layout = QVBoxLayout(phase_container)
-        phase_layout.setContentsMargins(10, 5, 10, 5)
-        phase_layout.setSpacing(4)
+        phase_layout.setContentsMargins(10, 5, 10, 3)
+        phase_layout.setSpacing(3)
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
@@ -132,6 +132,7 @@ class DetailedProgressWidget(QWidget):
         self.runtime_hint_label = QLabel("")
         self.runtime_hint_label.setObjectName("runtime_hint_text")
         self.runtime_hint_label.setWordWrap(True)
+        self.runtime_hint_label.hide()
         phase_layout.addWidget(self.runtime_hint_label)
 
         main_layout.addWidget(phase_container)
@@ -247,6 +248,7 @@ class DetailedProgressWidget(QWidget):
         self.phase_text_label.setText(phase_config["text"])
         self.runtime_summary_label.setText(runtime_summary)
         self.runtime_hint_label.setText(runtime_hint)
+        self.runtime_hint_label.setVisible(bool(runtime_hint))
 
         # 更新进度条
         self.progress_bar.setValue(percentage)

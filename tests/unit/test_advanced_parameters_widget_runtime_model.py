@@ -82,3 +82,16 @@ def test_widget_reads_and_writes_mask_tracking_runtime_params(qtbot) -> None:
     assert params["mask_tracking_max_missing_detections"] == 2
     assert params["mask_tracking_motion_iou_threshold"] == pytest.approx(0.31, rel=1e-6)
     assert params["mask_tracking_scene_shift_confirmation_frames"] == 3
+
+
+def test_widget_disables_blend_postprocess_by_default(qtbot) -> None:
+    from app.ui.widgets.advanced.advanced_parameters_widget import AdvancedParametersWidget
+
+    widget = AdvancedParametersWidget()
+    qtbot.addWidget(widget)
+
+    assert widget.enable_blend_check is not None
+    assert widget.enable_blend_check.isChecked() is False
+
+    params = widget.get_parameters()
+    assert params["enable_blend_postprocess"] is False
