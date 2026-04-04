@@ -14,17 +14,17 @@ def label_styles(colors: dict) -> str:
     QLabel[class="title"] {{
         font-size: 14px;
         font-weight: bold;
-        color: {colors['primary']};
+        color: {colors['text_primary']};
     }}
 
     QLabel[class="subtitle"] {{
         font-size: 12px;
-        color: {colors['text_secondary']};
+        color: {colors['primary_dark']};
+        font-weight: 500;
     }}
 
     QLabel[class="info"] {{
         color: {colors['text_secondary']};
-        font-style: italic;
     }}
 
     QLabel:disabled {{
