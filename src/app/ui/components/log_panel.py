@@ -1,5 +1,4 @@
 import logging
-from html import escape
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, Optional
 
@@ -20,6 +19,8 @@ from PyQt6.QtWidgets import (
 if TYPE_CHECKING:
     from ...config.styles.manager import ModernStyleManager
 
+from .log_rendering import LogEntry, render_log_document_html
+
 
 class LogPanel(QWidget):
     """
@@ -31,6 +32,7 @@ class LogPanel(QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._max_lines = 1000  # 最大显示行数
+        self._log_entries: list[LogEntry] = []
         self._style_manager = style_manager
         self._init_ui()
         self._setup_log_handler()
@@ -43,6 +45,23 @@ class LogPanel(QWidget):
             style_manager: ModernStyleManager 实例
         """
         self._style_manager = style_manager
+        self.refresh_log_view()
+
+    def refresh_log_view(self) -> None:
+        """按当前主题重新渲染日志内容，避免切换主题后旧日志样式残留或串行混排。"""
+        if not hasattr(self, "log_text_edit") or self.log_text_edit is None:
+            return
+
+        log_colors = self._get_log_colors()
+        html = render_log_document_html(self._log_entries, log_colors)
+        self.log_text_edit.setHtml(html)
+
+        cursor = self.log_text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.log_text_edit.setTextCursor(cursor)
+
+        if self.auto_scroll_checkbox.isChecked():
+            self.log_text_edit.ensureCursorVisible()
 
     def _get_log_colors(self) -> Dict[str, str]:
         """
@@ -186,7 +205,7 @@ class LogPanel(QWidget):
 
     def _clear_log(self):
         """清空日志"""
-        self.log_text_edit.clear()
+        self._log_entries.clear()
         self._add_log_message("INFO", "📝 日志已清空")
 
     def _save_log(self):
@@ -205,46 +224,17 @@ class LogPanel(QWidget):
     def _add_log_message(self, level, message):
         """添加日志消息"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-
-        # 获取当前主题的日志颜色
-        log_colors = self._get_log_colors()
-        timestamp_color = log_colors.get("TIMESTAMP", "#888888")
-        level_color = log_colors.get(level, log_colors.get("INFO"))
-        message_color = log_colors.get("MESSAGE", level_color)
-        safe_level = escape(level)
-        safe_message = escape(message)
-
-        # 格式化消息
-        formatted_message = (
-            f'<div style="line-height: 1.55; margin: 0 0 4px 0;">'
-            f'<span style="color: {timestamp_color}; font-weight: 500;">[{timestamp}]</span>'
-            f'&nbsp;&nbsp;<span style="color: {level_color}; font-weight: 700;">'
-            f'[{safe_level}]</span>'
-            f'&nbsp;&nbsp;<span style="color: {message_color}; font-weight: 500;">'
-            f"{safe_message}</span></div>"
-        )
-
-        # 添加到文本区域
-        cursor = self.log_text_edit.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(formatted_message)
+        self._log_entries.append(LogEntry(timestamp=timestamp, level=level, message=message))
 
         # 控制最大行数
         self._limit_log_lines()
 
-        # 自动滚动到底部
-        if self.auto_scroll_checkbox.isChecked():
-            self.log_text_edit.ensureCursorVisible()
+        self.refresh_log_view()
 
     def _limit_log_lines(self):
         """限制日志行数"""
-        document = self.log_text_edit.document()
-        if document and document.blockCount() > self._max_lines:
-            first_block = document.firstBlock()
-            if first_block:
-                cursor = QTextCursor(first_block)
-                cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
-                cursor.removeSelectedText()
+        if len(self._log_entries) > self._max_lines:
+            self._log_entries = self._log_entries[-self._max_lines :]
 
     @pyqtSlot(str)
     def add_info_log(self, message):

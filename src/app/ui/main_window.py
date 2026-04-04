@@ -297,6 +297,9 @@ class MainWindow(QMainWindow):
         if hasattr(self.style_manager, "apply_style"):
             self.style_manager.apply_style(self)
 
+        if hasattr(self, "log_panel") and hasattr(self.log_panel, "refresh_log_view"):
+            self.log_panel.refresh_log_view()
+
         # 更新主题切换按钮文本
         current_theme = (
             self.style_manager.current_theme
