@@ -16,7 +16,7 @@ AI参数构建器
 
 import logging
 import os
-import sys
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -28,6 +28,17 @@ from ...config.advanced_params import (
     ResolvedPerformanceConfig,
 )
 from ...config.validators import get_validator
+
+
+@lru_cache(maxsize=1)
+def detect_cuda_available() -> bool:
+    """显式探测当前环境是否可用 CUDA。"""
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _get_optional_config_value(
@@ -159,13 +170,7 @@ class AIParamsBuilder:
 
     def _is_cuda_available(self) -> bool:
         """判断当前环境是否可用 CUDA。"""
-        try:
-            torch_module = sys.modules.get("torch")
-            if torch_module is None:
-                return False
-            return bool(torch_module.cuda.is_available())
-        except Exception:  # noqa: BLE001
-            return False
+        return detect_cuda_available()
 
     def build_from_ui(
         self,
@@ -231,7 +236,9 @@ class AIParamsBuilder:
 
         return ai_params
 
-    def _build_detection_params(self, advanced_params: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_detection_params(  # noqa: C901
+        self, advanced_params: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         构建检测参数（带验证）
 
@@ -281,6 +288,39 @@ class AIParamsBuilder:
         except (TypeError, ValueError):
             tracking_interval = 3
         params["mask_tracking_interval"] = max(1, tracking_interval)
+
+        raw_tracking_missing = advanced_params.get(
+            "mask_tracking_max_missing_detections",
+            advanced_params.get("mask_tracking_max_missed_detections", 1),
+        )
+        try:
+            tracking_missing = int(raw_tracking_missing or 0)
+        except (TypeError, ValueError):
+            tracking_missing = 1
+        params["mask_tracking_max_missing_detections"] = max(0, tracking_missing)
+
+        raw_tracking_motion_iou = advanced_params.get(
+            "mask_tracking_motion_iou_threshold",
+            advanced_params.get(
+                "mask_tracking_scene_change_iou_threshold",
+                advanced_params.get("mask_tracking_scene_shift_iou_threshold", 0.2),
+            ),
+        )
+        try:
+            tracking_motion_iou = float(raw_tracking_motion_iou)
+        except (TypeError, ValueError):
+            tracking_motion_iou = 0.2
+        params["mask_tracking_motion_iou_threshold"] = max(0.0, min(1.0, tracking_motion_iou))
+
+        raw_tracking_confirmation = advanced_params.get(
+            "mask_tracking_scene_shift_confirmation_frames",
+            1,
+        )
+        try:
+            tracking_confirmation = int(raw_tracking_confirmation or 1)
+        except (TypeError, ValueError):
+            tracking_confirmation = 1
+        params["mask_tracking_scene_shift_confirmation_frames"] = max(1, tracking_confirmation)
 
         self.logger.debug(
             f"[检测参数] conf_threshold={params['conf_threshold']}, device={params['device']}"
@@ -334,12 +374,13 @@ class AIParamsBuilder:
         # GPU 修复开关（布尔值）：仅当用户选择了 GPU 深度学习 U-Net 时才启用。
         # 否则即使勾选了“启用 GPU”，也应尊重 OpenCV 算法选择，避免“修复算法看起来不生效”。
         enable_gpu = bool(advanced_params.get("enable_gpu", True))
-        cuda_available = self._is_cuda_available()
-        params["use_gpu_inpainting"] = bool(
-            enable_gpu
-            and cuda_available
-            and params["requested_inpainting_backend"] in {"legacy_unet", "lama", "mat"}
-        )
+        gpu_backend_selected = params["requested_inpainting_backend"] in {
+            "legacy_unet",
+            "lama",
+            "mat",
+        }
+        cuda_available = self._is_cuda_available() if enable_gpu and gpu_backend_selected else False
+        params["use_gpu_inpainting"] = bool(enable_gpu and cuda_available and gpu_backend_selected)
 
         # 后处理选项（布尔值，无需验证）
         params["enable_smooth_postprocess"] = advanced_params.get("enable_smooth_postprocess", True)
@@ -420,10 +461,11 @@ class AIParamsBuilder:
             inpainting_method,
             normalized_algorithm,
         )
+        gpu_backend_selected = requested_inpainting_backend in {"legacy_unet", "lama", "mat"}
         use_gpu_inpainting = bool(
             advanced_params.get("enable_gpu", snapshot.enable_gpu)
+            and gpu_backend_selected
             and self._is_cuda_available()
-            and requested_inpainting_backend in {"legacy_unet", "lama", "mat"}
         )
         context = ProcessingContext(
             input_file_path=input_file_path,

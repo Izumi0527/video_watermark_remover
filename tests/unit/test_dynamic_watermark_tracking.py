@@ -138,6 +138,44 @@ class _DummyDetector:
         return self.mask.copy()
 
 
+class _SequenceDetector:
+    """按顺序返回检测结果，用于验证关键帧检测与中间帧复用。"""
+
+    def __init__(self, masks: list[np.ndarray]):
+        self._masks = [mask.copy() for mask in masks]
+        self.call_count = 0
+
+    def detect_watermark(self, frame: np.ndarray) -> np.ndarray:
+        _ = frame
+        index = min(self.call_count, len(self._masks) - 1)
+        self.call_count += 1
+        return self._masks[index].copy()
+
+
+class _SequenceBatchDetector:
+    """同时支持单帧与批量检测的顺序检测桩。"""
+
+    def __init__(self, masks: list[np.ndarray]):
+        self._masks = [mask.copy() for mask in masks]
+        self._cursor = 0
+        self.batch_calls = 0
+        self.single_calls = 0
+
+    def _next_mask(self) -> np.ndarray:
+        index = min(self._cursor, len(self._masks) - 1)
+        self._cursor += 1
+        return self._masks[index].copy()
+
+    def detect_batch(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+        self.batch_calls += 1
+        return [self._next_mask() for _ in frames]
+
+    def detect_watermark(self, frame: np.ndarray) -> np.ndarray:
+        _ = frame
+        self.single_calls += 1
+        return self._next_mask()
+
+
 def _build_lightweight_ai_handler(detector: _DummyDetector, ai_handler_cls: type):
     """构造一个仅用于 `process_frame` 行为测试的轻量 AIHandler。"""
     handler = ai_handler_cls.__new__(ai_handler_cls)
@@ -175,6 +213,18 @@ def _create_test_frame() -> np.ndarray:
 def _create_detected_mask() -> np.ndarray:
     mask = np.zeros((48, 64), dtype=np.uint8)
     mask[20:30, 28:42] = 255
+    return mask
+
+
+def _create_shifted_detected_mask() -> np.ndarray:
+    mask = np.zeros((48, 64), dtype=np.uint8)
+    mask[20:30, 30:44] = 255
+    return mask
+
+
+def _create_far_shifted_detected_mask() -> np.ndarray:
+    mask = np.zeros((48, 64), dtype=np.uint8)
+    mask[20:30, 42:56] = 255
     return mask
 
 
@@ -276,6 +326,39 @@ def test_ai_params_builder_gpu_unet_respects_enable_gpu_toggle(
     assert disabled_params["use_gpu_inpainting"] is False
 
 
+def test_ai_handler_consumes_temporal_tracking_controls_from_built_ai_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """builder 下沉的新时序参数应被 AIHandler 与 TemporalCoordinator 一致消费。"""
+    ai_handler_cls, ai_params_builder_cls = _load_test_targets(monkeypatch)
+    builder = ai_params_builder_cls()
+
+    ai_params = builder.build_from_ui(
+        preferences=_DummyPreferences(auto_mode=True),
+        advanced_params={
+            "enable_mask_tracking": True,
+            "mask_tracking_interval": 4,
+            "mask_tracking_max_missing_detections": 2,
+            "mask_tracking_motion_iou_threshold": 0.28,
+            "mask_tracking_scene_shift_confirmation_frames": 3,
+        },
+        manual_selections=None,
+        input_file_path="demo.mp4",
+    )
+
+    handler = ai_handler_cls(_build_test_config(), ai_params)
+
+    assert ai_params["mask_tracking_max_missing_detections"] == 2
+    assert ai_params["mask_tracking_motion_iou_threshold"] == pytest.approx(0.28)
+    assert ai_params["mask_tracking_scene_shift_confirmation_frames"] == 3
+    assert handler.mask_tracking_max_missing_detections == 2
+    assert handler.mask_tracking_motion_iou_threshold == pytest.approx(0.28)
+    assert handler.mask_tracking_scene_shift_confirmation_frames == 3
+    assert handler.temporal_coordinator.max_missing_detections == 2
+    assert handler.temporal_coordinator.motion_redetect_iou_threshold == pytest.approx(0.28)
+    assert handler.temporal_coordinator.scene_shift_confirmation_frames == 3
+
+
 def test_ai_handler_prefers_auto_detection_when_conflicting_params_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -337,6 +420,134 @@ def test_ai_handler_passes_min_area_pixels_to_yolo_detector(
 
     assert handler.watermark_detector is not None
     assert yolo_detector_module.last_init_kwargs["min_area_pixels"] == 321
+
+
+def test_ai_handler_uses_temporal_coordinator_for_mask_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """开启掩码跟踪后，AIHandler 应通过时序协调器复用非关键帧掩码。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceDetector([_create_detected_mask(), _create_shifted_detected_mask()])
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+
+    frame = _create_test_frame()
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    _, first_info = handler.process_frame(frame, params)
+    _, second_info = handler.process_frame(frame, params)
+    _, third_info = handler.process_frame(frame, params)
+    _, fourth_info = handler.process_frame(frame, params)
+
+    assert hasattr(handler, "temporal_coordinator")
+    assert first_info["detection_method"] == "automatic_yolo"
+    assert second_info["detection_method"] == "mask_tracking_reuse_last"
+    assert third_info["detection_method"] == "mask_tracking_reuse_last"
+    assert fourth_info["detection_method"] == "automatic_yolo"
+    assert detector.call_count == 2
+
+
+def test_ai_handler_long_sequence_keeps_keyframe_and_reuse_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """长序列单帧处理时，应持续保持关键帧检测与中间帧复用节奏。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceDetector(
+        [
+            _create_detected_mask(),
+            _create_shifted_detected_mask(),
+            _create_detected_mask(),
+        ]
+    )
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    detection_methods = []
+    for _ in range(7):
+        _, info = handler.process_frame(_create_test_frame(), params)
+        detection_methods.append(info["detection_method"])
+
+    assert detection_methods == [
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+        "mask_tracking_reuse_last",
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+        "mask_tracking_reuse_last",
+        "automatic_yolo",
+    ]
+    assert detector.call_count == 3
+
+
+def test_ai_handler_batch_cold_start_keeps_conservative_detection_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """冷启动批次应保持保守检测，不在同批内因前帧稳定而回收后续检测位点。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceBatchDetector(
+        [
+            _create_detected_mask(),
+            _create_shifted_detected_mask(),
+            _create_detected_mask(),
+            _create_shifted_detected_mask(),
+        ]
+    )
+    handler = ai_handler_cls(
+        config=None,
+        ai_params={
+            "use_gpu_inpainting": False,
+            "device": "cpu",
+            "enable_mask_tracking": True,
+            "mask_tracking_interval": 3,
+            "mask_tracking_warmup_frames": 1,
+        },
+    )
+    handler.watermark_detector = detector
+
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    first_batch_results = handler.process_frames_batch(
+        [_create_test_frame(), _create_test_frame(), _create_test_frame()],
+        params,
+    )
+    first_batch_methods = [info["detection_method"] for _, info in first_batch_results]
+
+    second_batch_results = handler.process_frames_batch(
+        [_create_test_frame(), _create_test_frame(), _create_test_frame()],
+        params,
+    )
+    second_batch_methods = [info["detection_method"] for _, info in second_batch_results]
+
+    assert first_batch_methods == [
+        "automatic_yolo",
+        "automatic_yolo",
+        "automatic_yolo",
+    ]
+    assert second_batch_methods == [
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+        "mask_tracking_reuse_last",
+    ]
+    assert detector.batch_calls == 2
+    assert detector.single_calls == 0
 
 
 def test_ai_handler_passes_inpainting_params_to_opencv_inpainter(
@@ -696,3 +907,219 @@ def test_ai_handler_reports_gpu_oom_retry_info(
     assert info["inpainting_backend"] == "gpu_deep_learning_unet"
     assert info["gpu_inpainting_profile"]["resize_limit"] == 768
     assert info["gpu_inpainting_retry"] == {"applied": True, "count": 1, "reason": "oom"}
+
+
+def test_ai_handler_reuses_temporal_mask_between_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启用时序协调后，非关键帧应复用上一帧稳定掩码。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _DummyDetector(_create_detected_mask())
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+
+    _, first_info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": True,
+            "user_mask": None,
+            "detection_sensitivity": 0.5,
+        },
+    )
+    _, second_info = handler.process_frame(
+        _create_test_frame(),
+        {
+            "auto_detect": True,
+            "user_mask": None,
+            "detection_sensitivity": 0.5,
+        },
+    )
+
+    assert detector.call_count == 1
+    assert first_info["detection_method"] == "automatic_yolo"
+    assert second_info["detection_method"] == "mask_tracking_reuse_last"
+
+
+def test_ai_handler_reset_runtime_state_clears_temporal_tracking_between_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """跨任务 reset 后，新任务首帧必须重新检测，不能复用上一任务掩码。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceDetector([_create_detected_mask(), _create_shifted_detected_mask()])
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    _, first_info = handler.process_frame(_create_test_frame(), params)
+    _, second_info = handler.process_frame(_create_test_frame(), params)
+
+    assert first_info["detection_method"] == "automatic_yolo"
+    assert second_info["detection_method"] == "mask_tracking_reuse_last"
+    assert detector.call_count == 1
+
+    handler.reset_runtime_state_for_new_task()
+
+    assert handler._mask_tracking_next_frame_index == 0
+    assert handler.temporal_coordinator.stable_hits == 0
+    assert handler.temporal_coordinator.get_stored_mask_copy() is None
+
+    _, third_info = handler.process_frame(_create_test_frame(), params)
+
+    assert third_info["detection_method"] == "automatic_yolo"
+    assert detector.call_count == 2
+
+
+def test_ai_handler_forces_next_detection_after_large_temporal_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """关键帧检测到大位移后，下一帧应强制重检以避免直接复用旧时序状态。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceDetector(
+        [
+            _create_detected_mask(),
+            _create_far_shifted_detected_mask(),
+            _create_far_shifted_detected_mask(),
+        ]
+    )
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+    handler.mask_tracking_motion_iou_threshold = 0.2
+
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    detection_methods = []
+    for _ in range(6):
+        _, info = handler.process_frame(_create_test_frame(), params)
+        detection_methods.append(info["detection_method"])
+
+    assert detection_methods == [
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+        "mask_tracking_reuse_last",
+        "automatic_yolo",
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+    ]
+    assert detector.call_count == 3
+
+
+def test_ai_handler_forces_redetection_after_large_mask_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """关键帧检测到大位移后，下一帧应立即重检，避免直接复用不稳定新掩码。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+    detector = _SequenceDetector(
+        [
+            _create_detected_mask(),
+            _create_far_shifted_detected_mask(),
+            _create_far_shifted_detected_mask(),
+        ]
+    )
+    handler = _build_lightweight_ai_handler(detector, ai_handler_cls)
+    handler.enable_mask_tracking = True
+    handler.mask_tracking_interval = 3
+    handler.mask_tracking_warmup_frames = 0
+
+    params = {
+        "auto_detect": True,
+        "user_mask": None,
+        "detection_sensitivity": 0.5,
+    }
+
+    methods = []
+    for _ in range(5):
+        _, info = handler.process_frame(_create_test_frame(), params)
+        methods.append(info["detection_method"])
+
+    assert methods == [
+        "automatic_yolo",
+        "mask_tracking_reuse_last",
+        "mask_tracking_reuse_last",
+        "automatic_yolo",
+        "automatic_yolo",
+    ]
+    assert detector.call_count == 3
+
+
+def test_builder_passes_temporal_tracking_params_to_ai_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Builder 生成的时序参数应完整传递到 AIHandler 与 TemporalCoordinator。"""
+    ai_handler_cls, ai_params_builder_cls = _load_test_targets(monkeypatch)
+    builder = ai_params_builder_cls()
+    monkeypatch.setattr(builder, "_is_cuda_available", lambda: False)
+
+    ai_params = builder.build_from_ui(
+        preferences=_DummyPreferences(auto_mode=True),
+        advanced_params={
+            "detection_method": "YOLO v11x 深度学习auto (推荐)",
+            "inpainting_method": "LaMa 深度学习修复（推荐）",
+            "enable_mask_tracking": True,
+            "mask_tracking_interval": 3,
+            "mask_tracking_max_missing_detections": 2,
+            "mask_tracking_motion_iou_threshold": 0.35,
+            "mask_tracking_scene_shift_confirmation_frames": 4,
+        },
+        manual_selections=None,
+        input_file_path="demo.mp4",
+    )
+
+    handler = ai_handler_cls(
+        config=None,
+        ai_params=ai_params,
+    )
+
+    assert handler.mask_tracking_max_missing_detections == 2
+    assert handler.mask_tracking_motion_iou_threshold == pytest.approx(0.35, rel=1e-6)
+    assert handler.mask_tracking_scene_shift_confirmation_frames == 4
+    assert handler.temporal_coordinator.max_missing_detections == 2
+    assert handler.temporal_coordinator.motion_redetect_iou_threshold == pytest.approx(
+        0.35, rel=1e-6
+    )
+    assert handler.temporal_coordinator.scene_shift_confirmation_frames == 4
+
+
+def test_ai_handler_configures_temporal_coordinator_with_tracking_runtime_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AIHandler 初始化时应把新增时序参数下沉到 TemporalCoordinator。"""
+    ai_handler_cls, _ = _load_test_targets(monkeypatch)
+
+    handler = ai_handler_cls(
+        config=None,
+        ai_params={
+            "use_gpu_inpainting": False,
+            "device": "cpu",
+            "enable_mask_tracking": True,
+            "mask_tracking_interval": 5,
+            "mask_tracking_warmup_frames": 1,
+            "mask_tracking_max_missing_detections": 2,
+            "mask_tracking_motion_iou_threshold": 0.27,
+            "mask_tracking_scene_shift_confirmation_frames": 4,
+        },
+    )
+
+    assert handler.mask_tracking_max_missing_detections == 2
+    assert handler.mask_tracking_motion_iou_threshold == pytest.approx(0.27, rel=1e-6)
+    assert handler.mask_tracking_scene_shift_confirmation_frames == 4
+    assert handler.temporal_coordinator.max_missing_detections == 2
+    assert handler.temporal_coordinator.motion_redetect_iou_threshold == pytest.approx(
+        0.27,
+        rel=1e-6,
+    )
+    assert handler.temporal_coordinator.scene_shift_confirmation_frames == 4

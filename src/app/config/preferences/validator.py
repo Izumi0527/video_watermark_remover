@@ -4,7 +4,12 @@ import logging
 import os
 from typing import Any, Dict, List
 
-from ..advanced_params import OUTPUT_FORMAT_LABELS, OUTPUT_FORMAT_OPTIONS
+from ..advanced_params import (
+    MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX,
+    MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX,
+    OUTPUT_FORMAT_LABELS,
+    OUTPUT_FORMAT_OPTIONS,
+)
 
 _VALID_PROCESSING_MODES = {
     "auto",
@@ -30,6 +35,14 @@ _INT_MIN_ADVANCED_PARAM_RULES = {
 _INT_RANGE_ADVANCED_PARAM_RULES = {
     "worker_count": (0, 16),
     "compression_quality": (1, 100),
+    "mask_tracking_max_missing_detections": (0, MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX),
+    "mask_tracking_scene_shift_confirmation_frames": (
+        1,
+        MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX,
+    ),
+}
+_FLOAT_RANGE_ADVANCED_PARAM_RULES = {
+    "mask_tracking_motion_iou_threshold": (0.0, 1.0),
 }
 _VALID_OUTPUT_FORMATS = (
     set(OUTPUT_FORMAT_OPTIONS) | set(OUTPUT_FORMAT_LABELS.values()) | {"jpeg", "JPEG"}
@@ -101,6 +114,13 @@ class PreferencesValidator:
         if key in _INT_RANGE_ADVANCED_PARAM_RULES:
             min_value, max_value = _INT_RANGE_ADVANCED_PARAM_RULES[key]
             return isinstance(value, int) and min_value <= value <= max_value
+
+        if key in _FLOAT_RANGE_ADVANCED_PARAM_RULES:
+            min_float_value, max_float_value = _FLOAT_RANGE_ADVANCED_PARAM_RULES[key]
+            return (
+                isinstance(value, (int, float))
+                and min_float_value <= float(value) <= max_float_value
+            )
 
         if key == "output_format":
             return str(value or "").strip() in _VALID_OUTPUT_FORMATS

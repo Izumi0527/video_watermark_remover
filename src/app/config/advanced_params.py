@@ -41,6 +41,8 @@ OUTPUT_FORMAT_LABEL_TO_VALUE = {
 }
 _DEFAULT_AUTO_WORKER_COUNT = 4
 _GPU_DEEP_BACKENDS = {"lama", "legacy_unet", "mat"}
+MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX = 30
+MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX = 30
 _VIDEO_FILE_EXTENSIONS = {
     ".mp4",
     ".mov",
@@ -75,6 +77,21 @@ def _normalize_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         normalized = default
     return max(minimum, min(maximum, normalized))
+
+
+def _normalize_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        normalized = default
+    return max(minimum, min(maximum, normalized))
+
+
+def _get_first_present_value(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    return None
 
 
 def normalize_processing_mode(value: Any) -> str:
@@ -334,6 +351,31 @@ def migrate_legacy_performance_preferences(  # noqa: C901
     if preserve_audio is not None:
         result["preserve_audio"] = preserve_audio
 
+    mask_tracking_max_missing_detections = normalized_current.get(
+        "mask_tracking_max_missing_detections",
+        normalized_current.get("mask_tracking_max_missed_detections"),
+    )
+    if mask_tracking_max_missing_detections is not None:
+        result["mask_tracking_max_missing_detections"] = mask_tracking_max_missing_detections
+
+    mask_tracking_motion_iou_threshold = normalized_current.get(
+        "mask_tracking_motion_iou_threshold",
+        normalized_current.get(
+            "mask_tracking_scene_change_iou_threshold",
+            normalized_current.get("mask_tracking_scene_shift_iou_threshold"),
+        ),
+    )
+    if mask_tracking_motion_iou_threshold is not None:
+        result["mask_tracking_motion_iou_threshold"] = mask_tracking_motion_iou_threshold
+
+    mask_tracking_scene_shift_confirmation_frames = normalized_current.get(
+        "mask_tracking_scene_shift_confirmation_frames"
+    )
+    if mask_tracking_scene_shift_confirmation_frames is not None:
+        result[
+            "mask_tracking_scene_shift_confirmation_frames"
+        ] = mask_tracking_scene_shift_confirmation_frames
+
     return result
 
 
@@ -545,6 +587,9 @@ class AdvancedParamsSnapshot:
     add_suffix: bool = True
     add_timestamp: bool = False
     preserve_audio: bool = True
+    mask_tracking_max_missing_detections: int = 1
+    mask_tracking_motion_iou_threshold: float = 0.2
+    mask_tracking_scene_shift_confirmation_frames: int = 1
 
     @classmethod
     def defaults(cls) -> "AdvancedParamsSnapshot":
@@ -553,6 +598,7 @@ class AdvancedParamsSnapshot:
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any] | None = None) -> "AdvancedParamsSnapshot":
         merged = migrate_legacy_performance_preferences(current=raw)
+        raw_mapping = dict(raw or {})
         defaults = cls.defaults()
         return cls(
             processing_mode=normalize_processing_mode(
@@ -610,6 +656,36 @@ class AdvancedParamsSnapshot:
             preserve_audio=_normalize_bool(
                 merged.get("preserve_audio"),
                 defaults.preserve_audio,
+            ),
+            mask_tracking_max_missing_detections=_normalize_int(
+                _get_first_present_value(
+                    raw_mapping,
+                    "mask_tracking_max_missing_detections",
+                    "mask_tracking_max_missed_detections",
+                ),
+                defaults.mask_tracking_max_missing_detections,
+                0,
+                MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX,
+            ),
+            mask_tracking_motion_iou_threshold=_normalize_float(
+                _get_first_present_value(
+                    raw_mapping,
+                    "mask_tracking_motion_iou_threshold",
+                    "mask_tracking_scene_change_iou_threshold",
+                    "mask_tracking_scene_shift_iou_threshold",
+                ),
+                defaults.mask_tracking_motion_iou_threshold,
+                0.0,
+                1.0,
+            ),
+            mask_tracking_scene_shift_confirmation_frames=_normalize_int(
+                _get_first_present_value(
+                    raw_mapping,
+                    "mask_tracking_scene_shift_confirmation_frames",
+                ),
+                defaults.mask_tracking_scene_shift_confirmation_frames,
+                1,
+                MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX,
             ),
         )
 
@@ -709,6 +785,8 @@ class AdvancedParamsSnapshot:
 
 __all__ = [
     "AdvancedParamsSnapshot",
+    "MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX",
+    "MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX",
     "OUTPUT_FORMAT_LABELS",
     "OUTPUT_FORMAT_OPTIONS",
     "ProcessingContext",

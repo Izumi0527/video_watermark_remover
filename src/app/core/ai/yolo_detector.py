@@ -21,6 +21,7 @@ from ...config.config_manager import ConfigManager
 from ...utils.model_downloader import ModelDownloader
 from ..exceptions import DetectionError
 from .gpu_monitor import ensure_gpu_memory, get_safe_batch_size
+from .mask_refiner import MaskRefiner
 
 if TYPE_CHECKING:
     from ultralytics import YOLO  # type: ignore[import-not-found]
@@ -116,6 +117,12 @@ class YOLOWatermarkDetector:
             0, config.getint("YOLO", "mask_dilate_iterations", fallback=0)
         )
         self.mask_close_kernel = max(0, config.getint("YOLO", "mask_close_kernel", fallback=5))
+        self.mask_refiner = MaskRefiner(
+            profile="complex_logo",
+            close_kernel=self.mask_close_kernel,
+            erode_iterations=self.mask_erode_iterations,
+            dilate_iterations=self.mask_dilate_iterations,
+        )
 
         # 确定模型路径（优先级：参数 > 配置 > 自动选择）
         if model_path:
@@ -400,29 +407,20 @@ class YOLOWatermarkDetector:
         """
         return self._compute_axis_padding(box_w), self._compute_axis_padding(box_h)
 
-    def _postprocess_mask(self, mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    def _postprocess_mask(
+        self,
+        mask: NDArray[np.uint8],
+        frame_shape: Optional[Sequence[int]] = None,
+    ) -> NDArray[np.uint8]:
         """
         对掩码做轻量后处理，用于微调边界与连接断裂区域。
         """
         if mask is None or not np.any(mask):
             return mask
-
-        # 细粒度膨胀/腐蚀（可用于“略扩大/略收缩”边界）
-        fine_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        if self.mask_erode_iterations > 0:
-            mask = np.asarray(cv2.erode(mask, fine_kernel, iterations=self.mask_erode_iterations))
-        if self.mask_dilate_iterations > 0:
-            mask = np.asarray(cv2.dilate(mask, fine_kernel, iterations=self.mask_dilate_iterations))
-
-        # 闭运算：连接近邻区域、填补小孔洞（kernel 尺寸应为奇数）
-        k = int(self.mask_close_kernel)
-        if k > 0:
-            if k % 2 == 0:
-                k += 1
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-            mask = np.asarray(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel))
-
-        return mask
+        return self.mask_refiner.refine(
+            np.asarray(mask, dtype=np.uint8),
+            frame_shape=tuple(frame_shape or mask.shape),
+        )
 
     def _masks_to_mask(  # noqa: C901
         self, masks: Any, frame_shape: Sequence[int]
@@ -458,7 +456,7 @@ class YOLOWatermarkDetector:
                 if merged is not None:
                     if merged.shape != (h, w):
                         merged = cv2.resize(merged, (w, h), interpolation=cv2.INTER_NEAREST)
-                    return self._postprocess_mask(np.asarray(merged, dtype=np.uint8))
+                    return self._postprocess_mask(np.asarray(merged, dtype=np.uint8), frame_shape)
 
         # 兜底：使用 masks.xy（多边形点集，坐标通常为原图像素坐标）
         polys = getattr(masks, "xy", None)
@@ -470,7 +468,7 @@ class YOLOWatermarkDetector:
                 if pts.ndim != 2 or pts.shape[1] != 2:
                     continue
                 cv2.fillPoly(out, [pts], 255)
-            return self._postprocess_mask(out)
+            return self._postprocess_mask(out, frame_shape)
 
         return None
 
@@ -564,7 +562,7 @@ class YOLOWatermarkDetector:
 
             cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
 
-        return self._postprocess_mask(mask)
+        return self._postprocess_mask(mask, frame_shape)
 
     def cleanup(self):
         """清理 GPU 内存"""

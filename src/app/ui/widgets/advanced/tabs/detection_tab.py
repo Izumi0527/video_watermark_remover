@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QLabel,
@@ -14,6 +15,11 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+)
+
+from .....config.advanced_params import (
+    MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX,
+    MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX,
 )
 
 
@@ -137,6 +143,47 @@ class DetectionParametersTab:
         parent_widget.mask_tracking_interval_spin.setValue(3)
         parent_widget.mask_tracking_interval_spin.setSuffix(" 帧")
         mask_layout.addRow("重新检测间隔:", parent_widget.mask_tracking_interval_spin)
+
+        parent_widget.mask_tracking_max_missing_detections_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mask_tracking_max_missing_detections_spin,
+            tooltip="连续丢检时允许复用历史掩码的最大次数，越大越稳定但误跟踪风险更高。",
+        )
+        parent_widget.mask_tracking_max_missing_detections_spin.setMinimum(0)
+        parent_widget.mask_tracking_max_missing_detections_spin.setMaximum(
+            MASK_TRACKING_MAX_MISSING_DETECTIONS_MAX
+        )
+        parent_widget.mask_tracking_max_missing_detections_spin.setValue(1)
+        parent_widget.mask_tracking_max_missing_detections_spin.setSuffix(" 次")
+        mask_layout.addRow("丢检容忍次数:", parent_widget.mask_tracking_max_missing_detections_spin)
+
+        parent_widget.mask_tracking_motion_iou_threshold_spin = QDoubleSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mask_tracking_motion_iou_threshold_spin,
+            tooltip="当新旧掩码 IoU 低于该阈值时判定为明显位移，并触发后续重检确认。",
+        )
+        parent_widget.mask_tracking_motion_iou_threshold_spin.setDecimals(2)
+        parent_widget.mask_tracking_motion_iou_threshold_spin.setSingleStep(0.05)
+        parent_widget.mask_tracking_motion_iou_threshold_spin.setMinimum(0.0)
+        parent_widget.mask_tracking_motion_iou_threshold_spin.setMaximum(1.0)
+        parent_widget.mask_tracking_motion_iou_threshold_spin.setValue(0.2)
+        mask_layout.addRow("位移触发阈值(IoU):", parent_widget.mask_tracking_motion_iou_threshold_spin)
+
+        parent_widget.mask_tracking_scene_shift_confirmation_frames_spin = QSpinBox()
+        parent_widget.configure_panel_spin_box(
+            parent_widget.mask_tracking_scene_shift_confirmation_frames_spin,
+            tooltip="发生大位移后，强制连续重检的确认帧数，用于抑制短时抖动误判。",
+        )
+        parent_widget.mask_tracking_scene_shift_confirmation_frames_spin.setMinimum(1)
+        parent_widget.mask_tracking_scene_shift_confirmation_frames_spin.setMaximum(
+            MASK_TRACKING_SCENE_SHIFT_CONFIRMATION_FRAMES_MAX
+        )
+        parent_widget.mask_tracking_scene_shift_confirmation_frames_spin.setValue(1)
+        parent_widget.mask_tracking_scene_shift_confirmation_frames_spin.setSuffix(" 帧")
+        mask_layout.addRow(
+            "位移确认帧数:",
+            parent_widget.mask_tracking_scene_shift_confirmation_frames_spin,
+        )
 
         tracking_hint_label = QLabel("说明：适合静态水印；动态水印建议关闭/减小间隔。")
         tracking_hint_label.setWordWrap(True)

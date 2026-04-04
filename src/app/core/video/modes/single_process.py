@@ -160,6 +160,11 @@ def process_video_singleprocess(processor) -> None:  # noqa: C901
             "detection_sensitivity": processor.ai_params.get("detection_sensitivity", 0.5),
             "user_mask": processor.ai_params.get("user_mask", None),
         }
+        reset_runtime_state = getattr(
+            processor.ai_handler, "reset_runtime_state_for_new_task", None
+        )
+        if callable(reset_runtime_state):
+            reset_runtime_state()
         detection_batch_size = _resolve_detection_batch_size(processor, processing_params)
 
         current_frame = 0

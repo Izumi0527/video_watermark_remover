@@ -82,6 +82,20 @@ def test_manager_set_get(preference_memory_fs):
     assert manager.get_preference("ui", "theme") == "light"
 
 
+def test_manager_rejects_temporal_tracking_values_over_ui_ceiling(preference_memory_fs):
+    config_dir = _make_config_dir("tracking_ceiling")
+    manager = preferences.UserPreferencesManager(config_dir=str(config_dir))
+
+    assert manager.set_preference("advanced_params", "mask_tracking_max_missing_detections", 30)
+    assert not manager.set_preference("advanced_params", "mask_tracking_max_missing_detections", 31)
+    assert manager.set_preference(
+        "advanced_params", "mask_tracking_scene_shift_confirmation_frames", 30
+    )
+    assert not manager.set_preference(
+        "advanced_params", "mask_tracking_scene_shift_confirmation_frames", 31
+    )
+
+
 def test_global_manager_singleton(monkeypatch):
     import importlib
 

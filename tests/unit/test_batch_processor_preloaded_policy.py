@@ -111,9 +111,19 @@ def test_batch_processor_wrapper_marks_retry_wait_cancel_as_cancelled(
 
     attempts = {"count": 0}
 
-    def _fake_process_single_file(input_path: str, output_path: str, file_index: int):
+    def _fake_process_single_file(
+        input_path: str,
+        output_path: str,
+        file_index: int,
+        *,
+        file_id=None,
+    ):
         attempts["count"] += 1
-        return (ProcessingStatus.FAILED, "首次失败", {"attempt": attempts["count"]})
+        return (
+            ProcessingStatus.FAILED,
+            "首次失败",
+            {"attempt": attempts["count"], "file_id": file_id},
+        )
 
     def _fake_sleep(seconds: float) -> None:
         batch.should_stop = True
@@ -123,4 +133,9 @@ def test_batch_processor_wrapper_marks_retry_wait_cancel_as_cancelled(
 
     result = batch._process_single_file_wrapper(0, "demo.mp4", "demo_out.mp4", 1)
 
-    assert result == ("", ProcessingStatus.CANCELLED, "用户取消", {"attempt": 1})
+    assert result == (
+        "",
+        ProcessingStatus.CANCELLED,
+        "用户取消",
+        {"attempt": 1, "file_id": "legacy-0-demo.mp4"},
+    )

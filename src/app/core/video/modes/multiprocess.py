@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import re
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -59,6 +60,19 @@ def _calculate_chunks(
 
     processor.logger.info(f"Calculated {num_processes} chunks for {total_frames} frames")
     return chunks
+
+
+def _sort_chunk_paths(chunk_paths: List[str]) -> List[str]:
+    """按分块编号数值排序，避免 chunk_10 被排到 chunk_2 前。"""
+
+    def _chunk_sort_key(path: str) -> tuple[int, int | str]:
+        file_name = os.path.basename(path)
+        match = re.search(r"video_chunk_(\d+)_", file_name)
+        if match:
+            return (0, int(match.group(1)))
+        return (1, file_name)
+
+    return sorted(chunk_paths, key=_chunk_sort_key)
 
 
 def _check_progress_queue(
@@ -246,7 +260,7 @@ def process_video_multiprocess(processor) -> None:  # noqa: C901
             raise Exception(f"{len(failed_chunks)} 个块处理失败: {'; '.join(error_messages)}")
 
         chunk_paths = [r[0] for r in results if r[0] is not None]
-        chunk_paths.sort()
+        chunk_paths = _sort_chunk_paths(chunk_paths)
 
         if _is_cancel_requested(processor):
             cancel_requested = True

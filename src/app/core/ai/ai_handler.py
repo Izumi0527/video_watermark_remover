@@ -23,6 +23,7 @@ from ...utils.inpainting_model_downloader import resolve_inpainting_asset_ref
 from .image_inpainter import ImageInpainter
 from .image_processor import apply_postprocessing, apply_preprocessing
 from .inpainting_backends.factory import create_inpainting_backend
+from .temporal_coordinator import TemporalCoordinator
 
 # 导入拆分出的检测和修复模块
 from .yolo_detector import YOLOWatermarkDetector
@@ -57,7 +58,7 @@ class AIHandler:
     统一管理水印检测和图像修复功能，提供完整的处理流程
     """
 
-    def __init__(self, config=None, ai_params=None):
+    def __init__(self, config=None, ai_params=None):  # noqa: C901
         self.config = config
         self.ai_params = ai_params or {}  # 默认空字典
 
@@ -112,6 +113,72 @@ class AIHandler:
             self.mask_tracking_warmup_frames = max(0, int(raw_tracking_warmup or 0))
         except (TypeError, ValueError):
             self.mask_tracking_warmup_frames = 2
+        raw_tracking_missing = self.ai_params.get(
+            "mask_tracking_max_missing_detections",
+            self.ai_params.get("mask_tracking_max_missed_detections", 1),
+        )
+        try:
+            self.mask_tracking_max_missing_detections = max(0, int(raw_tracking_missing or 0))
+        except (TypeError, ValueError):
+            self.mask_tracking_max_missing_detections = 1
+        raw_tracking_motion_iou = self.ai_params.get(
+            "mask_tracking_motion_iou_threshold",
+            self.ai_params.get(
+                "mask_tracking_scene_change_iou_threshold",
+                self.ai_params.get("mask_tracking_scene_shift_iou_threshold", 0.2),
+            ),
+        )
+        try:
+            self.mask_tracking_motion_iou_threshold = max(
+                0.0,
+                min(1.0, float(raw_tracking_motion_iou)),
+            )
+        except (TypeError, ValueError):
+            self.mask_tracking_motion_iou_threshold = 0.2
+        raw_tracking_confirmation = self.ai_params.get(
+            "mask_tracking_scene_shift_confirmation_frames",
+            1,
+        )
+        try:
+            self.mask_tracking_scene_shift_confirmation_frames = max(
+                1,
+                int(raw_tracking_confirmation or 1),
+            )
+        except (TypeError, ValueError):
+            self.mask_tracking_scene_shift_confirmation_frames = 1
+        raw_tracking_missing = self.ai_params.get(
+            "mask_tracking_max_missing_detections",
+            self.ai_params.get("mask_tracking_max_missed_detections", 1),
+        )
+        try:
+            self.mask_tracking_max_missing_detections = max(0, int(raw_tracking_missing or 0))
+        except (TypeError, ValueError):
+            self.mask_tracking_max_missing_detections = 1
+        raw_tracking_shift_iou = self.ai_params.get(
+            "mask_tracking_scene_shift_iou_threshold",
+            self.ai_params.get(
+                "mask_tracking_motion_iou_threshold",
+                self.ai_params.get("mask_tracking_scene_change_iou_threshold", 0.2),
+            ),
+        )
+        try:
+            self.mask_tracking_motion_iou_threshold = max(
+                0.0,
+                float(raw_tracking_shift_iou or 0.0),
+            )
+        except (TypeError, ValueError):
+            self.mask_tracking_motion_iou_threshold = 0.2
+        raw_tracking_confirmation = self.ai_params.get(
+            "mask_tracking_scene_shift_confirmation_frames",
+            1,
+        )
+        try:
+            self.mask_tracking_scene_shift_confirmation_frames = max(
+                0,
+                int(raw_tracking_confirmation or 0),
+            )
+        except (TypeError, ValueError):
+            self.mask_tracking_scene_shift_confirmation_frames = 1
 
         self.enable_mixed_inpainting = bool(self.ai_params.get("enable_mixed_inpainting", False))
         raw_mixed_ratio = self.ai_params.get("mixed_inpainting_area_ratio_threshold", 0.003)
@@ -167,6 +234,15 @@ class AIHandler:
         ):
             self.enable_mask_tracking = False
             self.logger.warning("掩码跟踪仅支持串行处理，已自动关闭以避免多进程乱序导致误判。")
+
+        self.temporal_coordinator = TemporalCoordinator(
+            enabled=self.enable_mask_tracking,
+            keyframe_interval=self.mask_tracking_interval,
+            warmup_frames=self.mask_tracking_warmup_frames,
+            max_missing_detections=self.mask_tracking_max_missing_detections,
+            motion_redetect_iou_threshold=self.mask_tracking_motion_iou_threshold,
+            scene_shift_confirmation_frames=self.mask_tracking_scene_shift_confirmation_frames,
+        )
 
         self._setup_device()
 
@@ -373,6 +449,52 @@ class AIHandler:
         except (TypeError, ValueError):
             tracking_warmup = int(getattr(self, "mask_tracking_warmup_frames", 2) or 2)
         self.mask_tracking_warmup_frames = max(0, tracking_warmup)
+        try:
+            tracking_missing = int(
+                self.ai_params.get(
+                    "mask_tracking_max_missing_detections",
+                    self.ai_params.get(
+                        "mask_tracking_max_missed_detections",
+                        getattr(self, "mask_tracking_max_missing_detections", 1),
+                    ),
+                )
+                or 0
+            )
+        except (TypeError, ValueError):
+            tracking_missing = int(getattr(self, "mask_tracking_max_missing_detections", 1) or 1)
+        self.mask_tracking_max_missing_detections = max(0, tracking_missing)
+        try:
+            tracking_shift_iou = float(
+                self.ai_params.get(
+                    "mask_tracking_scene_shift_iou_threshold",
+                    self.ai_params.get(
+                        "mask_tracking_motion_iou_threshold",
+                        self.ai_params.get(
+                            "mask_tracking_scene_change_iou_threshold",
+                            getattr(self, "mask_tracking_motion_iou_threshold", 0.2),
+                        ),
+                    ),
+                )
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            tracking_shift_iou = float(
+                getattr(self, "mask_tracking_motion_iou_threshold", 0.2) or 0.2
+            )
+        self.mask_tracking_motion_iou_threshold = max(0.0, tracking_shift_iou)
+        try:
+            tracking_confirmation = int(
+                self.ai_params.get(
+                    "mask_tracking_scene_shift_confirmation_frames",
+                    getattr(self, "mask_tracking_scene_shift_confirmation_frames", 1),
+                )
+                or 0
+            )
+        except (TypeError, ValueError):
+            tracking_confirmation = int(
+                getattr(self, "mask_tracking_scene_shift_confirmation_frames", 1) or 1
+            )
+        self.mask_tracking_scene_shift_confirmation_frames = max(0, tracking_confirmation)
 
         # 掩码跟踪仅对串行处理安全；若用户切换了运行模式，需重新评估开关。
         mode_is_parallel = bool(self.ai_params.get("enable_multiprocess", False)) or bool(
@@ -388,6 +510,7 @@ class AIHandler:
             self.logger.warning("掩码跟踪仅支持串行处理，已自动关闭以避免多进程乱序导致误判。")
         else:
             self.enable_mask_tracking = desired_tracking_enabled
+        self._configure_temporal_coordinator()
 
         # P1：混合修复
         self.enable_mixed_inpainting = bool(
@@ -424,6 +547,7 @@ class AIHandler:
         self._mask_tracking_next_frame_index = 0
         self._mask_tracking_last_mask = None
         self._mask_tracking_stable_hits = 0
+        self.temporal_coordinator.reset()
 
         self._batch_timing_stats = _build_empty_batch_timing_stats()
         self._batch_timing_last_reset_at = time.time()
@@ -608,14 +732,20 @@ class AIHandler:
 
         # 严格按帧序号顺序填充掩码，避免“未来检测结果回填到过去帧”。
         for offset in range(len(prepared_frames)):
+            frame_index = base_frame_index + offset
             if int(offset) in detection_offset_set:
                 detected = detected_mask_by_offset.get(int(offset))
-                masks[offset] = detected
+                masks[offset] = self.temporal_coordinator.update(
+                    frame_index=frame_index,
+                    detected_mask=detected,
+                )
                 detection_methods[offset] = "automatic_yolo"
-                self._record_tracking_detection_result(detected)
                 continue
 
-            tracked = self._get_tracked_mask_copy()
+            tracked = self.temporal_coordinator.update(
+                frame_index=frame_index,
+                detected_mask=None,
+            )
             if tracked is not None:
                 masks[offset] = tracked
                 detection_methods[offset] = "mask_tracking_reuse_last"
@@ -892,6 +1022,34 @@ class AIHandler:
             self.mask_tracking_interval = 3
         if not hasattr(self, "mask_tracking_warmup_frames"):
             self.mask_tracking_warmup_frames = 2
+        if not hasattr(self, "mask_tracking_max_missing_detections"):
+            self.mask_tracking_max_missing_detections = 1
+        if not hasattr(self, "mask_tracking_motion_iou_threshold"):
+            self.mask_tracking_motion_iou_threshold = 0.2
+        if not hasattr(self, "mask_tracking_scene_shift_confirmation_frames"):
+            self.mask_tracking_scene_shift_confirmation_frames = 1
+        if not hasattr(self, "temporal_coordinator"):
+            self.temporal_coordinator = TemporalCoordinator(
+                enabled=bool(getattr(self, "enable_mask_tracking", False)),
+                keyframe_interval=max(1, int(getattr(self, "mask_tracking_interval", 3) or 3)),
+                warmup_frames=max(
+                    0,
+                    int(getattr(self, "mask_tracking_warmup_frames", 2) or 0),
+                ),
+                max_missing_detections=max(
+                    0,
+                    int(getattr(self, "mask_tracking_max_missing_detections", 1) or 0),
+                ),
+                scene_shift_iou_threshold=max(
+                    0.0,
+                    float(getattr(self, "mask_tracking_motion_iou_threshold", 0.2) or 0.0),
+                ),
+                scene_shift_confirmation_frames=max(
+                    0,
+                    int(getattr(self, "mask_tracking_scene_shift_confirmation_frames", 1) or 0),
+                ),
+            )
+        self._configure_temporal_coordinator()
 
         if not hasattr(self, "enable_mask_shrink"):
             self.enable_mask_shrink = False
@@ -950,41 +1108,8 @@ class AIHandler:
         threshold = self._resolve_mixed_inpainting_threshold_ratio()
         return area_ratio > 0 and area_ratio <= threshold
 
-    def _is_tracking_ready(self) -> bool:
-        if not self.enable_mask_tracking:
-            return False
-        if self._mask_tracking_last_mask is None or not np.any(self._mask_tracking_last_mask):
-            return False
-        return int(self._mask_tracking_stable_hits or 0) >= int(
-            self.mask_tracking_warmup_frames or 0
-        )
-
     def _should_run_detection_for_frame_index(self, frame_index: int) -> bool:
-        if not self.enable_mask_tracking:
-            return True
-        if not self._is_tracking_ready():
-            return True
-        interval = max(1, int(self.mask_tracking_interval or 1))
-        return int(frame_index) % interval == 0
-
-    def _record_tracking_detection_result(self, mask: Optional[np.ndarray]) -> None:
-        """记录一次真实检测结果，用于后续跟踪复用。"""
-        if mask is None or not np.any(mask):
-            self._mask_tracking_last_mask = None
-            self._mask_tracking_stable_hits = 0
-            return
-        self._mask_tracking_last_mask = mask
-        self._mask_tracking_stable_hits = int(self._mask_tracking_stable_hits or 0) + 1
-
-    def _get_tracked_mask_copy(self) -> Optional[np.ndarray]:
-        """获取可复用的掩码副本。"""
-        mask = self._mask_tracking_last_mask
-        if mask is None or not np.any(mask):
-            return None
-        try:
-            return mask.copy()
-        except Exception:  # noqa: BLE001
-            return np.asarray(mask)
+        return self.temporal_coordinator.should_detect(frame_index)
 
     def _resolve_mask(  # noqa: C901
         self,
@@ -1041,20 +1166,28 @@ class AIHandler:
             if mask is not None:
                 # 注意：预计算掩码应在“生成阶段”完成必要的后处理（如掩码收缩）。
                 # 这里再做一次收缩会导致掩码被二次侵蚀，出现漏修风险。
+                mask = self.temporal_coordinator.update(
+                    frame_index=frame_index,
+                    detected_mask=mask,
+                )
                 processing_info["detection_method"] = "automatic_yolo"
             else:
-                if not self._should_run_detection_for_frame_index(frame_index):
-                    tracked = self._get_tracked_mask_copy()
-                    if tracked is not None:
-                        processing_info["detection_method"] = "mask_tracking_reuse_last"
-                        return tracked, None
+                tracked = self.temporal_coordinator.update(
+                    frame_index=frame_index,
+                    detected_mask=None,
+                )
+                if tracked is not None:
+                    processing_info["detection_method"] = "mask_tracking_reuse_last"
+                    return tracked, None
 
                 _ = watermark_selection_params.get("detection_sensitivity", 0.5)
                 detected = self.watermark_detector.detect_watermark(frame)
                 detected = self._shrink_mask_if_needed(detected)
-                mask = detected
+                mask = self.temporal_coordinator.update(
+                    frame_index=frame_index,
+                    detected_mask=detected,
+                )
                 processing_info["detection_method"] = "automatic_yolo"
-                self._record_tracking_detection_result(detected)
 
             detector = self.watermark_detector
             detector_model_type = getattr(detector, "model_type", None) or "unknown"
@@ -1068,6 +1201,27 @@ class AIHandler:
 
         self.logger.info("No watermark detection method specified")
         return None, None
+
+    def _configure_temporal_coordinator(self) -> None:
+        if not hasattr(self, "temporal_coordinator"):
+            self.temporal_coordinator = TemporalCoordinator()
+        self.temporal_coordinator.configure(
+            enabled=bool(self.enable_mask_tracking),
+            keyframe_interval=max(1, int(self.mask_tracking_interval or 1)),
+            warmup_frames=max(0, int(self.mask_tracking_warmup_frames or 0)),
+            max_missing_detections=max(
+                0,
+                int(getattr(self, "mask_tracking_max_missing_detections", 1) or 0),
+            ),
+            scene_shift_iou_threshold=max(
+                0.0,
+                float(getattr(self, "mask_tracking_motion_iou_threshold", 0.2) or 0.0),
+            ),
+            scene_shift_confirmation_frames=max(
+                0,
+                int(getattr(self, "mask_tracking_scene_shift_confirmation_frames", 1) or 0),
+            ),
+        )
 
     def _finalize_processed_frame(
         self,

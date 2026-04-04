@@ -57,3 +57,28 @@ def test_widget_falls_back_to_single_process_when_loading_legacy_auto_mode(qtbot
 
     params = widget.get_parameters()
     assert params["processing_mode"] == "single_process"
+
+
+def test_widget_reads_and_writes_mask_tracking_runtime_params(qtbot) -> None:
+    from app.ui.widgets.advanced.advanced_parameters_widget import AdvancedParametersWidget
+
+    widget = AdvancedParametersWidget()
+    qtbot.addWidget(widget)
+
+    widget.set_parameters(
+        {
+            "enable_mask_tracking": True,
+            "mask_tracking_interval": 6,
+            "mask_tracking_max_missing_detections": 2,
+            "mask_tracking_motion_iou_threshold": 0.31,
+            "mask_tracking_scene_shift_confirmation_frames": 3,
+        }
+    )
+
+    params = widget.get_parameters()
+
+    assert params["enable_mask_tracking"] is True
+    assert params["mask_tracking_interval"] == 6
+    assert params["mask_tracking_max_missing_detections"] == 2
+    assert params["mask_tracking_motion_iou_threshold"] == pytest.approx(0.31, rel=1e-6)
+    assert params["mask_tracking_scene_shift_confirmation_frames"] == 3

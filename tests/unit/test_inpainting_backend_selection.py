@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib
 import sys
+import types
 
 import pytest
 
@@ -62,6 +64,59 @@ def test_builder_maps_legacy_gpu_label_to_legacy_unet_backend() -> None:
 
     assert params["requested_inpainting_backend"] == "legacy_unet"
     assert params["use_gpu_inpainting"] is True
+
+
+def test_builder_detects_cuda_without_torch_preload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """即使 torch 尚未预加载，也应通过显式探测识别可用 CUDA。"""
+    builder_module = importlib.import_module("app.ui.utils.ai_params_builder")
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(builder_module, "detect_cuda_available", lambda: True)
+
+    params = _build_with_method("LaMa 深度学习修复（推荐）", enable_gpu=True)
+
+    assert params["requested_inpainting_backend"] == "lama"
+    assert params["use_gpu_inpainting"] is True
+
+
+def test_detect_cuda_available_imports_torch_when_not_preloaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """helper 应在 torch 未预加载时主动导入并读取 CUDA 能力。"""
+    builder_module = importlib.import_module("app.ui.utils.ai_params_builder")
+    real_import = builtins.__import__
+    fake_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch":
+            return fake_torch
+        return real_import(name, globals, locals, fromlist, level)
+
+    builder_module.detect_cuda_available.cache_clear()
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    assert builder_module.detect_cuda_available() is True
+    builder_module.detect_cuda_available.cache_clear()
+
+
+def test_detect_cuda_available_returns_false_when_import_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """helper 在 torch 导入失败时应安全回退为 False。"""
+    builder_module = importlib.import_module("app.ui.utils.ai_params_builder")
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch":
+            raise ImportError("torch unavailable")
+        return real_import(name, globals, locals, fromlist, level)
+
+    builder_module.detect_cuda_available.cache_clear()
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    assert builder_module.detect_cuda_available() is False
+    builder_module.detect_cuda_available.cache_clear()
 
 
 def test_builder_maps_opencv_label_to_backend_and_method() -> None:

@@ -70,6 +70,9 @@ class AdvancedParametersWidget(QWidget):
         self.mask_shrink_pixels_spin: Optional["QSpinBox"] = None
         self.enable_mask_tracking_check: Optional["QCheckBox"] = None
         self.mask_tracking_interval_spin: Optional["QSpinBox"] = None
+        self.mask_tracking_max_missing_detections_spin: Optional["QSpinBox"] = None
+        self.mask_tracking_motion_iou_threshold_spin: Optional["QDoubleSpinBox"] = None
+        self.mask_tracking_scene_shift_confirmation_frames_spin: Optional["QSpinBox"] = None
         self.inpainting_method_combo: Optional["QComboBox"] = None
         self.inpaint_radius_spin: Optional["QSpinBox"] = None
         self.quality_slider: Optional["QSlider"] = None
@@ -147,9 +150,7 @@ class AdvancedParametersWidget(QWidget):
             combo_box.view().setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         if tooltip:
             combo_box.setToolTip(tooltip)
-        if minimum_contents_length is not None and hasattr(
-            combo_box, "setMinimumContentsLength"
-        ):
+        if minimum_contents_length is not None and hasattr(combo_box, "setMinimumContentsLength"):
             combo_box.setMinimumContentsLength(minimum_contents_length)
 
     def configure_panel_spin_box(
@@ -195,6 +196,18 @@ class AdvancedParametersWidget(QWidget):
             self.enable_mask_tracking_check.toggled.connect(self._on_parameter_changed)
         if self.mask_tracking_interval_spin:
             self.mask_tracking_interval_spin.valueChanged.connect(self._on_parameter_changed)
+        if self.mask_tracking_max_missing_detections_spin:
+            self.mask_tracking_max_missing_detections_spin.valueChanged.connect(
+                self._on_parameter_changed
+            )
+        if self.mask_tracking_motion_iou_threshold_spin:
+            self.mask_tracking_motion_iou_threshold_spin.valueChanged.connect(
+                self._on_parameter_changed
+            )
+        if self.mask_tracking_scene_shift_confirmation_frames_spin:
+            self.mask_tracking_scene_shift_confirmation_frames_spin.valueChanged.connect(
+                self._on_parameter_changed
+            )
 
         # 修复参数信号
         if self.inpainting_method_combo:
@@ -323,6 +336,21 @@ class AdvancedParametersWidget(QWidget):
                 "preserve_audio": (
                     self.preserve_audio_check.isChecked() if self.preserve_audio_check else True
                 ),
+                "mask_tracking_max_missing_detections": (
+                    self.mask_tracking_max_missing_detections_spin.value()
+                    if self.mask_tracking_max_missing_detections_spin
+                    else 1
+                ),
+                "mask_tracking_motion_iou_threshold": (
+                    self.mask_tracking_motion_iou_threshold_spin.value()
+                    if self.mask_tracking_motion_iou_threshold_spin
+                    else 0.2
+                ),
+                "mask_tracking_scene_shift_confirmation_frames": (
+                    self.mask_tracking_scene_shift_confirmation_frames_spin.value()
+                    if self.mask_tracking_scene_shift_confirmation_frames_spin
+                    else 1
+                ),
             }
         )
 
@@ -359,6 +387,21 @@ class AdvancedParametersWidget(QWidget):
             ),
             "mask_tracking_interval": (
                 self.mask_tracking_interval_spin.value() if self.mask_tracking_interval_spin else 3
+            ),
+            "mask_tracking_max_missing_detections": (
+                self.mask_tracking_max_missing_detections_spin.value()
+                if self.mask_tracking_max_missing_detections_spin
+                else 1
+            ),
+            "mask_tracking_motion_iou_threshold": (
+                self.mask_tracking_motion_iou_threshold_spin.value()
+                if self.mask_tracking_motion_iou_threshold_spin
+                else 0.2
+            ),
+            "mask_tracking_scene_shift_confirmation_frames": (
+                self.mask_tracking_scene_shift_confirmation_frames_spin.value()
+                if self.mask_tracking_scene_shift_confirmation_frames_spin
+                else 1
             ),
             # 修复参数
             "inpainting_method": (
@@ -429,6 +472,27 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_mask_tracking_check.setChecked(parameters["enable_mask_tracking"])
             if "mask_tracking_interval" in parameters and self.mask_tracking_interval_spin:
                 self.mask_tracking_interval_spin.setValue(int(parameters["mask_tracking_interval"]))
+            if (
+                "mask_tracking_max_missing_detections" in parameters
+                and self.mask_tracking_max_missing_detections_spin
+            ):
+                self.mask_tracking_max_missing_detections_spin.setValue(
+                    int(parameters["mask_tracking_max_missing_detections"])
+                )
+            if (
+                "mask_tracking_motion_iou_threshold" in parameters
+                and self.mask_tracking_motion_iou_threshold_spin
+            ):
+                self.mask_tracking_motion_iou_threshold_spin.setValue(
+                    float(parameters["mask_tracking_motion_iou_threshold"])
+                )
+            if (
+                "mask_tracking_scene_shift_confirmation_frames" in parameters
+                and self.mask_tracking_scene_shift_confirmation_frames_spin
+            ):
+                self.mask_tracking_scene_shift_confirmation_frames_spin.setValue(
+                    int(parameters["mask_tracking_scene_shift_confirmation_frames"])
+                )
 
             # 设置修复参数
             if "inpainting_method" in parameters and self.inpainting_method_combo:
@@ -557,6 +621,18 @@ class AdvancedParametersWidget(QWidget):
                 self.enable_mask_tracking_check.toggled.disconnect(self._on_parameter_changed)
             if self.mask_tracking_interval_spin:
                 self.mask_tracking_interval_spin.valueChanged.disconnect(self._on_parameter_changed)
+            if self.mask_tracking_max_missing_detections_spin:
+                self.mask_tracking_max_missing_detections_spin.valueChanged.disconnect(
+                    self._on_parameter_changed
+                )
+            if self.mask_tracking_motion_iou_threshold_spin:
+                self.mask_tracking_motion_iou_threshold_spin.valueChanged.disconnect(
+                    self._on_parameter_changed
+                )
+            if self.mask_tracking_scene_shift_confirmation_frames_spin:
+                self.mask_tracking_scene_shift_confirmation_frames_spin.valueChanged.disconnect(
+                    self._on_parameter_changed
+                )
 
             if self.inpainting_method_combo:
                 self.inpainting_method_combo.currentTextChanged.disconnect(
@@ -637,6 +713,9 @@ class AdvancedParametersWidget(QWidget):
             "mask_shrink_pixels": 1,
             "enable_mask_tracking": False,
             "mask_tracking_interval": 3,
+            "mask_tracking_max_missing_detections": 1,
+            "mask_tracking_motion_iou_threshold": 0.2,
+            "mask_tracking_scene_shift_confirmation_frames": 1,
             "inpainting_method": "LaMa 深度学习修复（推荐）",
             "inpainting_radius": 3,
             "inpainting_quality": 3,
