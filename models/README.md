@@ -340,4 +340,3 @@ custom_model_path = ./models/your-custom-model.pt
 ---
 
 **最后更新**: 2026-05-04
-**维护者**: Claude Code Assistant

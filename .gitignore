@@ -173,7 +173,6 @@ datasets/
 # Project-Specific Ignores
 # ============================================================
 
-# Claude Code configuration (local settings, may contain sensitive data)
 .claude/
 .claude/**
 *.claude
