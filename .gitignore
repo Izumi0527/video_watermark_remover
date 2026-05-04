@@ -240,4 +240,6 @@ user_data/
 
 # Codex/Agent 本地指令文件（不纳入版本库）
 AGENTS.md
-docs/agents/*
+docs/agents/
+docs/plans/
+docs/archive/
