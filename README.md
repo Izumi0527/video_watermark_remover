@@ -16,12 +16,22 @@
 - 外部工具：视频音频保留需要 `FFmpeg` / `ffprobe` 可用。
 - GPU：可选；NVIDIA CUDA 环境可提升 YOLO 检测和深度修复速度。
 
-### 2. Windows 菜单式安装
+### 2. 菜单式安装
+
+Windows：
 
 ```powershell
 git clone https://github.com/Izumi0527/video_watermark_remover.git
 cd video_watermark_remover
 .\scripts\vwr.ps1
+```
+
+Linux / macOS / Git Bash：
+
+```bash
+git clone https://github.com/Izumi0527/video_watermark_remover.git
+cd video_watermark_remover
+bash scripts/vwr.sh
 ```
 
 进入菜单后，按顺序执行：
@@ -53,8 +63,6 @@ uv pip install -e .
 python main.py
 ```
 
-Linux / macOS 当前没有专用脚本，主要用于手动验证。
-
 ### 4. 模型准备
 
 默认 YOLO 模型可在首次运行时自动下载，也可以提前放入 `models/`：
@@ -73,16 +81,32 @@ $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
 
 ### 5. 启动验证
 
+Windows：
+
 ```powershell
 .\scripts\vwr.ps1
+```
+
+Linux / macOS / Git Bash：
+
+```bash
+bash scripts/vwr.sh
 ```
 
 在菜单中选择 `启动程序`。如果提示缺少依赖或模型路径异常，优先回到菜单执行 `环境初始化`，并按提示开启自动修复。
 
 ### 6. 打包部署
 
+Windows：
+
 ```powershell
 .\scripts\vwr.ps1
+```
+
+Linux / macOS / Git Bash：
+
+```bash
+bash scripts/vwr.sh
 ```
 
 在菜单中选择 `打包构建`。脚本会使用 PyInstaller 构建可执行文件，并输出到 `release/` 目录。发布前建议先运行菜单中的 `代码质量检查` 和 `运行测试`。
@@ -98,7 +122,7 @@ $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
 - 音频保留：处理视频后尽量保留原始音频轨道。
 - 批处理：支持队列处理、状态追踪、失败记录和 JSON 清单导出。
 - 参数面板：检测、修复、性能、输出参数集中配置。
-- 工程化入口：通过 `scripts/vwr.ps1` 管理常用开发和运行任务。
+- 工程化入口：通过 `scripts/vwr.ps1` 或 `scripts/vwr.sh` 管理常用开发和运行任务。
 
 ---
 
@@ -110,6 +134,10 @@ $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
 .\scripts\vwr.ps1
 ```
 
+```bash
+bash scripts/vwr.sh
+```
+
 在菜单中选择 `启动程序`。
 
 ### 运行测试
@@ -118,12 +146,16 @@ $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
 .\.venv\Scripts\python.exe -m pytest tests/unit -q
 ```
 
-也可以运行 `.\scripts\vwr.ps1`，在菜单中选择 `运行测试`。
+也可以运行 `.\scripts\vwr.ps1` 或 `bash scripts/vwr.sh`，在菜单中选择 `运行测试`。
 
 ### 质量检查
 
 ```powershell
 .\scripts\vwr.ps1
+```
+
+```bash
+bash scripts/vwr.sh
 ```
 
 在菜单中选择 `代码质量检查`。
@@ -178,7 +210,7 @@ docs/
 ## 文档索引
 
 - [docs/architecture.md](docs/architecture.md)：当前架构、代码地图与维护边界。
-- [scripts/README.md](scripts/README.md)：`vwr.ps1` 菜单入口说明。
+- [scripts/README.md](scripts/README.md)：`vwr.ps1` / `vwr.sh` 菜单入口说明。
 - [models/README.md](models/README.md)：模型说明、下载方式与配置建议。
 - [tests/TESTING_GUIDE.md](tests/TESTING_GUIDE.md)：测试分层与推荐执行方式。
 - [docs/archive/yolo_model_upgrade.md](docs/archive/yolo_model_upgrade.md)：YOLO 模型升级记录。

@@ -21,6 +21,7 @@
 - `tests`：114 个 Python 测试文件，约 16,465 行。
 - `docs`：77 个 Markdown 文档。
 - `scripts/vwr.ps1`：统一 PowerShell 入口，约 94 KB。
+- `scripts/vwr.sh`：与 PowerShell 脚本功能对齐的 Bash 交互入口。
 - `pyproject.toml`：包元数据版本为 `0.7.23`。
 - `src/app/__init__.py`：应用可见版本为 `0.7.23`。
 
@@ -35,7 +36,7 @@
 - 检测模型：`Ultralytics YOLO`
 - 深度修复：`PyTorch`、内置轻量 U-Net、LaMa TorchScript 后端
 - 音视频封装：`FFmpeg` / `ffprobe`
-- 工程脚本：`uv`、PowerShell、`pytest`、`black`、`flake8`、`mypy`、`bandit`
+- 工程脚本：`uv`、PowerShell、Bash、`pytest`、`black`、`flake8`、`mypy`、`bandit`
 
 ### 1.3 运行入口
 
@@ -43,7 +44,7 @@
 - 包入口：`src/app/entrypoints.py`
 - 包脚本：`video-watermark-remover`、`vwr`
 - GUI 脚本：`video-watermark-remover-gui`
-- 推荐开发入口：`.\scripts\vwr.ps1`
+- 推荐开发入口：`.\scripts\vwr.ps1` 或 `bash scripts/vwr.sh`
 
 启动链路：
 
@@ -114,6 +115,7 @@ video_watermark_remover/
   requirements*.txt               # 运行与开发依赖
   scripts/
     vwr.ps1                       # Windows 交互式工程入口
+    vwr.sh                        # Bash 交互式工程入口
     README.md                     # 脚本使用说明
   models/
     README.md                     # YOLO / LaMa 模型说明
@@ -483,13 +485,13 @@ BatchProcessingWidget
 
 LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和环境变量共同解析。
 
-脚本层 `vwr.ps1` 会在启动前提供 LaMa TorchScript 权重提示，避免用户启动后才发现深度修复不可用。
+脚本层 `vwr.ps1` / `vwr.sh` 会在启动前提供 LaMa TorchScript 权重提示，避免用户启动后才发现深度修复不可用。
 
 ---
 
 ## 9. 工程脚本与开发入口
 
-`scripts/vwr.ps1` 是当前 Windows 开发和运行的统一入口，已经从旧的尾参命令形式转为交互式菜单。
+`scripts/vwr.ps1` 是当前 Windows 开发和运行的统一入口，`scripts/vwr.sh` 是 Linux / macOS / Git Bash 下的对应入口。两个脚本都保持纯交互式菜单模式。
 
 主要能力：
 
@@ -503,7 +505,7 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 
 注意：
 
-- `scripts/README.md` 已说明旧尾参命令形式移除。
+- `scripts/README.md` 已说明旧尾参命令形式移除，并列出 PowerShell / Bash 两种入口。
 - 项目文档和 README 中推荐的脚本命令应优先保持与这个交互式入口一致。
 
 ---
@@ -529,6 +531,10 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 .\scripts\vwr.ps1
 ```
 
+```bash
+bash scripts/vwr.sh
+```
+
 在菜单中选择“运行测试”，再选择 `unit` 并启用 `Quick`。
 
 直接命令式验证可参考 `tests/TESTING_GUIDE.md`，例如：
@@ -552,7 +558,7 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 - `models/README.md`
   - 模型说明、下载方式、推荐配置。
 - `scripts/README.md`
-  - PowerShell 工程入口说明。
+  - PowerShell / Bash 工程入口说明。
 - `tests/TESTING_GUIDE.md`
   - 测试分层和推荐执行方式。
 - `docs/archive/`
@@ -574,7 +580,7 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 - `src/app/core/ai/ai_handler.py`
   - 同时协调检测、mask、修复后端、fallback、trace 和 batch。
   - 风险是参数字段遗漏会导致 UI、批处理和清单不一致。
-- `scripts/vwr.ps1`
+- `scripts/vwr.ps1` / `scripts/vwr.sh`
   - 承载环境、运行、测试、质量、打包、清理和 CI。
   - 风险是交互式入口和测试脚本约定不一致。
 
@@ -677,7 +683,7 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 - 改 AI：运行 `tests/unit/core/ai` 定向测试，必要时补集成测试。
 - 改视频模式：运行视频模块拆分、模式、输出策略相关测试。
 - 改批处理：运行 batch、manifest、取消、file_id 相关测试。
-- 改脚本：运行 PowerShell 脚本单测或 E2E 切片，避免超过 60 秒的无界等待。
+- 改脚本：运行脚本语法校验和相关单测或 E2E 切片，避免超过 60 秒的无界等待。
 
 ---
 

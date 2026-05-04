@@ -1,14 +1,24 @@
-# scripts 目录说明（`vwr.ps1` 纯交互式入口）
+# scripts 目录说明（纯交互式入口）
 
-本仓库的自动化脚本入口为 `.\scripts\vwr.ps1`。  
-脚本仅支持 **Windows PowerShell**，并且已经调整为**纯交互式菜单模式**。
+本仓库提供两个自动化脚本入口：
+
+- Windows PowerShell：`.\scripts\vwr.ps1`
+- Linux / macOS / Git Bash：`bash scripts/vwr.sh`
+
+两个脚本都采用**纯交互式菜单模式**，不再支持旧式尾参命令。
 
 ## 1. 使用方式
 
-直接运行：
+Windows 直接运行：
 
 ```powershell
 .\scripts\vwr.ps1
+```
+
+Linux / macOS / Git Bash 直接运行：
+
+```bash
+bash scripts/vwr.sh
 ```
 
 脚本启动后会显示主菜单：
@@ -25,7 +35,7 @@
 H. 查看帮助
 0. 退出
 
-> 说明：旧的尾参命令形式已经移除，不再支持 `.\scripts\vwr.ps1 help/setup/run/test/...`
+> 说明：旧的尾参命令形式已经移除，不再支持 `.\scripts\vwr.ps1 help/setup/run/test/...` 或 `bash scripts/vwr.sh help/setup/run/test/...`
 
 ---
 
@@ -72,7 +82,7 @@ H. 查看帮助
 - `basic` 会清理 `.mypy_cache`、`.pytest_cache`、`.coverage*`、`logs/*.log`
 - `temp` 会清理 `.cache/tmp`、`.cache/pytest`、`.cache/tests`、`.pytest_tmp`、`.tmp_*`、`tmp_*`、`pytest-cache-files-*`、`test_output`、`tests/.cache`、`tests/test_data/runtime_tmp`
 - 若 `.cache` 下仅剩已清空后的空父目录，脚本会顺带删除空的 `.cache`；若仍有未纳入规则的内容，则会保留 `.cache`
-- 若历史测试残留目录提示 `Access is denied`，通常表示当前 PowerShell 不是管理员会话；请以管理员身份重新打开 PowerShell 后，再运行 `.\scripts\vwr.ps1` 执行清理
+- 若 Windows 历史测试残留目录提示 `Access is denied`，通常表示当前 PowerShell 不是管理员会话；请以管理员身份重新打开 PowerShell 后，再运行 `.\scripts\vwr.ps1` 执行清理
 - 所有级别都会递归清理 `src/` 与 `tests/` 下的 `__pycache__`、`*.pyc`、`*.pyo`
 - 不会删除 `.venv`、`models`、`release`
 - `deep` 还会额外清理 `.uv-cache`、`.cache/uv`、`.cache/setup-state`、`src/video_watermark_remover.egg-info`
@@ -89,8 +99,16 @@ https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/bi
 
 下载后可设置：
 
+PowerShell：
+
 ```powershell
 $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
+```
+
+Bash：
+
+```bash
+export VWR_LAMA_MODEL_PATH="/path/to/big-lama.pt"
 ```
 
 ---
@@ -100,3 +118,4 @@ $env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
 - 需要详细日志时，可继续使用 PowerShell 公共参数 `-Verbose`
 - 若脚本提示缺少开发依赖，请重新运行脚本，并在“环境初始化”中开启“安装开发依赖”
 - 若脚本提示虚拟环境不存在，请重新运行脚本，并在菜单中选择“环境初始化”
+- Bash 版会优先使用 `.venv/bin/python`，在 Git Bash 下也兼容 `.venv/Scripts/python.exe`
