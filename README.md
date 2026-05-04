@@ -39,7 +39,7 @@ bash scripts/vwr.sh
 1. `环境初始化`
 2. `启动程序`
 
-环境初始化会继续询问 Python 版本、Torch 后端、镜像源和是否安装开发依赖。脚本会创建或复用 `.venv`，安装依赖，并把当前项目安装为 editable 开发模式。
+环境初始化会继续询问 Python 版本、Torch 后端、镜像源、是否安装开发依赖，以及是否安装 YOLO 模型。脚本会创建或复用 `.venv`，安装依赖，并把当前项目安装为 editable 开发模式。
 
 ### 3. 手动安装
 
@@ -70,6 +70,13 @@ python main.py
 - `models/yolo11x-watermark.pt`
 - `models/yolo11x-watermark-corzent.pt`
 - `models/big-lama.pt`
+
+也可以运行 `.\scripts\vwr.ps1` 或 `bash scripts/vwr.sh`，在菜单中选择 `模型安装`，按需下载检测或修复模型：
+
+- `yolo11x-watermark`：默认推荐，专用水印检测模型。
+- `yolo11x-watermark-corzent`：corzent 微调版本，适合对比验证。
+- `yolo11s`：轻量通用模型，适合 CPU 或快速验证。
+- `big-lama.pt`：LaMa TorchScript 修复模型，用于根据 mask 修补水印区域。
 
 如需指定 LaMa TorchScript 权重：
 

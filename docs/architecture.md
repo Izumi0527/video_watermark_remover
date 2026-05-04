@@ -501,6 +501,7 @@ LaMa 和 legacy U-Net 路径由 `inpainting_model_downloader.py`、配置项和�
 - 测试：`unit / integration / all / audio / preferences / e2e / quality`。
 - 覆盖率、性能测试、打包构建。
 - 分级清理缓存和临时目录。
+- 模型安装：选择下载 `yolo11x-watermark`、`yolo11x-watermark-corzent`、`yolo11s` 或 LaMa `big-lama.pt`，并可同步写入 `[YOLO].model_type` / `[Models].lama_model_path`。
 - CI 模式。
 
 注意：

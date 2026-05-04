@@ -108,6 +108,7 @@ def test_vwr_without_args_enters_interactive_menu() -> None:
     assert "交互式菜单" in completed.stdout
     assert "1. 环境初始化" in completed.stdout
     assert "8. 清理缓存与临时文件" in completed.stdout
+    assert "10. 模型安装" in completed.stdout
 
 
 def test_vwr_rejects_legacy_tail_commands() -> None:
@@ -165,6 +166,124 @@ def test_start_interactive_menu_dispatches_test_unit_quick(tmp_path: Path) -> No
             "Coverage": False,
             "Performance": False,
             "Report": False,
+        }
+    ]
+
+
+def test_start_interactive_menu_dispatches_yolo_model_install(tmp_path: Path) -> None:
+    result = _run_powershell_harness(
+        tmp_path,
+        """
+        $script:MockAnswers = @("10", "1", "2", "Y", "Y", "0")
+        $script:Calls = @()
+
+        function global:Read-Host {
+            param([string]$Prompt)
+
+            if ($script:MockAnswers.Count -eq 0) {
+                throw "输入队列已耗尽：$Prompt"
+            }
+
+            $value = $script:MockAnswers[0]
+            if ($script:MockAnswers.Count -gt 1) {
+                $script:MockAnswers = @($script:MockAnswers[1..($script:MockAnswers.Count - 1)])
+            } else {
+                $script:MockAnswers = @()
+            }
+            return $value
+        }
+
+        function global:Invoke-YoloModelInstall {
+            param(
+                [string]$ModelKey,
+                [switch]$Force,
+                [switch]$UpdateConfig
+            )
+
+            $script:Calls += [ordered]@{
+                Command = "yolo"
+                ModelKey = $ModelKey
+                Force = [bool]$Force
+                UpdateConfig = [bool]$UpdateConfig
+            }
+        }
+
+        Start-InteractiveMenu
+        @{ Calls = $script:Calls } | ConvertTo-Json -Depth 6 -Compress
+        """,
+    )
+
+    assert result["Calls"] == [
+        {
+            "Command": "yolo",
+            "ModelKey": "yolo11x-watermark-corzent",
+            "Force": True,
+            "UpdateConfig": True,
+        }
+    ]
+
+
+def test_start_interactive_menu_dispatches_lama_model_install(tmp_path: Path) -> None:
+    result = _run_powershell_harness(
+        tmp_path,
+        """
+        $script:MockAnswers = @("10", "2", "Y", "Y", "0")
+        $script:Calls = @()
+
+        function global:Read-Host {
+            param([string]$Prompt)
+
+            if ($script:MockAnswers.Count -eq 0) {
+                throw "输入队列已耗尽：$Prompt"
+            }
+
+            $value = $script:MockAnswers[0]
+            if ($script:MockAnswers.Count -gt 1) {
+                $script:MockAnswers = @($script:MockAnswers[1..($script:MockAnswers.Count - 1)])
+            } else {
+                $script:MockAnswers = @()
+            }
+            return $value
+        }
+
+        function global:Invoke-YoloModelInstall {
+            param(
+                [string]$ModelKey,
+                [switch]$Force,
+                [switch]$UpdateConfig
+            )
+
+            $script:Calls += [ordered]@{
+                Command = "yolo"
+                ModelKey = $ModelKey
+                Force = [bool]$Force
+                UpdateConfig = [bool]$UpdateConfig
+            }
+        }
+
+        function global:Invoke-LamaTorchScriptModelInstall {
+            param(
+                [switch]$Force,
+                [switch]$UpdateConfig
+            )
+
+            $script:Calls += [ordered]@{
+                Command = "lama"
+                Force = [bool]$Force
+                UpdateConfig = [bool]$UpdateConfig
+            }
+        }
+
+        Start-InteractiveMenu
+        @{ Calls = $script:Calls } | ConvertTo-Json -Depth 6 -Compress
+        """,
+    )
+
+    assert result["Calls"] == [
+        {
+            "Command": "lama",
+            "Force": True,
+            "UpdateConfig": True,
         }
     ]
 

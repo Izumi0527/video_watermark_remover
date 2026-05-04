@@ -1,8 +1,10 @@
-# YOLO模型文件目录
+# 模型文件目录
 
-本目录用于存储YOLOv11系列水印检测模型权重文件。
+本目录用于存储水印检测和深度修复相关模型权重文件。
 
-**默认模型**：YOLOv11x-Watermark（专用水印检测，>99%准确率）⭐
+**默认检测模型**：YOLOv11x-Watermark（专用水印检测，>99%准确率）⭐
+
+**推荐修复模型**：`big-lama.pt`（LaMa TorchScript 图像修复模型）
 
 ## 📦 支持的模型列表
 
@@ -25,7 +27,7 @@
 - ✅ **极高准确率**：专门针对水印检测微调，检测准确率>99%
 - ✅ **低误报率**：有效区分水印与正常内容
 - ✅ **GPU加速**：批处理模式下可达120-150 FPS（NVIDIA 4070 Ti Super）
-- ✅ **通用性强**：支持多种水印类型（文字、图标、透明、半透���）
+- ✅ **通用性强**：支持多种水印类型（文字、图标、透明、半透明）
 
 **推荐配置参数：**
 ```ini
@@ -79,9 +81,51 @@ iou_threshold = 0.4
 batch_size = 1-4       # CPU或低端GPU
 ```
 
+### 4. big-lama.pt（LaMa TorchScript 修复模型）
+
+**深度图像修复模型** - 基于 LaMa（Large Mask Inpainting）的 TorchScript 权重，用于对水印区域做背景补全。
+
+| 属性 | 详情 |
+|------|------|
+| **文件名** | `big-lama.pt` |
+| **大小** | ~196 MiB / ~205.8 MB |
+| **模型类型** | TorchScript `.pt` |
+| **默认路径** | `models/big-lama.pt` |
+| **适用场景** | 视频帧水印擦除、图片水印擦除、mask 区域背景补全 |
+| **下载源** | [simple-lama-inpainting release](https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt) |
+
+**它和 YOLO 的关系：**
+
+- YOLO 模型负责检测水印位置，输出检测框或 mask。
+- `big-lama.pt` 负责根据 mask 修补水印区域，把背景补回来。
+- 换句话说，YOLO 负责“找水印”，LaMa 负责“修水印”。
+
+**运行时说明：**
+
+- 当前项目的 LaMa 运行时支持 TorchScript `.pt/.jit/.ts` 模型文件。
+- 官方 LaMa checkpoint 目录或 `.ckpt/.pth` 训练权重目前不会被直接运行。
+- 将 `big-lama.pt` 放在 `models/big-lama.pt` 后，项目可按默认候选路径自动识别；也可以设置 `VWR_LAMA_MODEL_PATH` 指向自定义路径。
+
 ## 🚀 快速开始
 
-### 自动下载（推荐）
+### 脚本交互安装（推荐）
+
+运行统一脚本入口，在菜单中选择 `10. 模型安装`：
+
+```powershell
+.\scripts\vwr.ps1
+```
+
+```bash
+bash scripts/vwr.sh
+```
+
+脚本支持两类模型安装：
+
+- YOLO 检测模型：`yolo11x-watermark / yolo11x-watermark-corzent / yolo11s`
+- LaMa 修复模型：`big-lama.pt`
+
+### YOLO 自动下载
 
 配置文件中启用自动下载功能：
 
@@ -93,7 +137,9 @@ auto_download_model = yes
 model_download_source = huggingface
 ```
 
-首次运行时，程序会自动从Hugging Face下载模型到本目录。
+首次运行时，程序会自动从 Hugging Face 下载 YOLO 模型到本目录。
+
+> 说明：`big-lama.pt` 建议通过脚本菜单或手动方式下载到 `models/big-lama.pt`。
 
 ### 手动下载
 
@@ -120,6 +166,20 @@ python -m app.utils.model_downloader download yolo11s
 python -m app.utils.model_downloader download yolo11x-watermark --force
 ```
 
+LaMa 修复模型可通过脚本菜单下载，也可手动下载：
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt" `
+  -OutFile "models/big-lama.pt"
+```
+
+```bash
+curl -L --fail \
+  -o models/big-lama.pt \
+  "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
+```
+
 #### 方法2：手动下载文件
 
 **YOLOv11x-Watermark:**
@@ -138,6 +198,20 @@ python -m app.utils.model_downloader download yolo11x-watermark --force
 1. 访问：https://github.com/ultralytics/assets/releases/tag/v8.3.0
 2. 下载 `yolo11s.pt`
 3. 放置到本目录（`models/`）
+
+**big-lama.pt:**
+1. 访问：https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt
+2. 下载 `big-lama.pt`
+3. 放置到本目录（`models/`）
+4. 如放在其他位置，可设置环境变量：
+
+```powershell
+$env:VWR_LAMA_MODEL_PATH="C:/path/to/big-lama.pt"
+```
+
+```bash
+export VWR_LAMA_MODEL_PATH="/path/to/big-lama.pt"
+```
 
 ## 💻 GPU要求与性能对比
 
@@ -234,8 +308,8 @@ custom_model_path = ./models/your-custom-model.pt
 
 ### Q1: 模型下载失败怎么办？
 **A:**
-- 检查网络连接（Hugging Face可能需要代理）
-- 尝试切换下载源：`model_download_source = github`
+- 检查网络连接（Hugging Face / GitHub 可能需要代理）
+- YOLO 模型可尝试切换下载源：`model_download_source = github`
 - 手动下载后放置到`models/`目录
 
 ### Q2: GPU显存不足怎么办？
@@ -265,5 +339,5 @@ custom_model_path = ./models/your-custom-model.pt
 
 ---
 
-**最后更新**: 2025-11-22
+**最后更新**: 2026-05-04
 **维护者**: Claude Code Assistant

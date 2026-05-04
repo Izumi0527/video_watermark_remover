@@ -39,6 +39,13 @@ ARTIFACTS_DIR="logs/ci-artifacts"
 OUTPUT_FILE=""
 VWR_LOG_FILE=""
 UV_EXECUTABLE=""
+INSTALL_YOLO_MODEL=0
+YOLO_MODEL=""
+YOLO_FORCE_DOWNLOAD=0
+UPDATE_YOLO_CONFIG=1
+INSTALL_LAMA_TORCHSCRIPT_MODEL=0
+LAMA_FORCE_DOWNLOAD=0
+UPDATE_LAMA_CONFIG=1
 
 if [[ -t 1 ]]; then
   COLOR_CYAN=$'\033[36m'
@@ -583,6 +590,10 @@ lama_torchscript_download_url() {
   printf '%s\n' "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
 }
 
+lama_torchscript_target_path() {
+  printf '%s\n' "models/big-lama.pt"
+}
+
 show_lama_torchscript_hint() {
   warn "未检测到 LaMa TorchScript 权重，深度修复可能不可用"
   info "下载地址：$(lama_torchscript_download_url)"
@@ -632,6 +643,140 @@ save_simple_json_report() {
   ok "报告已保存：${path}"
 }
 
+yolo_model_key_from_choice() {
+  case "$1" in
+    1) printf '%s\n' "yolo11x-watermark" ;;
+    2) printf '%s\n' "yolo11x-watermark-corzent" ;;
+    3) printf '%s\n' "yolo11s" ;;
+    *) printf '%s\n' "yolo11x-watermark" ;;
+  esac
+}
+
+read_yolo_model_key() {
+  cat >&2 <<'EOF'
+
+可安装的 YOLO 模型：
+  1. yolo11x-watermark：默认推荐，专用水印检测模型（约 114MB）
+  2. yolo11x-watermark-corzent：corzent 微调版本（约 109MB）
+  3. yolo11s：轻量通用模型（约 19MB，适合 CPU/快速验证）
+EOF
+  local choice
+  choice="$(read_choice_value "请选择 YOLO 模型" "1/2/3" "1")"
+  yolo_model_key_from_choice "${choice}"
+}
+
+read_model_install_target() {
+  cat >&2 <<'EOF'
+
+可安装的模型类型：
+  1. YOLO 检测模型：负责定位水印区域
+  2. LaMa 修复模型 big-lama.pt：负责根据 mask 修补水印区域
+  0. 返回主菜单
+EOF
+  read_choice_value "请选择模型类型" "1/2/0" "1"
+}
+
+invoke_yolo_model_install() {
+  local model_key="${1:-yolo11x-watermark}"
+  local force="${2:-0}"
+  local update_config="${3:-1}"
+  local py
+
+  case "${model_key}" in
+    yolo11x-watermark|yolo11x-watermark-corzent|yolo11s) ;;
+    *) die "未知 YOLO 模型：${model_key}" ;;
+  esac
+
+  section "YOLO 模型安装"
+  py="$(venv_python 2>/dev/null || true)"
+  [[ -n "${py}" ]] || die "虚拟环境不存在，请先在菜单中选择[环境初始化]"
+  ensure_project_importable 0
+
+  local args=(-m app.utils.model_downloader download "${model_key}" --model-dir models)
+  [[ "${force}" == "1" ]] && args+=(--force)
+  info "准备下载 YOLO 模型：${model_key}"
+  PYTHONIOENCODING=utf-8 PYTHONUTF8=1 "${py}" "${args[@]}"
+
+  if [[ "${update_config}" == "1" ]]; then
+    "${py}" - "${model_key}" <<'PY'
+import sys
+from app.config.config_manager import ConfigManager
+
+model_key = sys.argv[1]
+config_path = ConfigManager.get_config_path()
+config = ConfigManager.load_config(config_path)
+if not config.has_section("YOLO"):
+    config.add_section("YOLO")
+config.set("YOLO", "model_type", model_key)
+config.set("YOLO", "auto_download_model", "yes")
+with open(config_path, "w", encoding="utf-8") as f:
+    config.write(f)
+print(f"已更新配置：{config_path} -> [YOLO].model_type={model_key}")
+PY
+  else
+    warn "已跳过配置更新，应用仍会按当前 config.ini 的 [YOLO].model_type 选择模型"
+  fi
+
+  ok "YOLO 模型安装完成：${model_key}"
+}
+
+invoke_lama_torchscript_model_install() {
+  local force="${1:-0}"
+  local update_config="${2:-1}"
+  local url target tmp py
+
+  section "LaMa 修复模型安装"
+  url="$(lama_torchscript_download_url)"
+  target="$(lama_torchscript_target_path)"
+  mkdir -p "$(dirname "${target}")"
+
+  if [[ -f "${target}" && "${force}" != "1" ]]; then
+    ok "已存在 LaMa TorchScript 模型，跳过下载：${target}"
+  else
+    tmp="${target}.download"
+    rm -f "${tmp}"
+    info "准备下载 LaMa TorchScript 模型：big-lama.pt"
+    info "下载地址：${url}"
+    if command_exists curl; then
+      curl -L --fail --output "${tmp}" "${url}"
+    elif command_exists wget; then
+      wget -O "${tmp}" "${url}"
+    else
+      die "未检测到 curl 或 wget，无法下载 big-lama.pt"
+    fi
+
+    [[ -s "${tmp}" ]] || {
+      rm -f "${tmp}"
+      die "LaMa 模型下载失败：下载文件为空"
+    }
+    mv -f "${tmp}" "${target}"
+  fi
+
+  if [[ "${update_config}" == "1" ]]; then
+    py="$(venv_python 2>/dev/null || true)"
+    if [[ -n "${py}" ]] && assert_project_importable >/dev/null 2>&1; then
+      "${py}" - <<'PY'
+from app.config.config_manager import ConfigManager
+
+config_path = ConfigManager.get_config_path()
+config = ConfigManager.load_config(config_path)
+if not config.has_section("Models"):
+    config.add_section("Models")
+config.set("Models", "lama_model_path", "models/big-lama.pt")
+with open(config_path, "w", encoding="utf-8") as f:
+    config.write(f)
+print(f"已更新配置：{config_path} -> [Models].lama_model_path=models/big-lama.pt")
+PY
+    else
+      warn "当前虚拟环境不可用，已跳过配置更新；默认路径 models/big-lama.pt 仍会被应用自动识别"
+    fi
+  else
+    warn "已跳过配置更新；默认路径 models/big-lama.pt 仍会被应用自动识别"
+  fi
+
+  ok "LaMa 修复模型安装完成：${target}"
+}
+
 show_help() {
   cat <<EOF
 智能视频水印去除工具 - 纯交互式 Bash 入口 (vwr.sh)
@@ -650,6 +795,7 @@ show_help() {
   7. 打包构建：PyInstaller 输出 release/
   8. 清理缓存与临时文件：basic / temp / all / deep
   9. CI 模式：运行质量、单测与可选门禁
+  10. 模型安装：选择并下载 YOLO 检测模型或 LaMa 修复模型
 
 提示：
   Bash 版与 PowerShell 版保持纯交互模式，不支持旧式尾参命令。
@@ -674,6 +820,7 @@ show_interactive_menu_header() {
   7. 打包构建
   8. 清理缓存与临时文件
   9. CI 模式
+  10. 模型安装
   H. 查看帮助
   0. 退出
 
@@ -708,6 +855,17 @@ invoke_interactive_setup() {
     2) INDEX_STRATEGY="unsafe-first-match" ;;
     *) INDEX_STRATEGY="unsafe-best-match" ;;
   esac
+  INSTALL_YOLO_MODEL="$(read_yes_no "是否安装 YOLO 模型" 0)"
+  if [[ "${INSTALL_YOLO_MODEL}" == "1" ]]; then
+    YOLO_MODEL="$(read_yolo_model_key)"
+    YOLO_FORCE_DOWNLOAD="$(read_yes_no "是否强制重新下载该 YOLO 模型" 0)"
+    UPDATE_YOLO_CONFIG="$(read_yes_no "是否同步写入应用配置 [YOLO].model_type" 1)"
+  fi
+  INSTALL_LAMA_TORCHSCRIPT_MODEL="$(read_yes_no "是否安装 LaMa 修复模型 big-lama.pt" 0)"
+  if [[ "${INSTALL_LAMA_TORCHSCRIPT_MODEL}" == "1" ]]; then
+    LAMA_FORCE_DOWNLOAD="$(read_yes_no "是否强制重新下载 big-lama.pt" 0)"
+    UPDATE_LAMA_CONFIG="$(read_yes_no "是否同步写入应用配置 [Models].lama_model_path" 1)"
+  fi
   invoke_setup
 }
 
@@ -797,6 +955,27 @@ invoke_interactive_ci() {
   invoke_ci
 }
 
+invoke_interactive_model_install() {
+  local target
+  target="$(read_model_install_target)"
+  case "${target}" in
+    1)
+      YOLO_MODEL="$(read_yolo_model_key)"
+      YOLO_FORCE_DOWNLOAD="$(read_yes_no "是否强制重新下载该 YOLO 模型" 0)"
+      UPDATE_YOLO_CONFIG="$(read_yes_no "是否同步写入应用配置 [YOLO].model_type" 1)"
+      invoke_yolo_model_install "${YOLO_MODEL}" "${YOLO_FORCE_DOWNLOAD}" "${UPDATE_YOLO_CONFIG}"
+      ;;
+    2)
+      LAMA_FORCE_DOWNLOAD="$(read_yes_no "是否强制重新下载 big-lama.pt" 0)"
+      UPDATE_LAMA_CONFIG="$(read_yes_no "是否同步写入应用配置 [Models].lama_model_path" 1)"
+      invoke_lama_torchscript_model_install "${LAMA_FORCE_DOWNLOAD}" "${UPDATE_LAMA_CONFIG}"
+      ;;
+    *)
+      info "已返回主菜单"
+      ;;
+  esac
+}
+
 invoke_setup() {
   section "环境配置 (setup)"
   ensure_venv "${PYTHON_SELECTOR}"
@@ -825,6 +1004,12 @@ invoke_setup() {
 
   install_editable_project 1
   app_path="$(assert_project_importable)"
+  if [[ "${INSTALL_YOLO_MODEL}" == "1" ]]; then
+    invoke_yolo_model_install "${YOLO_MODEL}" "${YOLO_FORCE_DOWNLOAD}" "${UPDATE_YOLO_CONFIG}"
+  fi
+  if [[ "${INSTALL_LAMA_TORCHSCRIPT_MODEL}" == "1" ]]; then
+    invoke_lama_torchscript_model_install "${LAMA_FORCE_DOWNLOAD}" "${UPDATE_LAMA_CONFIG}"
+  fi
   py="$(venv_python)"
   ok "Python：$("${py}" --version 2>&1)"
   ok "导入验证：${app_path}"
@@ -1385,7 +1570,7 @@ start_interactive_menu() {
   while true; do
     show_interactive_menu_header
     local choice
-    choice="$(read_choice_value "请选择操作" "1/2/3/4/5/6/7/8/9/H/0" "")"
+    choice="$(read_choice_value "请选择操作" "1/2/3/4/5/6/7/8/9/10/H/0" "")"
     case "$(printf '%s' "${choice}" | tr '[:lower:]' '[:upper:]')" in
       1) invoke_interactive_setup ;;
       2) invoke_interactive_run ;;
@@ -1396,6 +1581,7 @@ start_interactive_menu() {
       7) invoke_interactive_build ;;
       8) invoke_interactive_clean ;;
       9) invoke_interactive_ci ;;
+      10) invoke_interactive_model_install ;;
       H) show_help ;;
       0) info "已退出交互式菜单"; return 0 ;;
     esac

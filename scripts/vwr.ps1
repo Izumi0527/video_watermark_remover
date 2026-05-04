@@ -56,6 +56,13 @@ $script:TimeoutMinutes = 30
 $script:CleanScope = "all"
 $script:DefaultIndexIsBound = $false
 $script:UvExecutablePath = $null
+$script:InstallYoloModel = $false
+$script:YoloModel = ""
+$script:YoloForceDownload = $false
+$script:UpdateYoloConfig = $true
+$script:InstallLamaTorchScriptModel = $false
+$script:LamaForceDownload = $false
+$script:UpdateLamaConfig = $true
 
 function Reset-ExecutionOptions {
     $script:Arg1 = ""
@@ -90,6 +97,13 @@ function Reset-ExecutionOptions {
     $script:CleanScope = "all"
     $script:DefaultIndex = ""
     $script:DefaultIndexIsBound = $false
+    $script:InstallYoloModel = $false
+    $script:YoloModel = ""
+    $script:YoloForceDownload = $false
+    $script:UpdateYoloConfig = $true
+    $script:InstallLamaTorchScriptModel = $false
+    $script:LamaForceDownload = $false
+    $script:UpdateLamaConfig = $true
 }
 
 function Initialize-Log {
@@ -1060,6 +1074,10 @@ function Get-LamaTorchScriptDownloadUrl {
     return "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
 }
 
+function Get-LamaTorchScriptTargetPath {
+    return (Join-Path $ProjectRoot "models/big-lama.pt")
+}
+
 function Show-LamaTorchScriptHint {
     $url = Get-LamaTorchScriptDownloadUrl
     Write-Info "LaMa TorchScript 模型下载（big-lama.pt）：$url"
@@ -1403,6 +1421,7 @@ function Show-Help {
     Write-Host "  7. 打包构建：PyInstaller 输出 release/" -ForegroundColor White
     Write-Host "  8. 清理缓存与临时文件：basic / temp / all / deep" -ForegroundColor White
     Write-Host "  9. CI 模式：运行质量、单测与可选门禁" -ForegroundColor White
+    Write-Host "  10. 模型安装：选择并下载 YOLO 检测模型或 LaMa 修复模型" -ForegroundColor White
     Write-Host ""
     Write-Host "提示：" -ForegroundColor Cyan
     Write-Host "  脚本已移除旧式尾参命令，请勿再使用 .\\scripts\\vwr.ps1 help/setup/run/test ..." -ForegroundColor White
@@ -1429,6 +1448,7 @@ function Show-InteractiveMenuHeader {
     Write-Host "  7. 打包构建" -ForegroundColor White
     Write-Host "  8. 清理缓存与临时文件" -ForegroundColor White
     Write-Host "  9. CI 模式" -ForegroundColor White
+    Write-Host "  10. 模型安装" -ForegroundColor White
     Write-Host "  H. 查看帮助" -ForegroundColor White
     Write-Host "  0. 退出" -ForegroundColor White
     Write-Host ""
@@ -1505,6 +1525,184 @@ function Show-LegacyCliRemovedNotice {
     Write-Host ""
 }
 
+function Get-YoloModelKeyFromChoice {
+    param([string]$Choice)
+
+    switch ($Choice) {
+        "1" { return "yolo11x-watermark" }
+        "2" { return "yolo11x-watermark-corzent" }
+        "3" { return "yolo11s" }
+        default { return "yolo11x-watermark" }
+    }
+}
+
+function Read-YoloModelKey {
+    Write-Host ""
+    Write-Host "可安装的 YOLO 模型：" -ForegroundColor Cyan
+    Write-Host "  1. yolo11x-watermark：默认推荐，专用水印检测模型（约 114MB）" -ForegroundColor White
+    Write-Host "  2. yolo11x-watermark-corzent：corzent 微调版本（约 109MB）" -ForegroundColor White
+    Write-Host "  3. yolo11s：轻量通用模型（约 19MB，适合 CPU/快速验证）" -ForegroundColor White
+    $choice = Read-ChoiceValue -Prompt "请选择 YOLO 模型" -AllowedValues @("1", "2", "3") -DefaultValue "1"
+    return (Get-YoloModelKeyFromChoice -Choice $choice)
+}
+
+function Read-ModelInstallTarget {
+    Write-Host ""
+    Write-Host "可安装的模型类型：" -ForegroundColor Cyan
+    Write-Host "  1. YOLO 检测模型：负责定位水印区域" -ForegroundColor White
+    Write-Host "  2. LaMa 修复模型 big-lama.pt：负责根据 mask 修补水印区域" -ForegroundColor White
+    Write-Host "  0. 返回主菜单" -ForegroundColor White
+    return (Read-ChoiceValue -Prompt "请选择模型类型" -AllowedValues @("1", "2", "0") -DefaultValue "1")
+}
+
+function Invoke-YoloModelInstall {
+    param(
+        [string]$ModelKey,
+        [switch]$Force,
+        [switch]$UpdateConfig
+    )
+
+    if (-not $ModelKey) {
+        $ModelKey = "yolo11x-watermark"
+    }
+
+    $validModels = @("yolo11x-watermark", "yolo11x-watermark-corzent", "yolo11s")
+    if ($validModels -notcontains $ModelKey) {
+        throw "未知 YOLO 模型：$ModelKey。可选：$($validModels -join ', ')"
+    }
+
+    Write-Section "YOLO 模型安装"
+    Ensure-ProjectImportable
+
+    $venv = Get-VenvInfo
+    if (-not (Test-Path $venv.Python)) {
+        throw "虚拟环境不存在，请先在菜单中选择[环境初始化]。"
+    }
+
+    $downloadArgs = @("-m", "app.utils.model_downloader", "download", $ModelKey, "--model-dir", "models")
+    if ($Force) {
+        $downloadArgs += "--force"
+    }
+
+    Write-Info "准备下载 YOLO 模型：$ModelKey"
+    $oldPythonIoEncoding = $env:PYTHONIOENCODING
+    $oldPythonUtf8 = $env:PYTHONUTF8
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
+    try {
+        & $venv.Python @downloadArgs | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "YOLO 模型下载失败（退出码：$LASTEXITCODE）：$ModelKey"
+        }
+    } finally {
+        if ($null -eq $oldPythonIoEncoding) {
+            Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONIOENCODING = $oldPythonIoEncoding
+        }
+        if ($null -eq $oldPythonUtf8) {
+            Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONUTF8 = $oldPythonUtf8
+        }
+    }
+
+    if ($UpdateConfig) {
+        $pyCode = @'
+import sys
+from app.config.config_manager import ConfigManager
+
+model_key = sys.argv[1]
+config_path = ConfigManager.get_config_path()
+config = ConfigManager.load_config(config_path)
+if not config.has_section("YOLO"):
+    config.add_section("YOLO")
+config.set("YOLO", "model_type", model_key)
+config.set("YOLO", "auto_download_model", "yes")
+with open(config_path, "w", encoding="utf-8") as f:
+    config.write(f)
+print(f"已更新配置：{config_path} -> [YOLO].model_type={model_key}")
+'@
+        & $venv.Python -c $pyCode $ModelKey | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "YOLO 配置更新失败（退出码：$LASTEXITCODE）"
+        }
+    } else {
+        Write-Warn "已跳过配置更新，应用仍会按当前 config.ini 的 [YOLO].model_type 选择模型"
+    }
+
+    Write-Ok "YOLO 模型安装完成：$ModelKey"
+}
+
+function Invoke-LamaTorchScriptModelInstall {
+    param(
+        [switch]$Force,
+        [switch]$UpdateConfig
+    )
+
+    Write-Section "LaMa 修复模型安装"
+
+    $url = Get-LamaTorchScriptDownloadUrl
+    $targetPath = Get-LamaTorchScriptTargetPath
+    $targetDir = Split-Path -Parent $targetPath
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+
+    if ((Test-Path $targetPath) -and -not $Force) {
+        Write-Ok "已存在 LaMa TorchScript 模型，跳过下载：$targetPath"
+    } else {
+        $tempPath = "$targetPath.download"
+        if (Test-Path $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force
+        }
+
+        Write-Info "准备下载 LaMa TorchScript 模型：big-lama.pt"
+        Write-Info "下载地址：$url"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing
+            $downloaded = Get-Item -LiteralPath $tempPath
+            if ($downloaded.Length -le 0) {
+                throw "下载文件为空：$tempPath"
+            }
+            Move-Item -LiteralPath $tempPath -Destination $targetPath -Force
+        } catch {
+            if (Test-Path $tempPath) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+            throw "LaMa 模型下载失败：$($_.Exception.Message)"
+        }
+    }
+
+    if ($UpdateConfig) {
+        $venv = Get-VenvInfo
+        if ((Test-Path $venv.Python) -and (Test-ProjectImportable)) {
+            $pyCode = @'
+from app.config.config_manager import ConfigManager
+
+config_path = ConfigManager.get_config_path()
+config = ConfigManager.load_config(config_path)
+if not config.has_section("Models"):
+    config.add_section("Models")
+config.set("Models", "lama_model_path", "models/big-lama.pt")
+with open(config_path, "w", encoding="utf-8") as f:
+    config.write(f)
+print(f"已更新配置：{config_path} -> [Models].lama_model_path=models/big-lama.pt")
+'@
+            & $venv.Python -c $pyCode | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                throw "LaMa 配置更新失败（退出码：$LASTEXITCODE）"
+            }
+        } else {
+            Write-Warn "当前虚拟环境不可用，已跳过配置更新；默认路径 models/big-lama.pt 仍会被应用自动识别。"
+        }
+    } else {
+        Write-Warn "已跳过配置更新；默认路径 models/big-lama.pt 仍会被应用自动识别。"
+    }
+
+    Write-Ok "LaMa 修复模型安装完成：$targetPath"
+}
+
 function Invoke-InteractiveSetup {
     $script:Dev = Read-YesNo -Prompt "是否安装开发依赖" -Default $false
     $script:Python = Read-TextWithDefault -Prompt "Python 版本" -DefaultValue "3.12.10"
@@ -1542,7 +1740,40 @@ function Invoke-InteractiveSetup {
         default { "unsafe-best-match" }
     }
 
+    $script:InstallYoloModel = Read-YesNo -Prompt "是否安装 YOLO 模型" -Default $false
+    if ($script:InstallYoloModel) {
+        $script:YoloModel = Read-YoloModelKey
+        $script:YoloForceDownload = Read-YesNo -Prompt "是否强制重新下载该 YOLO 模型" -Default $false
+        $script:UpdateYoloConfig = Read-YesNo -Prompt "是否同步写入应用配置 [YOLO].model_type" -Default $true
+    }
+
+    $script:InstallLamaTorchScriptModel = Read-YesNo -Prompt "是否安装 LaMa 修复模型 big-lama.pt" -Default $false
+    if ($script:InstallLamaTorchScriptModel) {
+        $script:LamaForceDownload = Read-YesNo -Prompt "是否强制重新下载 big-lama.pt" -Default $false
+        $script:UpdateLamaConfig = Read-YesNo -Prompt "是否同步写入应用配置 [Models].lama_model_path" -Default $true
+    }
+
     Invoke-Setup
+}
+
+function Invoke-InteractiveModelInstall {
+    $target = Read-ModelInstallTarget
+    switch ($target) {
+        "1" {
+            $script:YoloModel = Read-YoloModelKey
+            $script:YoloForceDownload = Read-YesNo -Prompt "是否强制重新下载该 YOLO 模型" -Default $false
+            $script:UpdateYoloConfig = Read-YesNo -Prompt "是否同步写入应用配置 [YOLO].model_type" -Default $true
+            Invoke-YoloModelInstall -ModelKey $script:YoloModel -Force:$script:YoloForceDownload -UpdateConfig:$script:UpdateYoloConfig
+        }
+        "2" {
+            $script:LamaForceDownload = Read-YesNo -Prompt "是否强制重新下载 big-lama.pt" -Default $false
+            $script:UpdateLamaConfig = Read-YesNo -Prompt "是否同步写入应用配置 [Models].lama_model_path" -Default $true
+            Invoke-LamaTorchScriptModelInstall -Force:$script:LamaForceDownload -UpdateConfig:$script:UpdateLamaConfig
+        }
+        default {
+            Write-Info "已返回主菜单"
+        }
+    }
 }
 
 function Invoke-InteractiveRun {
@@ -1628,7 +1859,7 @@ function Start-InteractiveMenu {
     while ($true) {
         Reset-ExecutionOptions
         Show-InteractiveMenuHeader
-        $choice = Read-ChoiceValue -Prompt "请输入选项" -AllowedValues @("1", "2", "3", "4", "5", "6", "7", "8", "9", "H", "0") -DefaultValue "0"
+        $choice = Read-ChoiceValue -Prompt "请输入选项" -AllowedValues @("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "H", "0") -DefaultValue "0"
 
         switch ($choice.ToUpperInvariant()) {
             "1" { Invoke-InteractiveSetup }
@@ -1640,6 +1871,7 @@ function Start-InteractiveMenu {
             "7" { Invoke-InteractiveBuild }
             "8" { Invoke-InteractiveClean }
             "9" { Invoke-InteractiveCI }
+            "10" { Invoke-InteractiveModelInstall }
             "H" { Show-Help }
             "0" {
                 Write-Info "已退出交互式菜单"
@@ -1675,6 +1907,12 @@ function Invoke-Setup {
 
     Install-EditableProject -NoDeps
     $appPath = Assert-ProjectImportable
+    if ($InstallYoloModel) {
+        Invoke-YoloModelInstall -ModelKey $YoloModel -Force:$YoloForceDownload -UpdateConfig:$UpdateYoloConfig
+    }
+    if ($InstallLamaTorchScriptModel) {
+        Invoke-LamaTorchScriptModelInstall -Force:$LamaForceDownload -UpdateConfig:$UpdateLamaConfig
+    }
 
     $venv = Get-VenvInfo
     $pyVer = & $venv.Python --version 2>&1

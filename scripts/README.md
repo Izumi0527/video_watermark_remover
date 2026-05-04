@@ -32,6 +32,7 @@ bash scripts/vwr.sh
 7. 打包构建
 8. 清理缓存与临时文件
 9. CI 模式
+10. 模型安装
 H. 查看帮助
 0. 退出
 
@@ -50,6 +51,28 @@ H. 查看帮助
 - Torch 后端
 - 索引源（自动 / 清华镜像 / 自定义）
 - 索引策略
+- 是否安装 YOLO 模型
+- 是否安装 LaMa 修复模型 `big-lama.pt`
+
+若选择安装 YOLO 模型，脚本会继续询问：
+
+- 模型类型：`yolo11x-watermark / yolo11x-watermark-corzent / yolo11s`
+- 是否强制重新下载
+- 是否同步写入应用配置 `[YOLO].model_type`
+
+若选择安装 LaMa 修复模型，脚本会继续询问：
+
+- 是否强制重新下载 `big-lama.pt`
+- 是否同步写入应用配置 `[Models].lama_model_path`
+
+### 模型安装
+
+在菜单中选择 `10. 模型安装`，可以独立下载或切换检测和修复模型：
+
+- `yolo11x-watermark`：默认推荐，专用水印检测模型（约 114MB）
+- `yolo11x-watermark-corzent`：corzent 微调版本（约 109MB）
+- `yolo11s`：轻量通用模型（约 19MB）
+- `big-lama.pt`：LaMa TorchScript 修复模型，默认下载到 `models/big-lama.pt`
 
 ### 启动程序
 
