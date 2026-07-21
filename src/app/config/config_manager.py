@@ -59,15 +59,9 @@ class ConfigManager:
     Manages loading and saving application configuration using configparser.
     """
 
-    # 兼容 Phase3 测试所需的默认值（小写 section），同时保留现有大写 section 以兼容现有代码
-    _DEFAULTS: Dict[str, Dict[str, str]] = {
+    # 默认值只维护大写 section 一份；小写镜像（Phase3 测试兼容）由下方程序化生成
+    _BASE_DEFAULTS: Dict[str, Dict[str, str]] = {
         "Paths": {
-            "ffmpeg_path": "ffmpeg",
-            "default_model_dir": "./models",
-            "last_input_dir": "",
-            "last_output_dir": "",
-        },
-        "paths": {
             "ffmpeg_path": "ffmpeg",
             "default_model_dir": "./models",
             "last_input_dir": "",
@@ -81,18 +75,7 @@ class ConfigManager:
             "default_detection_sensitivity": "0.5",
             "default_inpainting_method": "auto",
         },
-        "processing": {
-            "default_output_suffix": "_processed",
-            "auto_start_processing": "no",
-            "gpu_acceleration": "auto",
-            "default_detection_sensitivity": "0.5",
-            "default_inpainting_method": "auto",
-        },
         "Logging": {
-            "log_level": "INFO",
-            "log_file_path": os.path.join(CONFIG_DIR, "app.log"),
-        },
-        "logging": {
             "log_level": "INFO",
             "log_file_path": os.path.join(CONFIG_DIR, "app.log"),
         },
@@ -101,21 +84,8 @@ class ConfigManager:
             "inpainting_model_path": "",
             "default_confidence_threshold": "0.5",
         },
-        "models": {
-            "detection_model_path": "",
-            "inpainting_model_path": "",
-            "default_confidence_threshold": "0.5",
-        },
         "Advanced": {},
-        "advanced": {},
         "Batch": {
-            "max_concurrent_files": "1",
-            "auto_retry_failed": "yes",
-            "max_retry_count": "3",
-            "delete_temp_files": "yes",
-            "show_progress_details": "yes",
-        },
-        "batch": {
             "max_concurrent_files": "1",
             "auto_retry_failed": "yes",
             "max_retry_count": "3",
@@ -144,21 +114,12 @@ class ConfigManager:
             "mask_dilate_iterations": "0",
             "mask_close_kernel": "5",
         },
-        "yolo": {
-            "model_type": "yolo11x-watermark",
-            "custom_model_path": "",
-            "conf_threshold": "0.25",
-            "iou_threshold": "0.45",
-            "batch_size": "8",
-            "auto_download_model": "yes",
-            "model_download_source": "huggingface",
-            "mask_padding_px": "4",
-            "mask_padding_ratio": "0.02",
-            "mask_padding_max": "24",
-            "mask_erode_iterations": "0",
-            "mask_dilate_iterations": "0",
-            "mask_close_kernel": "5",
-        },
+    }
+
+    _DEFAULTS: Dict[str, Dict[str, str]] = {
+        key: dict(options)
+        for section, options in _BASE_DEFAULTS.items()
+        for key in (section, section.lower())
     }
 
     @staticmethod
@@ -349,39 +310,3 @@ class ConfigManager:
             config.add_section(section)
         config.set(section, option, str(value))  # Values must be strings for configparser
         return ConfigManager.save_config(config, config_path)
-
-
-if __name__ == "__main__":
-    # Example usage:
-    logger.info(f"Default config path: {ConfigManager.get_config_path()}")
-
-    # Load (or create if not exists)
-    my_config = ConfigManager.load_config()
-
-    # Get a value
-    ffmpeg_path = my_config.get("Paths", "ffmpeg_path", fallback="ffmpeg_not_found")
-    logger.info(f"FFmpeg path from config: {ffmpeg_path}")
-
-    log_level = my_config.get("Logging", "log_level")
-    logger.info(f"Log level: {log_level}")
-
-    # Update a value
-    # ConfigManager.update_config_value('Paths', 'last_input_dir', '/new/path/to/videos')
-    # updated_config = ConfigManager.load_config() # Reload to see change
-    # logger.info(f"Updated last_input_dir: {updated_config.get('Paths', 'last_input_dir')}")
-
-    # Ensure the default config file (default_config.ini in project's configs
-    # dir) is also created for reference
-    project_configs_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs"
-    )
-    reference_default_config_path = os.path.join(project_configs_dir, "default_config.ini")
-    if not os.path.exists(reference_default_config_path):
-        logger.info(f"Creating reference default_config.ini at {reference_default_config_path}")
-        ConfigManager._create_default_config(reference_default_config_path)
-    else:
-        logger.info(
-            f"Reference default_config.ini already exists at {reference_default_config_path}"
-        )
-
-    logger.info("config_manager.py executed directly (for testing purposes).")

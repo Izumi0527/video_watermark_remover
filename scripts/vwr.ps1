@@ -1165,30 +1165,6 @@ function Resolve-LamaStartupAssetRef {
     }
 }
 
-function Resolve-LegacyInpaintingStartupAssetRef {
-    param([string]$ConfigPath)
-
-    if ($env:VWR_INPAINTING_MODEL_PATH -and $env:VWR_INPAINTING_MODEL_PATH.Trim()) {
-        return @{
-            Path = $env:VWR_INPAINTING_MODEL_PATH.Trim()
-            Source = "VWR_INPAINTING_MODEL_PATH"
-        }
-    }
-
-    $configValue = Resolve-ConfigOptionValue -ConfigPath $ConfigPath -OptionNames @("inpainting_model_path")
-    if ($configValue.Value) {
-        return @{
-            Path = $configValue.Value
-            Source = "config:$($configValue.OptionName)"
-        }
-    }
-
-    return @{
-        Path = ""
-        Source = ""
-    }
-}
-
 function Resolve-LamaTorchScriptAssetStatus {
     param([string]$AssetRef)
 
@@ -1266,44 +1242,6 @@ function Resolve-LamaTorchScriptAssetStatus {
     }
 }
 
-function Resolve-LegacyInpaintingAssetStatus {
-    param([string]$AssetRef)
-
-    if (-not $AssetRef -or -not $AssetRef.Trim()) {
-        return @{
-            Status = "missing"
-            ResolvedPath = ""
-        }
-    }
-
-    if (-not (Test-Path $AssetRef)) {
-        return @{
-            Status = "path_missing"
-            ResolvedPath = $AssetRef
-        }
-    }
-
-    $item = Get-Item -LiteralPath $AssetRef -ErrorAction SilentlyContinue
-    if ($null -eq $item) {
-        return @{
-            Status = "path_missing"
-            ResolvedPath = $AssetRef
-        }
-    }
-
-    if ($item.PSIsContainer) {
-        return @{
-            Status = "directory_path"
-            ResolvedPath = $item.FullName
-        }
-    }
-
-    return @{
-        Status = "ready"
-        ResolvedPath = $item.FullName
-    }
-}
-
 function Show-StartupInpaintingPrecheck {
     param([string]$ConfigPath)
 
@@ -1332,25 +1270,6 @@ function Show-StartupInpaintingPrecheck {
         default {
             Write-Info "LaMa 启动前检查：未检测到可用的 TorchScript 模型，如需启用 LaMa 深度修复，请先准备 big-lama.pt。"
             Show-LamaTorchScriptHint
-        }
-    }
-
-    $legacyRef = Resolve-LegacyInpaintingStartupAssetRef -ConfigPath $ConfigPath
-    $legacyStatus = Resolve-LegacyInpaintingAssetStatus -AssetRef $legacyRef.Path
-    switch ($legacyStatus.Status) {
-        "ready" {
-            Write-Ok "旧 GPU U-Net 启动前检查：已发现候选权重：$($legacyStatus.ResolvedPath)"
-        }
-        "path_missing" {
-            Write-Warn "旧 GPU U-Net 启动前检查：$($legacyRef.Source) 指向的路径不存在：$($legacyStatus.ResolvedPath)"
-            Write-Info '如需启用旧 GPU U-Net，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
-        }
-        "directory_path" {
-            Write-Warn "旧 GPU U-Net 启动前检查：当前路径是目录，请改为权重文件路径：$($legacyStatus.ResolvedPath)"
-            Write-Info '如需启用旧 GPU U-Net，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
-        }
-        default {
-            Write-Info '旧 GPU U-Net 启动前检查：未检测到候选权重；如需启用，可设置：$env:VWR_INPAINTING_MODEL_PATH="C:/path/to/model.pth"'
         }
     }
 }

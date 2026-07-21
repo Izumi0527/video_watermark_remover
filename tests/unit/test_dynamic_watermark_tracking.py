@@ -27,39 +27,6 @@ def _install_ai_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     torch_module.device = lambda name: name
     monkeypatch.setitem(sys.modules, "torch", torch_module)
 
-    dl_inpainter_module = types.ModuleType("app.core.ai.dl_inpainter")
-    dl_inpainter_module.last_init_kwargs = None
-    dl_inpainter_module.last_load_model_path = None
-    dl_inpainter_module.next_load_model_result = True
-    dl_inpainter_module.last_inpaint_kwargs = None
-
-    class _DummyDeepLearningInpainter:
-        def __init__(self, *args, **kwargs):
-            dl_inpainter_module.last_init_kwargs = dict(kwargs)
-            self.last_profile_used = None
-            self.last_retry_info = None
-
-        def load_model(self, model_path=None):
-            dl_inpainter_module.last_load_model_path = model_path
-            return dl_inpainter_module.next_load_model_result
-
-        def inpaint_frame(self, frame, mask, radius=3, quality_level=3, profile=None):
-            dl_inpainter_module.last_inpaint_kwargs = {
-                "radius": radius,
-                "quality_level": quality_level,
-                "profile": profile,
-            }
-            self.last_profile_used = {
-                "requested_radius": radius,
-                "quality_level": quality_level,
-                "mask_expand_px": radius + quality_level,
-                "mask_feather_px": quality_level,
-            }
-            return frame.copy()
-
-    dl_inpainter_module.DeepLearningInpainter = _DummyDeepLearningInpainter
-    monkeypatch.setitem(sys.modules, "app.core.ai.dl_inpainter", dl_inpainter_module)
-
     image_inpainter_module = types.ModuleType("app.core.ai.image_inpainter")
 
     class _DummyImageInpainter:
@@ -200,7 +167,6 @@ def _build_lightweight_ai_handler(detector: _DummyDetector, ai_handler_cls: type
     handler.last_effective_inpaint_radius = None
     handler.last_gpu_inpainting_runtime_error = None
     handler.device = "cpu"
-    handler.dl_inpainter = None
     handler.watermark_detector = detector
     handler.inpaint_frame = lambda frame, _mask: frame.copy()
     return handler
@@ -228,11 +194,75 @@ def _create_far_shifted_detected_mask() -> np.ndarray:
     return mask
 
 
-def _build_test_config(inpainting_model_path: str = "") -> configparser.ConfigParser:
-    """构造仅包含 GPU 修复权重路径的测试配置。"""
+def _build_test_config(lama_model_path: str = "") -> configparser.ConfigParser:
+    """构造仅包含 LaMa 模型路径的测试配置。"""
     config = configparser.ConfigParser()
-    config["Models"] = {"inpainting_model_path": inpainting_model_path}
+    config["Models"] = {"lama_model_path": lama_model_path}
     return config
+
+
+class _FakeDeepBackend:
+    """LaMa 深度后端桩：记录调用并通过 trace 回传观测字段。"""
+
+    backend_id = "lama"
+
+    def __init__(self, model_path=None):
+        self.model_path = model_path
+        self.loaded_model_path = None
+        self.loaded_asset_ref = None
+        self.last_inpaint_kwargs = None
+        self.last_runtime_profile = None
+        self.inpaint_frame_impl = None
+        self.extra_trace = {}
+        self._trace = {}
+
+    def load(self):
+        if not self.model_path:
+            self._trace = {"load_failure_reason": "missing_lama_model_path"}
+            return False
+        self.loaded_model_path = self.model_path
+        self.loaded_asset_ref = self.model_path
+        return True
+
+    def set_runtime_profile(self, profile):
+        self.last_runtime_profile = dict(profile)
+
+    def inpaint_frame(self, frame, mask, inpaint_radius=3, quality_level=3, opencv_method="auto"):
+        self.last_inpaint_kwargs = {
+            "radius": inpaint_radius,
+            "quality_level": quality_level,
+        }
+        if self.inpaint_frame_impl is not None:
+            return self.inpaint_frame_impl(frame, mask, inpaint_radius, quality_level)
+        self._trace = {
+            "inpainting_backend": "lama",
+            "inpainting_method": "lama",
+            "gpu_inpainting_profile": {
+                "requested_radius": inpaint_radius,
+                "quality_level": quality_level,
+            },
+            **self.extra_trace,
+        }
+        return frame.copy()
+
+    def get_last_trace(self):
+        return dict(self._trace)
+
+
+def _install_fake_deep_backend_factory(monkeypatch: pytest.MonkeyPatch, created: dict) -> None:
+    """把 ai_handler 的深度后端工厂替换为 LaMa 桩，OpenCV 请求仍走真实工厂。"""
+    ai_handler_module = sys.modules["app.core.ai.ai_handler"]
+    real_factory = ai_handler_module.create_inpainting_backend
+
+    def fake_factory(requested_backend, **kwargs):
+        if str(requested_backend).strip().lower() == "lama":
+            backend = _FakeDeepBackend(model_path=kwargs.get("model_path"))
+            created["backend"] = backend
+            created["model_path"] = kwargs.get("model_path")
+            return backend
+        return real_factory(requested_backend, **kwargs)
+
+    monkeypatch.setattr(ai_handler_module, "create_inpainting_backend", fake_factory)
 
 
 def test_ai_params_builder_auto_mode_ignores_manual_selections(
@@ -635,19 +665,19 @@ def test_ai_handler_higher_quality_strengthens_postprocess_profile(
     assert low_quality["enhance_contrast"] < high_quality["enhance_contrast"]
 
 
-def test_ai_handler_passes_configured_inpainting_model_path_to_dl_inpainter(
+def test_ai_handler_passes_configured_lama_model_path_to_deep_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """GPU 修复启用时应把配置中的权重路径真实传给深度学习修复器。"""
+    """GPU 修复启用时应把配置中的模型路径真实传给深度修复后端。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
-    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -655,22 +685,24 @@ def test_ai_handler_passes_configured_inpainting_model_path_to_dl_inpainter(
             "device": "cuda",
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
 
     assert handler.load_models() is True
-    assert dl_inpainter_module.last_load_model_path == str(model_path)
+    assert created["model_path"] == str(model_path)
     assert handler.use_gpu_inpainting is True
-    assert handler.dl_inpainter is not None
+    assert handler.deep_inpainting_backend is not None
+    assert handler.loaded_inpainting_model_path == str(model_path)
 
 
-def test_ai_handler_falls_back_to_opencv_when_inpainting_model_path_missing(
+def test_ai_handler_falls_back_to_opencv_when_lama_model_path_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """未配置 GPU 修复权重时应明确降级到 OpenCV，而不是继续走随机初始化成功路径。"""
+    """未配置 LaMa 模型路径时应明确降级到 OpenCV。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
-    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
     torch_module.cuda.is_available = lambda: True
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(""),
         ai_params={
@@ -678,6 +710,10 @@ def test_ai_handler_falls_back_to_opencv_when_inpainting_model_path_missing(
             "device": "cuda",
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
+    # 仓库可能存在 models/big-lama.pt 候选文件，显式清空以模拟"未配置"场景
+    handler.configured_lama_model_path = None
+    handler.configured_inpainting_asset_ref = None
     captured = {}
 
     def fake_inpaint(frame, mask, method=None, radius=3, quality_level=3):
@@ -687,7 +723,6 @@ def test_ai_handler_falls_back_to_opencv_when_inpainting_model_path_missing(
     handler.image_inpainter.inpaint_frame = fake_inpaint
 
     assert handler.load_models() is True
-    assert dl_inpainter_module.last_load_model_path is None
     assert handler.use_gpu_inpainting is False
 
     _, info = handler.process_frame(
@@ -701,22 +736,22 @@ def test_ai_handler_falls_back_to_opencv_when_inpainting_model_path_missing(
     assert captured["method"] == "auto"
     assert info["inpainting_backend"] == "opencv"
     assert info["gpu_inpainting_requested"] is True
-    assert info["gpu_inpainting_fallback_reason"] == "missing_inpainting_model_path"
+    assert info["gpu_inpainting_fallback_reason"] == "missing_lama_model_path"
 
 
-def test_ai_handler_passes_gpu_profile_params_to_dl_inpainter(
+def test_ai_handler_passes_gpu_profile_params_to_deep_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """GPU 路径启用时应把修复半径和质量真实传给深度学习修复器。"""
+    """GPU 路径启用时应把修复半径和质量真实传给深度修复后端。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
-    dl_inpainter_module = sys.modules["app.core.ai.dl_inpainter"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -726,6 +761,7 @@ def test_ai_handler_passes_gpu_profile_params_to_dl_inpainter(
             "inpaint_radius": 7,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
 
     assert handler.load_models() is True
 
@@ -737,14 +773,15 @@ def test_ai_handler_passes_gpu_profile_params_to_dl_inpainter(
         },
     )
 
-    assert dl_inpainter_module.last_inpaint_kwargs["radius"] == 7
-    assert dl_inpainter_module.last_inpaint_kwargs["quality_level"] == 5
-    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    backend = created["backend"]
+    assert backend.last_inpaint_kwargs["radius"] == 7
+    assert backend.last_inpaint_kwargs["quality_level"] == 5
+    assert info["inpainting_backend"] == "lama"
     assert info["gpu_inpainting_profile"]["requested_radius"] == 7
     assert info["gpu_inpainting_profile"]["quality_level"] == 5
 
 
-def test_ai_handler_falls_back_to_opencv_when_dl_inpainting_fails(
+def test_ai_handler_falls_back_to_opencv_when_deep_inpainting_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
@@ -753,9 +790,10 @@ def test_ai_handler_falls_back_to_opencv_when_dl_inpainting_fails(
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -765,12 +803,13 @@ def test_ai_handler_falls_back_to_opencv_when_dl_inpainting_fails(
             "inpaint_radius": 6,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
-    def raise_inpaint_error(frame, mask, radius=3, quality_level=3, profile=None):
+    def raise_inpaint_error(frame, mask, radius, quality_level):
         raise RuntimeError("gpu inpaint failed")
 
-    handler.dl_inpainter.inpaint_frame = raise_inpaint_error
+    created["backend"].inpaint_frame_impl = raise_inpaint_error
     captured = {}
 
     def fallback_inpaint(frame, mask, method=None, radius=3, quality_level=3):
@@ -801,7 +840,7 @@ def test_ai_handler_falls_back_to_opencv_when_dl_inpainting_fails(
     assert info["inpainting_backend"] == "opencv"
     assert info["inpainting_method"] == "telea"
     assert info["gpu_inpainting_profile"] is None
-    assert info["gpu_inpainting_fallback_reason"] == "gpu_runtime_exception"
+    assert info["gpu_inpainting_fallback_reason"] == "lama_runtime_exception"
     assert "gpu inpaint failed" in info["gpu_inpainting_runtime_error"]
     assert info["loaded_inpainting_model_path"] == str(model_path)
     assert info["quality_level"] == 4
@@ -814,14 +853,15 @@ def test_ai_handler_reports_effective_quality_level_from_gpu_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """GPU 路径成功时，应把 profile 中的实际质量等级写入 processing_info。"""
+    """GPU 路径成功时，应把 trace 中的实际质量等级写入 processing_info。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -831,18 +871,13 @@ def test_ai_handler_reports_effective_quality_level_from_gpu_profile(
             "inpaint_radius": 6,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
-    def fake_inpaint(frame, mask, radius=3, quality_level=3, profile=None):
-        handler.dl_inpainter.last_profile_used = {
-            "requested_radius": radius,
-            "quality_level": 5,
-            "mask_expand_px": 10,
-            "mask_feather_px": 6,
-        }
-        return frame.copy()
-
-    handler.dl_inpainter.inpaint_frame = fake_inpaint
+    created["backend"].extra_trace = {
+        "effective_quality_level": 5,
+        "effective_inpaint_radius": 6,
+    }
 
     _, info = handler.process_frame(
         _create_test_frame(),
@@ -856,7 +891,7 @@ def test_ai_handler_reports_effective_quality_level_from_gpu_profile(
     assert info["requested_quality_level"] == 9
     assert info["effective_quality_level"] == 5
     assert info["effective_inpaint_radius"] == 6
-    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    assert info["inpainting_backend"] == "lama"
 
 
 def test_ai_handler_reports_gpu_oom_retry_info(
@@ -868,9 +903,10 @@ def test_ai_handler_reports_gpu_oom_retry_info(
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -880,21 +916,17 @@ def test_ai_handler_reports_gpu_oom_retry_info(
             "inpaint_radius": 7,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
-    def fake_inpaint(frame, mask, radius=3, quality_level=3, profile=None):
-        handler.dl_inpainter.last_profile_used = {
-            "requested_radius": radius,
-            "quality_level": quality_level,
-            "mask_expand_px": 8,
-            "mask_feather_px": 5,
-            "blend_ratio": 0.72,
+    created["backend"].extra_trace = {
+        "gpu_inpainting_profile": {
+            "requested_radius": 7,
+            "quality_level": 5,
             "resize_limit": 768,
-        }
-        handler.dl_inpainter.last_retry_info = {"applied": True, "count": 1, "reason": "oom"}
-        return frame.copy()
-
-    handler.dl_inpainter.inpaint_frame = fake_inpaint
+        },
+        "gpu_inpainting_retry": {"applied": True, "count": 1, "reason": "oom"},
+    }
 
     _, info = handler.process_frame(
         _create_test_frame(),
@@ -904,7 +936,7 @@ def test_ai_handler_reports_gpu_oom_retry_info(
         },
     )
 
-    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    assert info["inpainting_backend"] == "lama"
     assert info["gpu_inpainting_profile"]["resize_limit"] == 768
     assert info["gpu_inpainting_retry"] == {"applied": True, "count": 1, "reason": "oom"}
 

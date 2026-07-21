@@ -15,6 +15,7 @@ import pytest
 from tests.unit.test_dynamic_watermark_tracking import (
     _build_test_config,
     _create_test_frame,
+    _install_fake_deep_backend_factory,
     _load_test_targets,
 )
 
@@ -70,38 +71,40 @@ def test_processing_info_reports_requested_and_actual_backend_for_opencv(
     assert info["gpu_inpainting_fallback_reason"] is None
 
 
-def test_processing_info_reports_backend_trace_when_legacy_unet_falls_back(
+def test_processing_info_reports_backend_trace_when_lama_falls_back(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """legacy U-Net 运行期降级时，应记录 requested/actual/fallback 三元组。"""
+    """LaMa 运行期降级时，应记录 requested/actual/fallback 三元组。"""
     ai_handler_cls, _ = _load_test_targets(monkeypatch)
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
-            "requested_inpainting_backend": "legacy_unet",
+            "requested_inpainting_backend": "lama",
             "use_gpu_inpainting": True,
             "device": "cuda",
             "quality_level": 4,
             "inpaint_radius": 6,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
-    def raise_gpu_error(frame, mask, radius=3, quality_level=3, profile=None):
-        raise RuntimeError("legacy unet runtime failed")
+    def raise_gpu_error(frame, mask, radius, quality_level):
+        raise RuntimeError("lama runtime failed")
 
     def fallback_inpaint(frame, mask, method=None, radius=3, quality_level=3):
         handler.image_inpainter.last_method_used = "telea"
         return frame.copy()
 
-    handler.dl_inpainter.inpaint_frame = raise_gpu_error
+    created["backend"].inpaint_frame_impl = raise_gpu_error
     handler.image_inpainter.inpaint_frame = fallback_inpaint
 
     _, info = handler.process_frame(
@@ -112,8 +115,8 @@ def test_processing_info_reports_backend_trace_when_legacy_unet_falls_back(
         },
     )
 
-    assert info["requested_inpainting_backend"] == "legacy_unet"
+    assert info["requested_inpainting_backend"] == "lama"
     assert info["actual_inpainting_backend"] == "opencv"
     assert info["inpainting_backend"] == "opencv"
-    assert info["inpainting_fallback_reason"] == "gpu_runtime_exception"
-    assert info["gpu_inpainting_fallback_reason"] == "gpu_runtime_exception"
+    assert info["inpainting_fallback_reason"] == "lama_runtime_exception"
+    assert info["gpu_inpainting_fallback_reason"] == "lama_runtime_exception"

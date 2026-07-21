@@ -103,82 +103,7 @@ class AIHandler:
         self._mask_shrink_kernel_size = 0
 
         self.enable_mask_tracking = bool(self.ai_params.get("enable_mask_tracking", False))
-        raw_tracking_interval = self.ai_params.get("mask_tracking_interval", 3)
-        try:
-            self.mask_tracking_interval = max(1, int(raw_tracking_interval or 1))
-        except (TypeError, ValueError):
-            self.mask_tracking_interval = 3
-        raw_tracking_warmup = self.ai_params.get("mask_tracking_warmup_frames", 2)
-        try:
-            self.mask_tracking_warmup_frames = max(0, int(raw_tracking_warmup or 0))
-        except (TypeError, ValueError):
-            self.mask_tracking_warmup_frames = 2
-        raw_tracking_missing = self.ai_params.get(
-            "mask_tracking_max_missing_detections",
-            self.ai_params.get("mask_tracking_max_missed_detections", 1),
-        )
-        try:
-            self.mask_tracking_max_missing_detections = max(0, int(raw_tracking_missing or 0))
-        except (TypeError, ValueError):
-            self.mask_tracking_max_missing_detections = 1
-        raw_tracking_motion_iou = self.ai_params.get(
-            "mask_tracking_motion_iou_threshold",
-            self.ai_params.get(
-                "mask_tracking_scene_change_iou_threshold",
-                self.ai_params.get("mask_tracking_scene_shift_iou_threshold", 0.2),
-            ),
-        )
-        try:
-            self.mask_tracking_motion_iou_threshold = max(
-                0.0,
-                min(1.0, float(raw_tracking_motion_iou)),
-            )
-        except (TypeError, ValueError):
-            self.mask_tracking_motion_iou_threshold = 0.2
-        raw_tracking_confirmation = self.ai_params.get(
-            "mask_tracking_scene_shift_confirmation_frames",
-            1,
-        )
-        try:
-            self.mask_tracking_scene_shift_confirmation_frames = max(
-                1,
-                int(raw_tracking_confirmation or 1),
-            )
-        except (TypeError, ValueError):
-            self.mask_tracking_scene_shift_confirmation_frames = 1
-        raw_tracking_missing = self.ai_params.get(
-            "mask_tracking_max_missing_detections",
-            self.ai_params.get("mask_tracking_max_missed_detections", 1),
-        )
-        try:
-            self.mask_tracking_max_missing_detections = max(0, int(raw_tracking_missing or 0))
-        except (TypeError, ValueError):
-            self.mask_tracking_max_missing_detections = 1
-        raw_tracking_shift_iou = self.ai_params.get(
-            "mask_tracking_scene_shift_iou_threshold",
-            self.ai_params.get(
-                "mask_tracking_motion_iou_threshold",
-                self.ai_params.get("mask_tracking_scene_change_iou_threshold", 0.2),
-            ),
-        )
-        try:
-            self.mask_tracking_motion_iou_threshold = max(
-                0.0,
-                float(raw_tracking_shift_iou or 0.0),
-            )
-        except (TypeError, ValueError):
-            self.mask_tracking_motion_iou_threshold = 0.2
-        raw_tracking_confirmation = self.ai_params.get(
-            "mask_tracking_scene_shift_confirmation_frames",
-            1,
-        )
-        try:
-            self.mask_tracking_scene_shift_confirmation_frames = max(
-                0,
-                int(raw_tracking_confirmation or 0),
-            )
-        except (TypeError, ValueError):
-            self.mask_tracking_scene_shift_confirmation_frames = 1
+        self._parse_mask_tracking_params()
 
         self.enable_mixed_inpainting = bool(self.ai_params.get("enable_mixed_inpainting", False))
         raw_mixed_ratio = self.ai_params.get("mixed_inpainting_area_ratio_threshold", 0.003)
@@ -195,7 +120,6 @@ class AIHandler:
         # 初始化检测器和修复器
         self.watermark_detector: Optional[YOLOWatermarkDetector] = None  # 延迟初始化,需要先设置 device
         self.image_inpainter = ImageInpainter(config)
-        self.dl_inpainter = None  # 深度学习 inpainter (GPU 加速)
         self.opencv_inpainting_backend = None
         self.deep_inpainting_backend = None
         self.last_inpainting_method_used: Optional[str] = None
@@ -270,6 +194,48 @@ class AIHandler:
             f"gpu_memory_limit_mb={self.gpu_memory_limit_mb}, "
             f"configured_inpainting_model_path={self.configured_inpainting_model_path}, "
             f"configured_inpainting_asset_ref={self.configured_inpainting_asset_ref}"
+        )
+
+    @staticmethod
+    def _coerce_int_param(raw: Any, default: int, minimum: int) -> int:
+        """把可能非法的参数值收敛为带下限的整数，失败时回退默认值。"""
+        try:
+            return max(minimum, int(raw or 0))
+        except (TypeError, ValueError):
+            return default
+
+    def _parse_mask_tracking_params(self) -> None:
+        """解析掩码跟踪相关参数（含旧键名回退），非法值回退到默认。"""
+        self.mask_tracking_interval = self._coerce_int_param(
+            self.ai_params.get("mask_tracking_interval", 3), default=3, minimum=1
+        )
+        self.mask_tracking_warmup_frames = self._coerce_int_param(
+            self.ai_params.get("mask_tracking_warmup_frames", 2), default=2, minimum=0
+        )
+        raw_missing = self.ai_params.get(
+            "mask_tracking_max_missing_detections",
+            self.ai_params.get("mask_tracking_max_missed_detections", 1),
+        )
+        self.mask_tracking_max_missing_detections = self._coerce_int_param(
+            raw_missing, default=1, minimum=0
+        )
+
+        raw_shift_iou = self.ai_params.get(
+            "mask_tracking_scene_shift_iou_threshold",
+            self.ai_params.get(
+                "mask_tracking_motion_iou_threshold",
+                self.ai_params.get("mask_tracking_scene_change_iou_threshold", 0.2),
+            ),
+        )
+        try:
+            self.mask_tracking_motion_iou_threshold = max(0.0, float(raw_shift_iou or 0.0))
+        except (TypeError, ValueError):
+            self.mask_tracking_motion_iou_threshold = 0.2
+
+        self.mask_tracking_scene_shift_confirmation_frames = self._coerce_int_param(
+            self.ai_params.get("mask_tracking_scene_shift_confirmation_frames", 1),
+            default=1,
+            minimum=0,
         )
 
     def _setup_device(self):
@@ -361,7 +327,7 @@ class AIHandler:
 
         # 如果切换到GPU且启用GPU修复，需要重新加载深度学习修复器
         if self.device == "cuda" and self.requested_gpu_inpainting:
-            if self.dl_inpainter is None:
+            if self.deep_inpainting_backend is None:
                 try:
                     self.logger.info("Loading GPU deep learning inpainter after device switch...")
                     self._load_gpu_inpainter_or_fallback()
@@ -922,7 +888,7 @@ class AIHandler:
             "processing_time": 0,
             "preprocessing_applied": [],
             "postprocessing_applied": [],
-            "gpu_inpainting_requested": requested_backend in {"legacy_unet", "lama", "mat"},
+            "gpu_inpainting_requested": requested_backend in {"lama", "mat"},
             "gpu_inpainting_fallback_reason": self.gpu_inpainting_fallback_reason,
             "configured_inpainting_asset_ref": getattr(
                 self, "configured_inpainting_asset_ref", None
@@ -1517,7 +1483,6 @@ class AIHandler:
             str(getattr(self.deep_inpainting_backend, "backend_id", "") or "").strip().lower()
         )
         label_mapping = {
-            "legacy_unet": "GPU Deep Learning (U-Net)",
             "lama": "LaMa TorchScript",
             "mat": "MAT",
         }
@@ -1526,7 +1491,6 @@ class AIHandler:
     def _disable_gpu_inpainting(self, reason: str, clear_loaded_model_path: bool = True) -> None:
         """禁用 GPU 修复，并记录明确的降级原因。"""
         self.use_gpu_inpainting = False
-        self.dl_inpainter = None
         self.deep_inpainting_backend = None
         if clear_loaded_model_path:
             self.loaded_inpainting_model_path = None
@@ -1539,10 +1503,9 @@ class AIHandler:
             self._derive_requested_inpainting_backend(),
             config=self.config,
             torch_device=self.torch_device,
-            dl_inpainter=self.dl_inpainter,
             model_path=self.configured_inpainting_asset_ref,
         )
-        if getattr(self.deep_inpainting_backend, "backend_id", None) not in {"legacy_unet", "lama"}:
+        if getattr(self.deep_inpainting_backend, "backend_id", None) != "lama":
             self.logger.warning(
                 "Unsupported deep inpainting backend requested; falling back to OpenCV"
             )
@@ -1550,7 +1513,6 @@ class AIHandler:
             return False
 
         if self.deep_inpainting_backend.load():
-            self.dl_inpainter = getattr(self.deep_inpainting_backend, "dl_inpainter", None)
             self.use_gpu_inpainting = True
             self.loaded_inpainting_model_path = getattr(
                 self.deep_inpainting_backend,
@@ -1665,13 +1627,6 @@ class AIHandler:
             "quality_level": int(self.quality_level),
         }
 
-        if self.dl_inpainter is not None:
-            set_budget = getattr(self.dl_inpainter, "set_runtime_memory_budget", None)
-            if callable(set_budget):
-                set_budget(memory_budget_mb)
-            else:
-                setattr(self.dl_inpainter, "memory_budget_mb", memory_budget_mb)
-
         if self.deep_inpainting_backend is not None:
             set_runtime_profile = getattr(self.deep_inpainting_backend, "set_runtime_profile", None)
             if callable(set_runtime_profile):
@@ -1767,12 +1722,15 @@ class AIHandler:
         """从新旧参数推导统一的请求后端枚举。"""
         ai_params = getattr(self, "ai_params", {}) or {}
         raw_backend = str(ai_params.get("requested_inpainting_backend", "") or "").strip().lower()
-        if raw_backend in {"opencv", "lama", "legacy_unet", "mat"}:
+        if raw_backend == "legacy_unet":
+            # legacy_unet 后端已移除，旧配置自动迁移到 LaMa
+            return "lama"
+        if raw_backend in {"opencv", "lama", "mat"}:
             return raw_backend
 
         algorithm = str(self.inpainting_algorithm or "auto").strip().lower()
         if algorithm == "gpu_dl" or bool(getattr(self, "requested_gpu_inpainting", False)):
-            return "legacy_unet"
+            return "lama"
         return "opencv"
 
     def _derive_opencv_inpainting_method(self) -> str:
@@ -1874,21 +1832,3 @@ class AIHandler:
         self.last_effective_inpaint_radius = self._normalize_effective_inpaint_radius(
             getattr(self.image_inpainter, "last_effective_radius", None)
         )
-
-
-# 测试代码
-if __name__ == "__main__":
-    print("AIHandler module loaded for testing purposes.")
-
-    # 创建AI处理器实例
-    ai_handler = AIHandler()
-    ai_handler.load_models()
-
-    # 创建测试帧和参数
-    test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    test_params = {"auto_detect": True, "detection_sensitivity": 0.5}
-
-    # 执行完整处理流程
-    processed_frame, info = ai_handler.process_frame(test_frame, test_params)
-    print(f"Processing completed. Frame shape: {processed_frame.shape}")
-    print(f"Processing info: {info}")

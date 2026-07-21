@@ -422,11 +422,6 @@ class SignalHandler(QObject):
             self.control_panel.reset_progress()
             self.logger.error(error_msg)
 
-    def _on_processing_finished(self, output_path: str):
-        """处理完成回调 (Phase 4 Stage 1.4)"""
-        # 兼容旧连接方式：默认允许收尾
-        return self._on_processing_finished_with_thread(output_path, None)
-
     def _on_processing_finished_with_thread(
         self,
         output_path: str,
@@ -458,10 +453,6 @@ class SignalHandler(QObject):
             self.status_updated.emit("处理取消")
             self.output_file_path = None
             self.file_panel.set_export_enabled(False)
-
-    def _on_processing_error(self, error_msg: str):
-        """处理错误回调 (Phase 4 Stage 1.4)"""
-        return self._on_processing_error_with_thread(error_msg, None)
 
     def _on_processing_error_with_thread(
         self,

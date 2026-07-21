@@ -95,15 +95,15 @@ def test_only_explicit_gpu_dl_enables_gpu_inpainting() -> None:
     auto_mode = _build_with_method("auto", enable_gpu=True)
 
     assert explicit_gpu["inpainting_algorithm"] == "gpu_dl"
-    assert explicit_gpu["requested_inpainting_backend"] == "legacy_unet"
+    assert explicit_gpu["requested_inpainting_backend"] == "lama"
     assert explicit_gpu["use_gpu_inpainting"] is True
 
     assert ui_gpu["inpainting_algorithm"] == "gpu_dl"
-    assert ui_gpu["requested_inpainting_backend"] == "legacy_unet"
+    assert ui_gpu["requested_inpainting_backend"] == "lama"
     assert ui_gpu["use_gpu_inpainting"] is True
 
     assert disabled_gpu["inpainting_algorithm"] == "gpu_dl"
-    assert disabled_gpu["requested_inpainting_backend"] == "legacy_unet"
+    assert disabled_gpu["requested_inpainting_backend"] == "lama"
     assert disabled_gpu["use_gpu_inpainting"] is False
 
     assert auto_mode["inpainting_algorithm"] == "auto"

@@ -443,36 +443,3 @@ def apply_postprocessing(
         enhance_brightness=enhance_brightness,
         enhance_saturation=enhance_saturation,
     )
-
-
-# ============================================================================
-# 测试代码
-# ============================================================================
-
-if __name__ == "__main__":
-    print("Image Processor module loaded for testing.")
-
-    # 创建测试图像
-    test_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-    test_mask = np.zeros((480, 640), dtype=np.uint8)
-    cv2.rectangle(test_mask, (100, 100), (200, 200), 255, -1)
-
-    # 测试预处理
-    preprocessed = apply_preprocessing(
-        test_frame,
-        enable_blur=True,
-        enable_denoise=True,
-        enable_sharpen=True,
-    )
-    print(f"Preprocessed frame shape: {preprocessed.shape}")
-
-    # 测试后处理
-    postprocessed = apply_postprocessing(
-        test_frame,
-        preprocessed,
-        test_mask,
-        enable_smooth=True,
-        enable_blend=True,
-        enable_enhance=True,
-    )
-    print(f"Postprocessed frame shape: {postprocessed.shape}")

@@ -314,39 +314,3 @@ def get_safe_batch_size(base_size: int, frame_size: Tuple[int, int]) -> int:
 def cleanup_gpu() -> None:
     """清理 GPU 缓存"""
     get_gpu_monitor().cleanup()
-
-
-# ============================================================================
-# 测试代码
-# ============================================================================
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    print("GPU Memory Monitor Test")
-    print("=" * 50)
-
-    monitor = GPUMemoryMonitor()
-    print(f"GPU Available: {monitor.is_available}")
-
-    info = monitor.get_memory_info()
-    if info:
-        print(f"Total: {info.total_mb:.0f}MB")
-        print(f"Used: {info.used_mb:.0f}MB")
-        print(f"Free: {info.free_mb:.0f}MB")
-        print(f"Utilization: {info.utilization_percent:.1f}%")
-
-        # 测试批大小计算
-        frame_size = (1080, 1920)
-        base_batch = 8
-        safe_batch = monitor.calculate_safe_batch_size(base_batch, frame_size)
-        print(f"\nFrame size: {frame_size}")
-        print(f"Base batch size: {base_batch}")
-        print(f"Safe batch size: {safe_batch}")
-
-        # 检查警告
-        warning = monitor.check_and_warn()
-        if warning:
-            print(f"\n{warning}")
-    else:
-        print("GPU not available")

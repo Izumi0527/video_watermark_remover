@@ -44,7 +44,6 @@ def test_validator_accepts_requested_backend_and_opencv_method() -> None:
     validator = ConfigValidator()
 
     assert validator.validate("requested_inpainting_backend", "lama") == "lama"
-    assert validator.validate("requested_inpainting_backend", "legacy_unet") == "legacy_unet"
     assert validator.validate("requested_inpainting_backend", "opencv") == "opencv"
     assert validator.validate("opencv_inpainting_method", "telea") == "telea"
     assert validator.validate("opencv_inpainting_method", "auto") == "auto"
@@ -58,11 +57,11 @@ def test_builder_maps_future_lama_label_to_requested_backend() -> None:
     assert params["use_gpu_inpainting"] is True
 
 
-def test_builder_maps_legacy_gpu_label_to_legacy_unet_backend() -> None:
-    """当前 GPU U-Net 文案应明确收敛到 legacy U-Net backend。"""
+def test_builder_maps_legacy_gpu_label_to_lama_backend() -> None:
+    """旧 GPU U-Net 文案应自动迁移到 LaMa backend（legacy_unet 已移除）。"""
     params = _build_with_method("GPU 深度学习 U-Net (推荐)", enable_gpu=True)
 
-    assert params["requested_inpainting_backend"] == "legacy_unet"
+    assert params["requested_inpainting_backend"] == "lama"
     assert params["use_gpu_inpainting"] is True
 
 
@@ -131,13 +130,12 @@ def test_builder_maps_opencv_label_to_backend_and_method() -> None:
 def test_factory_creates_expected_backend_types(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """backend factory 应返回 OpenCV / legacy U-Net，并对未知值安全回退。"""
+    """backend factory 应返回 OpenCV，并对未知值安全回退。"""
     _install_ai_runtime_stubs(monkeypatch)
     for module_name in (
         "app.core.ai.inpainting_backends.factory",
         "app.core.ai.inpainting_backends.base",
         "app.core.ai.inpainting_backends.opencv_backend",
-        "app.core.ai.inpainting_backends.legacy_unet_backend",
     ):
         monkeypatch.delitem(sys.modules, module_name, raising=False)
 
@@ -149,11 +147,6 @@ def test_factory_creates_expected_backend_types(
         config=None,
         torch_device="cpu",
     )
-    legacy_backend = create_inpainting_backend(
-        requested_backend="legacy_unet",
-        config=None,
-        torch_device="cpu",
-    )
     unknown_backend = create_inpainting_backend(
         requested_backend="unexpected_backend",
         config=None,
@@ -161,7 +154,6 @@ def test_factory_creates_expected_backend_types(
     )
 
     assert opencv_backend.backend_id == "opencv"
-    assert legacy_backend.backend_id == "legacy_unet"
     assert unknown_backend.backend_id == "opencv"
     assert callable(getattr(opencv_backend, "load"))
-    assert callable(getattr(legacy_backend, "inpaint_frame"))
+    assert callable(getattr(opencv_backend, "inpaint_frame"))

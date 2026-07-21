@@ -100,7 +100,9 @@ def preference_memory_fs(monkeypatch: pytest.MonkeyPatch) -> PreferenceMemoryFS:
     monkeypatch.setattr(
         preferences_storage_module.Path,
         "mkdir",
-        lambda self, parents=False, exist_ok=False: fs.mkdir(self, parents=parents, exist_ok=exist_ok),
+        lambda self, parents=False, exist_ok=False: fs.mkdir(
+            self, parents=parents, exist_ok=exist_ok
+        ),
         raising=False,
     )
     monkeypatch.setattr(

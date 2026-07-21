@@ -12,6 +12,7 @@ import pytest
 from tests.unit.test_dynamic_watermark_tracking import (
     _build_test_config,
     _create_test_frame,
+    _install_fake_deep_backend_factory,
     _load_test_targets,
 )
 
@@ -61,9 +62,10 @@ def test_processing_info_reports_requested_and_effective_quality_for_gpu(
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -73,18 +75,10 @@ def test_processing_info_reports_requested_and_effective_quality_for_gpu(
             "inpaint_radius": 7,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
-    def fake_inpaint(frame, mask, radius=3, quality_level=3, profile=None):
-        handler.dl_inpainter.last_profile_used = {
-            "requested_radius": radius,
-            "quality_level": 5,
-            "mask_expand_px": 11,
-            "mask_feather_px": 8,
-        }
-        return frame.copy()
-
-    handler.dl_inpainter.inpaint_frame = fake_inpaint
+    created["backend"].extra_trace = {"effective_quality_level": 5}
 
     _, info = handler.process_frame(
         _create_test_frame(),
@@ -97,4 +91,4 @@ def test_processing_info_reports_requested_and_effective_quality_for_gpu(
     assert info["requested_quality_level"] == 999
     assert info["quality_level"] == 999
     assert info["effective_quality_level"] == 5
-    assert info["inpainting_backend"] == "gpu_deep_learning_unet"
+    assert info["inpainting_backend"] == "lama"

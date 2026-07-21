@@ -152,9 +152,9 @@ def main():
     # ========================================
     # 清理
     # ========================================
-    if hasattr(gpu_handler, "dl_inpainter") and gpu_handler.dl_inpainter is not None:
+    if getattr(gpu_handler, "deep_inpainting_backend", None) is not None:
         logger.info("清理 GPU 内存...")
-        gpu_handler.dl_inpainter.cleanup()
+        gpu_handler.deep_inpainting_backend.cleanup()
 
     print("=" * 60)
     print("[SUCCESS] 集成测试完成!")

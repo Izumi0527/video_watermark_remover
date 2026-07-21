@@ -12,6 +12,7 @@ import pytest
 from tests.unit.test_dynamic_watermark_tracking import (
     _build_test_config,
     _create_test_frame,
+    _install_fake_deep_backend_factory,
     _load_test_targets,
 )
 
@@ -25,9 +26,10 @@ def test_ai_handler_falls_back_to_opencv_when_gpu_runtime_inpainting_raises(
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -37,6 +39,7 @@ def test_ai_handler_falls_back_to_opencv_when_gpu_runtime_inpainting_raises(
             "inpaint_radius": 6,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
     captured: dict[str, object] = {}
@@ -48,11 +51,11 @@ def test_ai_handler_falls_back_to_opencv_when_gpu_runtime_inpainting_raises(
         handler.image_inpainter.last_quality_level = quality_level
         return frame.copy()
 
-    def raise_gpu_error(frame, mask, radius=3, quality_level=3, profile=None):
+    def raise_gpu_error(frame, mask, radius, quality_level):
         raise RuntimeError("gpu runtime failed")
 
     handler.image_inpainter.inpaint_frame = fake_opencv_inpaint
-    handler.dl_inpainter.inpaint_frame = raise_gpu_error
+    created["backend"].inpaint_frame_impl = raise_gpu_error
 
     _, info = handler.process_frame(
         _create_test_frame(),
@@ -70,10 +73,10 @@ def test_ai_handler_falls_back_to_opencv_when_gpu_runtime_inpainting_raises(
     assert info["inpainting_backend"] == "opencv"
     assert info["inpainting_method"] == "auto"
     assert info["gpu_inpainting_requested"] is True
-    assert info["gpu_inpainting_fallback_reason"] == "gpu_runtime_exception"
+    assert info["gpu_inpainting_fallback_reason"] == "lama_runtime_exception"
     assert info["loaded_inpainting_model_path"] == str(model_path)
     assert handler.use_gpu_inpainting is False
-    assert handler.dl_inpainter is None
+    assert handler.deep_inpainting_backend is None
 
 
 def test_ai_handler_applies_gpu_memory_budget_to_deep_inpainting_profile(
@@ -84,9 +87,10 @@ def test_ai_handler_applies_gpu_memory_budget_to_deep_inpainting_profile(
     torch_module = sys.modules["torch"]
     torch_module.cuda.is_available = lambda: True
 
-    model_path = tmp_path / "stub-unet.pth"
+    model_path = tmp_path / "stub-lama.pt"
     model_path.write_bytes(b"stub")
 
+    created: dict = {}
     handler = ai_handler_cls(
         config=_build_test_config(str(model_path)),
         ai_params={
@@ -95,13 +99,14 @@ def test_ai_handler_applies_gpu_memory_budget_to_deep_inpainting_profile(
             "gpu_memory_mb": 1024,
         },
     )
+    _install_fake_deep_backend_factory(monkeypatch, created)
     assert handler.load_models() is True
 
     runtime_profile = handler.build_gpu_runtime_profile((1080, 1920, 3))
 
     assert runtime_profile["memory_budget_mb"] == 1024
     assert runtime_profile["resize_limit"] == 640
-    assert getattr(handler.dl_inpainter, "memory_budget_mb", None) == 1024
+    assert created["backend"].last_runtime_profile["memory_budget_mb"] == 1024
 
 
 def test_ai_handler_pushes_runtime_profile_to_active_deep_backend(

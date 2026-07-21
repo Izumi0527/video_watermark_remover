@@ -310,17 +310,15 @@ except ImportError as exc:
     raise SystemExit(2)
 
 from app.ui.main_window import MainWindow
-from app.ui.widgets.batch.batch_processing_widget import BatchProcessingWidget
+from app.ui.widgets.batch import BatchProcessorThread
 
 app = QApplication.instance() or QApplication([])
 window = MainWindow()
-batch_widget = BatchProcessingWidget()
 
 print(f'✅ MainWindow 类型: {type(window).__name__}')
-print(f'✅ BatchProcessingWidget 类型: {type(batch_widget).__name__}')
+print(f'✅ BatchProcessorThread 可导入: {BatchProcessorThread.__name__}')
 
 window.close()
-batch_widget.close()
 app.quit()
 print('UI组件初始化测试通过')
 "@ -AllowedExitCodes @(0, 2)

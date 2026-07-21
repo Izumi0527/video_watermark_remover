@@ -19,11 +19,11 @@ import shutil
 import subprocess
 from typing import Any, Dict, List, Optional
 
+from ..video.output_strategy import resolve_ffmpeg_output_codecs, resolve_ffmpeg_reencode_args
 from .audio_extractor import AudioExtractor
 from .audio_merger import AudioMerger
 from .ffmpeg_detector import FFmpegDetector
 from .video_info_extractor import VideoInfoExtractor
-from ..video.output_strategy import resolve_ffmpeg_output_codecs, resolve_ffmpeg_reencode_args
 
 
 class FFmpegAudioProcessor:
@@ -305,35 +305,3 @@ class FFmpegAudioProcessor:
     def __del__(self):
         """析构函数，清理临时文件"""
         self.cleanup_temp_files()
-
-
-if __name__ == "__main__":
-    """测试代码"""
-    # 创建测试实例
-    processor = FFmpegAudioProcessor()
-
-    print("=== FFmpeg音频处理器重构版测试 ===")
-    print(f"FFmpeg available: {processor.is_available()}")
-
-    if processor.is_available():
-        version = processor.get_version_info()
-        print(f"FFmpeg version: {version}")
-
-        formats = processor.get_supported_formats()
-        print(f"Supported audio codecs: {formats['audio_codecs']}")
-
-        # 测试获取视频信息（如果有测试视频的话）
-        test_video = "test_video.mp4"  # 替换为实际测试视频路径
-        if os.path.exists(test_video):
-            info = processor.get_video_info(test_video)
-            print(f"Video info: {info}")
-
-    print("\n模块化架构包含:")
-    print("  - FFmpegDetector: FFmpeg检测和管理")
-    print("  - VideoInfoExtractor: 视频信息提取")
-    print("  - AudioExtractor: 音频提取功能")
-    print("  - AudioMerger: 音频视频合并")
-    print("✅ 重构版本测试完成")
-
-    # 清理
-    processor.cleanup_temp_files()

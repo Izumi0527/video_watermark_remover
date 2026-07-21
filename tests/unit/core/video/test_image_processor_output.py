@@ -58,7 +58,9 @@ def test_process_image_passes_resolved_encoding_options_to_imwrite(monkeypatch) 
         preview_update=_DummySignal(),
         finished=_DummySignal(),
         error=_DummySignal(),
-        logger=SimpleNamespace(info=lambda *_args, **_kwargs: None, error=lambda *_args, **_kwargs: None),
+        logger=SimpleNamespace(
+            info=lambda *_args, **_kwargs: None, error=lambda *_args, **_kwargs: None
+        ),
         last_processing_info=None,
         last_effective_processing_info=None,
         last_processing_summary=None,

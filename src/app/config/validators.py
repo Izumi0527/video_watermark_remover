@@ -203,7 +203,7 @@ class ConfigValidator:
                 param_name="requested_inpainting_backend",
                 param_type=str,
                 default="opencv",
-                allowed_values=["opencv", "lama", "legacy_unet", "mat"],
+                allowed_values=["opencv", "lama", "mat"],
                 description="请求的修复后端",
             ),
             "opencv_inpainting_method": ValidationRule(

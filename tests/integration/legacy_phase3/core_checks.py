@@ -32,11 +32,11 @@ def test_component_imports():
         return False
 
     try:
-        from app.ui.widgets.batch.batch_processing_widget import BatchProcessingWidget
+        from app.ui.widgets.batch import BatchProcessorThread  # noqa: F401
 
-        print("[OK] 批量处理组件导入成功")
+        print("[OK] 批量处理线程导入成功")
     except ImportError as e:
-        print(f"[ERROR] 批量处理组件导入失败: {e}")
+        print(f"[ERROR] 批量处理线程导入失败: {e}")
         return False
 
     try:
@@ -83,7 +83,7 @@ def test_file_structure():
         # 主窗口和核心组件
         "src/app/ui/main_window.py",
         "src/app/ui/widgets/image_selector_widget.py",
-        "src/app/ui/widgets/batch/batch_processing_widget.py",
+        "src/app/ui/widgets/batch/batch_processor_thread.py",
         "src/app/ui/widgets/advanced/advanced_parameters_widget.py",
         # 配置和样式管理
         "src/app/config/styles/manager.py",

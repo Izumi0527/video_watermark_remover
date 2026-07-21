@@ -224,8 +224,8 @@ def main():
     # ========================================
     logger.info("清理 GPU 内存...")
     ai_handler_gpu.watermark_detector.cleanup()
-    if ai_handler_gpu.dl_inpainter:
-        ai_handler_gpu.dl_inpainter.cleanup()
+    if ai_handler_gpu.deep_inpainting_backend is not None:
+        ai_handler_gpu.deep_inpainting_backend.cleanup()
 
     print("=" * 60)
     print("[SUCCESS] 测试完成!")

@@ -53,7 +53,6 @@ class PerformanceParametersTab:
         parent_widget.worker_count_spin.setMaximum(16)
         parent_widget.worker_count_spin.setValue(0)
         parent_widget.worker_count_spin.setSpecialValueText("自动")
-        parent_widget.thread_count_spin = parent_widget.worker_count_spin
         thread_layout.addRow("并行度:", parent_widget.worker_count_spin)
 
         layout.addWidget(thread_group)
@@ -63,7 +62,7 @@ class PerformanceParametersTab:
         gpu_layout = QVBoxLayout(gpu_group)
 
         parent_widget.enable_gpu_check = QCheckBox("启用深度修复（需 CUDA/权重）")
-        parent_widget.enable_gpu_check.setToolTip("启用深度学习修复后端（LaMa / 兼容 U-Net）。需要 CUDA 环境与模型权重。")
+        parent_widget.enable_gpu_check.setToolTip("启用深度学习修复后端（LaMa）。需要 CUDA 环境与模型权重。")
         gpu_layout.addWidget(parent_widget.enable_gpu_check)
 
         parent_widget.gpu_memory_spin = QSpinBox()

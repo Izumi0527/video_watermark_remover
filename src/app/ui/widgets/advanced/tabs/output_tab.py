@@ -84,5 +84,3 @@ class OutputParametersTab:
         layout.addStretch()
 
         return tab
-
-

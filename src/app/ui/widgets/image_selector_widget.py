@@ -9,7 +9,6 @@
 
 """
 
-import sys
 from typing import List, Tuple
 
 import numpy as np
@@ -100,30 +99,3 @@ class ImageSelectorWidget(QWidget):
 
         # 转发信号
         self.selection_changed.emit(selections)
-
-
-if __name__ == "__main__":
-    """测试代码"""
-    from PyQt6.QtWidgets import QApplication
-
-    app = QApplication(sys.argv)
-
-    # 创建测试窗口
-    widget = ImageSelectorWidget()
-    widget.setWindowTitle("图像选择器测试 - 重构版")
-    widget.resize(800, 600)
-    widget.show()
-
-    # 连接信号用于测试
-    def on_selection_changed(selections):
-        print(f"选择区域变化: {selections}")
-
-    widget.selection_changed.connect(on_selection_changed)
-
-    print("✅ 图像选择器重构版启动成功")
-    print("模块化架构包含:")
-    print("  - SelectableImageLabel: 核心图像显示组件")
-    print("  - SelectionEventHandler: 鼠标事件处理")
-    print("  - CoordinateConverter: 坐标转换工具")
-
-    sys.exit(app.exec())

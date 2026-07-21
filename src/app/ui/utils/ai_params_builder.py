@@ -375,7 +375,6 @@ class AIParamsBuilder:
         # 否则即使勾选了“启用 GPU”，也应尊重 OpenCV 算法选择，避免“修复算法看起来不生效”。
         enable_gpu = bool(advanced_params.get("enable_gpu", True))
         gpu_backend_selected = params["requested_inpainting_backend"] in {
-            "legacy_unet",
             "lama",
             "mat",
         }
@@ -461,7 +460,7 @@ class AIParamsBuilder:
             inpainting_method,
             normalized_algorithm,
         )
-        gpu_backend_selected = requested_inpainting_backend in {"legacy_unet", "lama", "mat"}
+        gpu_backend_selected = requested_inpainting_backend in {"lama", "mat"}
         use_gpu_inpainting = bool(
             advanced_params.get("enable_gpu", snapshot.enable_gpu)
             and gpu_backend_selected
@@ -604,8 +603,8 @@ class AIParamsBuilder:
 
         前端选项 → 后端algorithm参数：
         - "LaMa 深度学习修复（推荐）" → "gpu_dl"（兼容字段，实际后端由 requested_inpainting_backend 决定）
-        - "兼容 U-Net 深度修复（旧模型）" → "gpu_dl"
-        - "GPU 深度学习 U-Net (推荐)" → "gpu_dl"
+        - "兼容 U-Net 深度修复（旧模型）"（已移除的旧选项）→ "gpu_dl"
+        - "GPU 深度学习 U-Net (推荐)"（已移除的旧选项）→ "gpu_dl"
         - "TELEA 快速修复 (OpenCV)" → "telea"
         - "Navier-Stokes 高质量 (OpenCV)" → "navier_stokes"
         - "自定义插值方法" → "custom_interpolation"
@@ -656,9 +655,10 @@ class AIParamsBuilder:
         if normalized == "LaMa 深度学习修复（推荐）" or compact == "lama":
             return "lama"
         if normalized == "兼容 U-Net 深度修复（旧模型）":
-            return "legacy_unet"
+            # legacy_unet 后端已移除，旧偏好自动迁移到 LaMa
+            return "lama"
         if normalized_algorithm == "gpu_dl":
-            return "legacy_unet"
+            return "lama"
         return "opencv"
 
     def _resolve_opencv_inpainting_method(self, normalized_algorithm: str) -> str:

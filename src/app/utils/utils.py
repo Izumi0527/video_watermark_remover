@@ -53,18 +53,3 @@ def format_duration(seconds):
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
-if __name__ == "__main__":
-    # Test functions
-    test_dir = "temp_test_dir/subdir"
-    print(f"Ensuring directory '{test_dir}' exists: {ensure_directory_exists(test_dir)}")
-    if os.path.exists(test_dir):
-        os.rmdir(test_dir)  # Clean up subdir
-        os.rmdir(os.path.dirname(test_dir))  # Clean up parent
-
-    print(f"Basename of 'path/to/video.mp4': {get_file_basename('path/to/video.mp4')}")
-    print(f"Extension of 'path/to/video.mp4': {get_file_extension('path/to/video.mp4')}")
-    print(f"Duration 3661 seconds: {format_duration(3661)}")  # 01:01:01
-    print(f"Duration 59 seconds: {format_duration(59)}")  # 00:00:59
-    print("utils.py executed directly (for testing purposes).")

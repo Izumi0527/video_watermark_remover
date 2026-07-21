@@ -205,7 +205,6 @@ def test_startup_precheck_guides_when_no_inpainting_assets_configured() -> None:
 
     assert any("LaMa" in line and "big-lama.pt" in line for line in result["Infos"])
     assert any("VWR_LAMA_MODEL_PATH" in line for line in result["Infos"])
-    assert any("VWR_INPAINTING_MODEL_PATH" in line for line in result["Infos"])
     assert result["Warns"] == []
     assert result["Oks"] == []
 

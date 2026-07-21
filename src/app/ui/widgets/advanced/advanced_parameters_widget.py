@@ -85,7 +85,6 @@ class AdvancedParametersWidget(QWidget):
         self.mixed_inpainting_opencv_method_combo: Optional["QComboBox"] = None
         self.processing_mode_combo: Optional["QComboBox"] = None
         self.worker_count_spin: Optional["QSpinBox"] = None
-        self.thread_count_spin: Optional["QSpinBox"] = None
         self.enable_gpu_check: Optional["QCheckBox"] = None
         self.gpu_memory_spin: Optional["QSpinBox"] = None
         self.cache_size_spin: Optional["QSpinBox"] = None
@@ -239,8 +238,6 @@ class AdvancedParametersWidget(QWidget):
             self.processing_mode_combo.currentTextChanged.connect(self._on_parameter_changed)
         if self.worker_count_spin:
             self.worker_count_spin.valueChanged.connect(self._on_parameter_changed)
-        if self.thread_count_spin and self.thread_count_spin is not self.worker_count_spin:
-            self.thread_count_spin.valueChanged.connect(self._on_parameter_changed)
         if self.enable_gpu_check:
             self.enable_gpu_check.toggled.connect(self._on_parameter_changed)
         if self.gpu_memory_spin:
@@ -665,8 +662,6 @@ class AdvancedParametersWidget(QWidget):
                 self.processing_mode_combo.currentTextChanged.disconnect(self._on_parameter_changed)
             if self.worker_count_spin:
                 self.worker_count_spin.valueChanged.disconnect(self._on_parameter_changed)
-            if self.thread_count_spin and self.thread_count_spin is not self.worker_count_spin:
-                self.thread_count_spin.valueChanged.disconnect(self._on_parameter_changed)
             if self.enable_gpu_check:
                 self.enable_gpu_check.toggled.disconnect(self._on_parameter_changed)
             if self.gpu_memory_spin:
@@ -778,22 +773,3 @@ class AdvancedParametersWidget(QWidget):
 
             except Exception as e:
                 print(f"[WARNING] 加载高级参数失败: {e}")
-
-
-# 示例用法
-if __name__ == "__main__":
-    import sys
-
-    from PyQt6.QtWidgets import QApplication
-
-    app = QApplication(sys.argv)
-
-    widget = AdvancedParametersWidget()
-    widget.show()
-
-    def on_params_changed(params):
-        print(f"[INFO] 参数已更新: {len(params)} 个参数")
-
-    widget.parameters_changed.connect(on_params_changed)
-
-    sys.exit(app.exec())

@@ -14,8 +14,8 @@ def test_render_log_document_keeps_each_entry_in_separate_block():
     html = render_log_document_html(entries, colors)
 
     assert html.count('class="log-entry"') == 3
-    assert 'line-height: 1.45;' in html
-    assert 'margin: 0 0 2px 0;' in html
+    assert "line-height: 1.45;" in html
+    assert "margin: 0 0 2px 0;" in html
     assert '&nbsp;<span style="color:' in html
     assert "&nbsp;&nbsp;" not in html
     assert html.index("[11:36:18]") < html.index("[11:36:39]") < html.index("[11:36:42]")

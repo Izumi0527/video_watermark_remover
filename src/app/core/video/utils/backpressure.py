@@ -42,7 +42,7 @@ class RuntimeModeConstraint:
     reason: Optional[str] = None
 
 
-_DEEP_GPU_BACKENDS = {"lama", "legacy_unet", "mat"}
+_DEEP_GPU_BACKENDS = {"lama", "mat"}
 
 
 def resolve_runtime_mode_constraint(

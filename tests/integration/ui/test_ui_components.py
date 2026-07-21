@@ -29,7 +29,6 @@ import pytest
 RUNTIME_ROOT = Path(__file__).resolve().parents[3] / ".cache" / "tests" / "ui-components"
 COMPONENT_PROBES: tuple[tuple[str, str, str], ...] = (
     ("手动选择组件", "app.ui.widgets.image_selector_widget", "ImageSelectorWidget"),
-    ("批量处理组件", "app.ui.widgets.batch.batch_processing_widget", "BatchProcessingWidget"),
     ("高级参数组件", "app.ui.widgets.advanced.advanced_parameters_widget", "AdvancedParametersWidget"),
 )
 
