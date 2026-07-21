@@ -49,16 +49,30 @@ def test_validator_accepts_requested_backend_and_opencv_method() -> None:
     assert validator.validate("opencv_inpainting_method", "auto") == "auto"
 
 
-def test_builder_maps_future_lama_label_to_requested_backend() -> None:
+def _force_cuda_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """打桩 CUDA 探测：pytest 进程里 PyQt6 先于 torch 加载可能触发 DLL 冲突，
+    真实 import torch 会 access violation，单元测试一律不做真实探测。
+    """
+    builder_module = importlib.import_module("app.ui.utils.ai_params_builder")
+    monkeypatch.setattr(builder_module, "detect_cuda_available", lambda: True)
+
+
+def test_builder_maps_future_lama_label_to_requested_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """未来 UI 的 LaMa 文案应能提前映射到统一 backend 字段。"""
+    _force_cuda_available(monkeypatch)
     params = _build_with_method("LaMa 深度学习修复（推荐）", enable_gpu=True)
 
     assert params["requested_inpainting_backend"] == "lama"
     assert params["use_gpu_inpainting"] is True
 
 
-def test_builder_maps_legacy_gpu_label_to_lama_backend() -> None:
+def test_builder_maps_legacy_gpu_label_to_lama_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """旧 GPU U-Net 文案应自动迁移到 LaMa backend（legacy_unet 已移除）。"""
+    _force_cuda_available(monkeypatch)
     params = _build_with_method("GPU 深度学习 U-Net (推荐)", enable_gpu=True)
 
     assert params["requested_inpainting_backend"] == "lama"

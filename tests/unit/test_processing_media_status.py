@@ -201,7 +201,8 @@ def test_handle_start_processing_shows_image_specific_message(
     handler.handle_start_processing()
 
     assert preview_panel.processing_messages[-1] == "⏳ 正在处理图片，请稍候..."
-    assert received_messages[-1] == "开始处理图片..."
+    # 开始消息之后还会追加"处理模式运行时摘要"，因此校验成员而非末位
+    assert "开始处理图片..." in received_messages
 
 
 def test_handle_start_processing_shows_video_specific_message(
@@ -217,7 +218,8 @@ def test_handle_start_processing_shows_video_specific_message(
     handler.handle_start_processing()
 
     assert preview_panel.processing_messages[-1] == "⏳ 正在处理视频，请稍候..."
-    assert received_messages[-1] == "开始处理视频..."
+    # 开始消息之后还会追加"处理模式运行时摘要"，因此校验成员而非末位
+    assert "开始处理视频..." in received_messages
 
 
 def test_batch_file_changed_shows_video_specific_message(

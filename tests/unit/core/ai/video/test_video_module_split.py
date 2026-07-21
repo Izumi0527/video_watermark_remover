@@ -4,6 +4,8 @@ import types
 from configparser import ConfigParser
 from pathlib import Path
 
+import pytest
+
 
 def _install_pyqt6_stub() -> None:
     if importlib.util.find_spec("PyQt6") is not None:
@@ -79,7 +81,7 @@ def _install_numpy_stub() -> None:
     sys.modules["numpy.typing"] = numpy_typing_module
 
 
-def _install_runtime_stubs() -> None:
+def _install_runtime_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     ai_handler_module = types.ModuleType("app.core.ai.ai_handler")
 
     class _DummyAIHandler:
@@ -96,7 +98,7 @@ def _install_runtime_stubs() -> None:
             return frame, {"watermark_areas_found": 0, "processing_time": 0.0}
 
     ai_handler_module.AIHandler = _DummyAIHandler
-    sys.modules["app.core.ai.ai_handler"] = ai_handler_module
+    monkeypatch.setitem(sys.modules, "app.core.ai.ai_handler", ai_handler_module)
 
     ffmpeg_module = types.ModuleType("app.core.audio.ffmpeg_audio_processor")
 
@@ -111,13 +113,25 @@ def _install_runtime_stubs() -> None:
             return True
 
     ffmpeg_module.FFmpegAudioProcessor = _DummyFFmpegAudioProcessor
-    sys.modules["app.core.audio.ffmpeg_audio_processor"] = ffmpeg_module
+    monkeypatch.setitem(sys.modules, "app.core.audio.ffmpeg_audio_processor", ffmpeg_module)
 
 
 _install_pyqt6_stub()
 _install_cv2_stub()
 _install_numpy_stub()
-_install_runtime_stubs()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _runtime_stubs():
+    """仅在本模块测试期间替换重量级运行时依赖，结束后恢复真实模块。
+
+    此前用裸 `sys.modules[...] = stub` 会永久污染整个 pytest 会话，
+    导致后续测试（如 ffmpeg 回退参数测试）拿到桩模块而失败。
+    """
+    module_patch = pytest.MonkeyPatch()
+    _install_runtime_stubs(module_patch)
+    yield
+    module_patch.undo()
 
 
 COMPAT_LAYER_FILES = [
