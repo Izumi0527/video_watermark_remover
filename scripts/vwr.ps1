@@ -1970,6 +1970,9 @@ function Invoke-Run {
     Initialize-Log
     Write-Section "启动应用 (run)"
 
+    # 启动全流程不写入 .pyc（须在启动前导入自检之前设置，否则自检已产生 __pycache__）
+    $env:PYTHONDONTWRITEBYTECODE = "1"
+
     Ensure-Uv
     $venv = Get-VenvInfo
 
@@ -2634,7 +2637,8 @@ function Resolve-CleanTargets {
                 @{ Type = "dir"; Path = ".pytest_cache" },
                 @{ Type = "file"; Path = ".coverage" },
                 @{ Type = "glob"; Path = ".coverage.*" },
-                @{ Type = "glob"; Path = "logs/*.log" }
+                @{ Type = "glob"; Path = "logs/*.log" },
+                @{ Type = "dir"; Path = "logs/htmlcov" }
             )) {
             $targets.Add([pscustomobject]$target) | Out-Null
         }
@@ -2651,6 +2655,8 @@ function Resolve-CleanTargets {
                 @{ Type = "glob"; Path = ".tmp_*" },
                 @{ Type = "glob"; Path = "tmp_*" },
                 @{ Type = "dir"; Path = "test_output" },
+                @{ Type = "dir"; Path = "ci-artifacts" },
+                @{ Type = "dir"; Path = "logs/ci-artifacts" },
                 @{ Type = "dir"; Path = "tests/.cache" },
                 @{ Type = "dir"; Path = "tests/test_data/runtime_tmp" }
             )) {
@@ -2663,6 +2669,10 @@ function Resolve-CleanTargets {
                 @{ Type = "dir"; Path = ".uv-cache" },
                 @{ Type = "dir"; Path = ".cache/uv" },
                 @{ Type = "dir"; Path = ".cache/setup-state" },
+                @{ Type = "dir"; Path = ".cache/black" },
+                @{ Type = "dir"; Path = "build" },
+                @{ Type = "dir"; Path = "dist" },
+                @{ Type = "glob"; Path = "*.spec" },
                 @{ Type = "dir"; Path = "src/video_watermark_remover.egg-info" }
             )) {
             $targets.Add([pscustomobject]$target) | Out-Null

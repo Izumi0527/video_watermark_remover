@@ -1019,6 +1019,8 @@ invoke_setup() {
 invoke_run() {
   initialize_log
   section "启动应用 (run)"
+  # 启动全流程不写入 .pyc（须在启动前导入自检之前设置，否则自检已产生 __pycache__）
+  export PYTHONDONTWRITEBYTECODE="1"
   ensure_uv
 
   if ! venv_python >/dev/null 2>&1; then
@@ -1421,17 +1423,17 @@ resolve_clean_targets() {
   local scope="$1"
   case "${scope}" in
     basic|all|deep)
-      printf '%s\n' ".mypy_cache" ".pytest_cache" ".coverage" ".coverage.*" "logs/*.log"
+      printf '%s\n' ".mypy_cache" ".pytest_cache" ".coverage" ".coverage.*" "logs/*.log" "logs/htmlcov"
       ;;
   esac
   case "${scope}" in
     temp|all|deep)
-      printf '%s\n' ".cache/tmp" ".cache/pytest" ".cache/tests" ".pytest_tmp" ".tmp_*" "tmp_*" "pytest-cache-files-*" "test_output" "tests/.cache" "tests/test_data/runtime_tmp"
+      printf '%s\n' ".cache/tmp" ".cache/pytest" ".cache/tests" ".pytest_tmp" ".tmp_*" "tmp_*" "pytest-cache-files-*" "test_output" "ci-artifacts" "logs/ci-artifacts" "tests/.cache" "tests/test_data/runtime_tmp"
       ;;
   esac
   case "${scope}" in
     deep)
-      printf '%s\n' ".uv-cache" ".cache/uv" ".cache/setup-state" "src/video_watermark_remover.egg-info"
+      printf '%s\n' ".uv-cache" ".cache/uv" ".cache/setup-state" ".cache/black" "build" "dist" "*.spec" "src/video_watermark_remover.egg-info"
       ;;
   esac
 }
